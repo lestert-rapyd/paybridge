@@ -5,6 +5,7 @@
 import { VERTICALS, VERTICAL_ORDER } from './verticals.js';
 import { state, setState, subscribe } from './state.js';
 import { setActiveTab, setStatus } from './ui.js';
+import { stopWebhookWatch } from './webhooks.js';
 import * as ownFields from './flows/own-fields.js';
 import * as toolkit from './flows/toolkit.js';
 
@@ -110,6 +111,7 @@ function wire() {
 
 /* ── Render orchestration ────────────────────────────────── */
 function renderAll() {
+  stopWebhookWatch();
   syncControlStates();
   setActiveTab('request');
   setStatus('Awaiting input', 'idle');

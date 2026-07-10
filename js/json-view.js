@@ -1,55 +1,62 @@
 /* ─────────────────────────────────────────────────────────────
-   Syntax-highlighted JSON renderer.
-   Every primitive value gets a `.jv` span tagged with its dotted
-   path (e.g. payment_method.fields.number) so the sync engine can
-   highlight the node that a focused form field maps to.
+   Line-numbered JSON viewer.
+   renderJSONView(obj) → a gutter of line numbers + syntax-highlighted
+   body. Every primitive value carries its dotted path (data-path) so
+   the sync engine can highlight the node a focused field maps to.
+   Line numbers anchor demos + troubleshooting ("see line 7").
    ───────────────────────────────────────────────────────────── */
 
 function esc(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function primitive(value, path) {
+function valueSpan(value, path) {
   let cls = 'tok-str';
   let text;
-  if (value === null)               { cls = 'tok-bool'; text = 'null'; }
+  if (value === null)                  { cls = 'tok-bool'; text = 'null'; }
   else if (typeof value === 'number')  { cls = 'tok-num'; text = String(value); }
   else if (typeof value === 'boolean') { cls = 'tok-bool'; text = String(value); }
   else                                  { text = `"${esc(value)}"`; }
-  const shown = text === '""' ? '<span class="jv-empty">""</span>' : `<span class="${cls}">${text}</span>`;
-  return `<span class="jv" data-path="${path}">${shown}</span>`;
+  const inner = text === '""'
+    ? '<span class="jv-empty">""</span>'
+    : `<span class="${cls}">${text}</span>`;
+  return `<span class="jv" data-path="${path}">${inner}</span>`;
 }
 
-function render(value, path, indent) {
-  const pad   = '  '.repeat(indent);
-  const padIn = '  '.repeat(indent + 1);
+function build(value, path, indent, prefix, comma, lines) {
+  const pad = '  '.repeat(indent);
 
-  if (value === null || typeof value !== 'object') return primitive(value, path);
+  if (value !== null && typeof value === 'object') {
+    const isArr = Array.isArray(value);
+    const keys = isArr ? value.map((_, i) => i) : Object.keys(value);
+    const open = isArr ? '[' : '{';
+    const close = isArr ? ']' : '}';
 
-  if (Array.isArray(value)) {
-    if (!value.length) return '<span class="tok-punc">[]</span>';
-    const items = value.map((v, i) =>
-      padIn + render(v, path ? `${path}.${i}` : `${i}`, indent + 1)
-    ).join('<span class="tok-punc">,</span>\n');
-    return `<span class="tok-punc">[</span>\n${items}\n${pad}<span class="tok-punc">]</span>`;
+    if (keys.length === 0) {
+      lines.push(`${pad}${prefix}<span class="tok-punc">${open}${close}</span>${comma}`);
+      return;
+    }
+    lines.push(`${pad}${prefix}<span class="tok-punc">${open}</span>`);
+    keys.forEach((k, idx) => {
+      const childPath = path ? `${path}.${k}` : `${k}`;
+      const childPrefix = isArr
+        ? ''
+        : `<span class="tok-key">"${esc(k)}"</span><span class="tok-punc">: </span>`;
+      const childComma = idx < keys.length - 1 ? '<span class="tok-punc">,</span>' : '';
+      build(value[k], childPath, indent + 1, childPrefix, childComma, lines);
+    });
+    lines.push(`${pad}<span class="tok-punc">${close}</span>${comma}`);
+  } else {
+    lines.push(`${pad}${prefix}${valueSpan(value, path)}${comma}`);
   }
-
-  const keys = Object.keys(value);
-  if (!keys.length) return '<span class="tok-punc">{}</span>';
-  const items = keys.map(k => {
-    const childPath = path ? `${path}.${k}` : k;
-    return padIn +
-      `<span class="tok-key">"${esc(k)}"</span><span class="tok-punc">: </span>` +
-      render(value[k], childPath, indent + 1);
-  }).join('<span class="tok-punc">,</span>\n');
-  return `<span class="tok-punc">{</span>\n${items}\n${pad}<span class="tok-punc">}</span>`;
 }
 
-export function renderJSON(obj) {
-  return render(obj, '', 0);
+export function renderJSONView(obj) {
+  const lines = [];
+  build(obj, '', 0, '', '', lines);
+  const gutter = lines.map((_, i) => `<span>${i + 1}</span>`).join('');
+  const body = lines.map(l => `<div class="jsonv-line">${l || '&nbsp;'}</div>`).join('');
+  return `<div class="jsonv"><div class="jsonv-gutter">${gutter}</div><div class="jsonv-body">${body}</div></div>`;
 }
 
 /** Add .sync-hit to the value spans at the given paths, clear the rest. */

@@ -1,25 +1,26 @@
 /* ─────────────────────────────────────────────────────────────
    Checkout Toolkit flow (non-PCI model).
-   Rapyd's hosted iframe collects the card — the merchant's page
-   never touches card data. We make the real POST /v1/checkout call,
-   then render the toolkit (embedded / wallets) or hand off (hosted).
-   The right panel shows the real session request/response + the
-   toolkit's lifecycle events as they fire.
+   Rapyd's hosted iframe collects the card. We make the real
+   POST /v1/checkout call, render the toolkit (embedded / wallets) or
+   hand off (hosted). Right panel shows the real session + lifecycle
+   events; the left success/error screen is driven by the webhook.
    ───────────────────────────────────────────────────────────── */
 
 import { state } from '../state.js';
 import { VERTICALS } from '../verticals.js';
 import { createCheckoutSession } from '../api.js';
-import { renderJSON } from '../json-view.js';
+import { renderJSONView } from '../json-view.js';
 import { setActiveTab, setStatus } from '../ui.js';
+import { startWebhookWatch, setWatchPaymentId } from '../webhooks.js';
+import { renderProcessing, renderSuccess, renderError } from '../screens.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
-let mode = 'embedded';        // 'embedded' | 'wallets' | 'hosted'
+let mode = 'embedded';
 let tds = true;
-let events = [];              // toolkit lifecycle events
+let events = [];
 let listenersBound = false;
-let lastSession = null;       // response data of the active session
+let lastSession = null;
 
 const TOOLKIT_MODES = [
   { id: 'embedded', label: 'Embedded', hint: 'iframe on your page' },
@@ -90,7 +91,7 @@ function renderRequest() {
   el.innerHTML = `
     ${headerRows()}
     <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">no card data — collected by the iframe</span></div>
-    <div class="code">${renderJSON(displayBody())}</div>`;
+    ${renderJSONView(displayBody())}`;
 }
 
 function renderResponse() {
@@ -98,12 +99,13 @@ function renderResponse() {
   if (!el) return;
   let html = '';
   if (lastSession) {
-    html += `<div class="resp-http ok"><span class="rc">HTTP 200</span></div>
-      <div class="code">${renderJSON(lastSession)}</div>`;
+    const ok = !lastSession.error;
+    html += `<div class="eng-pillrow"><span class="wh-pill ${ok ? 'success' : 'failure'}">HTTP ${ok ? 200 : 400}</span><span class="wh-pill ${ok ? 'success' : 'failure'}">${ok ? 'CHECKOUT CREATED' : 'ERROR'}</span></div>
+      ${renderJSONView(lastSession)}`;
   }
   html += `<p class="eng-label" style="margin-top:16px">Toolkit lifecycle</p>`;
   if (!events.length) {
-    html += `<div class="wh-desc" style="padding-left:0">No events yet — interact with the checkout on the left.</div>`;
+    html += `<div class="wh-waiting">Interact with the checkout on the left…</div>`;
   } else {
     html += `<div class="tk-events">` + events.map(e => `
       <div class="tk-event ${e.cls || ''}">
@@ -119,12 +121,17 @@ function logEvent(name, detail = '', cls = '') {
   renderResponse();
 }
 
+/* ── Terminal (webhook / fallback) → left screen ─────────── */
+function handleTerminal(ev) {
+  const success = (ev.status === 'CLO' && ev.paid) || /COMPLETED|SUCCEEDED|CAPTURE/.test((ev.type || '').toUpperCase());
+  if (success) { setStatus('Paid', 'ok'); renderSuccess(ev); }
+  else { setStatus('Failed', 'error'); renderError(ev); }
+}
+
 /* ── Toolkit script + render ─────────────────────────────── */
 function loadToolkitScript() {
   return new Promise(resolve => {
-    const url = state.env === 'live'
-      ? 'https://checkouttoolkit.rapyd.net'
-      : 'https://sandboxcheckouttoolkit.rapyd.net';
+    const url = state.env === 'live' ? 'https://checkouttoolkit.rapyd.net' : 'https://sandboxcheckouttoolkit.rapyd.net';
     if (document.querySelector(`script[src="${url}"]`)) return resolve();
     const s = document.createElement('script');
     s.src = url;
@@ -137,24 +144,30 @@ function loadToolkitScript() {
 function bindToolkitEvents() {
   if (listenersBound) return;
   listenersBound = true;
-  const add = (name, cls, fmt) => window.addEventListener(name, e => {
-    logEvent(name, fmt ? fmt(e.detail || {}) : '', cls);
-    if (name === 'onCheckoutPaymentSuccess') setStatus('Paid', 'ok');
-    if (name === 'onCheckoutPaymentFailure') setStatus('Failed', 'error');
-    if (name === 'onCheckoutPaymentPending') setStatus('Pending · 3DS', 'action');
+  window.addEventListener('onLoading', e => logEvent('onLoading', `loading: ${e.detail?.loading}`));
+  window.addEventListener('onCheckoutPaymentPending', e => {
+    if (e.detail?.id) setWatchPaymentId(e.detail.id);
+    logEvent('onCheckoutPaymentPending', `${e.detail?.status || ''} ${e.detail?.next_action || ''}`.trim(), 'action');
+    setStatus('Pending · 3DS', 'action');
   });
-  add('onLoading', '', d => `loading: ${d.loading}`);
-  add('onCheckoutPaymentPending', 'action', d => `${d.status || ''} ${d.next_action || ''}`.trim());
-  add('onCheckoutPaymentSuccess', 'ok', d => `${d.status || ''} · paid:${d.paid}`);
-  add('onCheckoutPaymentFailure', 'err', d => (d.error && (d.error.message || d.error)) || 'failure');
+  window.addEventListener('onCheckoutPaymentSuccess', e => {
+    if (e.detail?.id) setWatchPaymentId(e.detail.id);
+    logEvent('onCheckoutPaymentSuccess', `${e.detail?.status || ''} · paid:${e.detail?.paid}`, 'ok');
+    setStatus('Confirming…', 'processing');
+    renderProcessing('Payment received', 'Confirming via webhook…');
+  });
+  window.addEventListener('onCheckoutPaymentFailure', e => {
+    logEvent('onCheckoutPaymentFailure', (e.detail?.error && (e.detail.error.message || e.detail.error)) || 'failure', 'err');
+    setStatus('Failed', 'error');
+    renderError({ status: 'ERR', message: 'The payment failed in the toolkit.' });
+  });
 }
 
 function renderToolkit(checkoutId) {
-  const accent = VERTICALS[state.vertical].dot;
   const config = {
     id: checkoutId,
     pay_button_text: 'Pay Now',
-    pay_button_color: accent,
+    pay_button_color: VERTICALS[state.vertical].dot,
     wait_on_payment_confirmation: true,
     wait_on_payment_redirect: true,
     close_on_complete: true,
@@ -185,7 +198,7 @@ async function launch() {
   setActiveTab('request');
 
   try {
-    const { httpStatus, data } = await createCheckoutSession(postBody());
+    const { data } = await createCheckoutSession(postBody());
     lastSession = data;
     renderResponse();
     setActiveTab('response');
@@ -193,13 +206,14 @@ async function launch() {
     const redirect = data?.data?.redirect_url;
     if (!id) throw new Error(data?.message || 'No checkout id returned');
     logEvent('session created', id, 'ok');
+    startWebhookWatch({ reference: state.reference, onTerminal: handleTerminal });
 
     if (mode === 'hosted') {
       setStatus('Redirect ready', 'action');
       $('#tk-area').innerHTML = `
         <div class="tk-redirect">
           <div class="tk-redirect-title">Hosted checkout ready</div>
-          <div class="tk-redirect-desc">In production the customer is redirected to Rapyd's hosted page. Opening in a new tab here keeps the demo alive.</div>
+          <div class="tk-redirect-desc">In production the customer is redirected to Rapyd's hosted page. Opening in a new tab here keeps the demo alive — the outcome returns via webhook.</div>
           <button class="co-cta" id="tk-open">Open hosted checkout ↗</button>
         </div>`;
       $('#tk-open').addEventListener('click', () => window.open(redirect, '_blank', 'noopener'));
@@ -213,13 +227,13 @@ async function launch() {
     lastSession = { error: 'error', message: err.message };
     renderResponse();
     setStatus('Error', 'error');
-    btn.disabled = false;
-    btn.textContent = `${VERTICALS[state.vertical].cta}`;
+    renderError({ status: 'ERR', message: err.message });
   }
 }
 
 /* ── Mount ───────────────────────────────────────────────── */
 export function mount() {
+  if (!$('#tk-area')) return;
   renderRequest();
   events = [];
   lastSession = null;

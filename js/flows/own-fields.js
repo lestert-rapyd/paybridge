@@ -2,14 +2,17 @@
    Own Card Fields flow (PCI-DSS model).
    Merchant fields collect the card; submit fires the real Rapyd
    POST /v1/payments. Focus/typing highlights + updates the live
-   request body in the Request tab. Renders into the tabbed panels.
+   request body. The final success/error screen is driven by the
+   real webhook (with a Retrieve-Payment fallback). 3DS renders inline.
    ───────────────────────────────────────────────────────────── */
 
 import { state } from '../state.js';
 import { VERTICALS } from '../verticals.js';
 import { createDirectPayment } from '../api.js';
-import { renderJSON, highlightPaths } from '../json-view.js';
+import { renderJSONView, highlightPaths } from '../json-view.js';
 import { setActiveTab, setStatus } from '../ui.js';
+import { startWebhookWatch } from '../webhooks.js';
+import { renderProcessing, render3DS, renderSuccess, renderError } from '../screens.js';
 import {
   FIELD_MAP, FIELD_LABEL, detectBrand,
   formatNumber, formatExpiry, parseExpiry,
@@ -53,7 +56,6 @@ function displayBody() {
   if (tds) body.payment_method_options = { '3d_required': true };
   return body;
 }
-
 function postBody() {
   const b = displayBody();
   b.merchant_reference_id = state.reference;
@@ -113,63 +115,51 @@ function headerRows() {
       <div><span class="hk">Content-Type:</span> <span class="hv">application/json</span></div>
     </div>`;
 }
-
 function renderRequest() {
   const el = $('#panel-request');
   if (!el) return;
   el.innerHTML = `
     ${headerRows()}
     <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${sent ? 'signed &amp; sent' : 'updates as you type'}</span></div>
-    <div class="code" id="req-json">${renderJSON(displayBody())}</div>`;
+    <div id="req-json">${renderJSONView(displayBody())}</div>`;
   applyHighlight();
 }
-
 function applyHighlight() {
   highlightPaths($('#req-json'), focusedId ? (FIELD_MAP[focusedId] || []) : []);
 }
 
 /* ── Response panel ──────────────────────────────────────── */
-function renderResponse(httpStatus, data) {
-  const ok = httpStatus < 400;
-  $('#panel-response').innerHTML = `
-    <div class="resp-http ${ok ? 'ok' : 'err'}"><span class="rc">HTTP ${httpStatus}</span></div>
-    <div class="code">${renderJSON(data ?? { error: 'no response body' })}</div>`;
-}
-
-/* ── Outcome → status + webhooks panel ───────────────────── */
-function interpretOutcome(httpStatus, data) {
+function respBadge(httpStatus, data) {
   const d = data?.data;
-  const wh = $('#panel-webhooks');
-  if (d?.status === 'CLO' && d?.paid) {
-    setStatus('Paid · CLO', 'ok');
-    toast('✅ Payment complete — status CLO, paid: true');
-    wh.innerHTML = lifecycleHint('PAYMENT_COMPLETED', 'Rapyd would fire this webhook to your server.', 'ok');
-  } else if (d?.status === 'ACT' && d?.next_action === '3d_verification') {
-    setStatus('3DS required', 'action');
-    toast('🔐 3-D Secure required');
-    wh.innerHTML = `
-      <div class="tds-prompt">
-        <div class="tds-title">3-D Secure challenge required</div>
-        <div class="tds-desc">Payment is <code>ACT</code> · <code>paid:false</code> · <code>next_action: 3d_verification</code>. The customer completes the challenge, then Rapyd fires the outcome webhook.</div>
-        <button class="mini-cta" id="open-3ds">Open 3DS challenge ↗</button>
-      </div>`;
-    $('#open-3ds')?.addEventListener('click', () => window.open(d.redirect_url, '_blank', 'noopener'));
-  } else {
-    setStatus('Declined', 'error');
-    toast(`❌ ${data?.message || data?.error || 'Payment failed'}`, 'err');
-    wh.innerHTML = lifecycleHint('PAYMENT_FAILED', data?.message || 'The payment was declined.', 'err');
-  }
+  if (d?.status === 'CLO' && d?.paid) return ['PAID · CLO', 'success'];
+  if (d?.status === 'ACT')           return ['ACTION · ACT', 'pending'];
+  if (data?.error)                   return [String(data.error), 'failure'];
+  if (d?.status)                     return [d.status, 'pending'];
+  return [`HTTP ${httpStatus}`, httpStatus < 400 ? 'success' : 'failure'];
+}
+function renderResponseSending() {
+  $('#panel-response').innerHTML = `<div class="eng-sending"><span class="spin"></span>Awaiting Rapyd response…</div>`;
+}
+function renderResponse(httpStatus, data) {
+  const [badge, kind] = respBadge(httpStatus, data);
+  $('#panel-response').innerHTML = `
+    <div class="eng-pillrow">
+      <span class="wh-pill ${httpStatus < 400 ? 'success' : 'failure'}">HTTP ${httpStatus}</span>
+      <span class="wh-pill ${kind}">${badge}</span>
+    </div>
+    ${renderJSONView(data ?? { error: 'no response body' })}`;
 }
 
-function lifecycleHint(evt, desc, cls) {
-  return `<div class="wh-hint ${cls}"><div class="wh-evt">${evt}</div>
-    <div class="wh-desc">${desc} <em>Live webhook delivery is wired in Phase 4.</em></div></div>`;
+/* ── Terminal (webhook or fallback) → left screen ────────── */
+function handleTerminal(ev) {
+  const success = (ev.status === 'CLO' && ev.paid) || /COMPLETED|SUCCEEDED|CAPTURE/.test((ev.type || '').toUpperCase());
+  if (success) { setStatus('Paid · CLO', 'ok'); renderSuccess(ev); toast('✅ Confirmed by webhook'); }
+  else { setStatus('Failed', 'error'); renderError(ev); toast('❌ Payment failed', 'err'); }
 }
 
 /* ── Submit ──────────────────────────────────────────────── */
 async function pay() {
   const btn = $('#pay-btn');
-  const label = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Processing…';
   setStatus('Processing…', 'processing');
@@ -178,27 +168,41 @@ async function pay() {
   sent = true;
   renderRequest();
   setActiveTab('response');
-  $('#panel-response').innerHTML = `<div class="eng-sending"><span class="spin"></span>Awaiting Rapyd response…</div>`;
+  renderResponseSending();
+
   try {
     const { httpStatus, data } = await createDirectPayment(postBody());
     renderResponse(httpStatus, data);
-    interpretOutcome(httpStatus, data);
+    const d = data?.data;
+
+    if (!d || data?.error) {
+      setStatus('Declined', 'error');
+      toast(`❌ ${data?.message || data?.error || 'Payment failed'}`, 'err');
+      renderError({ status: data?.error || 'ERR', message: data?.message || 'The payment was declined.' });
+      return;
+    }
+
+    if (d.status === 'ACT' && d.next_action === '3d_verification') {
+      setStatus('3DS challenge', 'action');
+      render3DS(d.redirect_url);
+    } else if (d.status === 'CLO' && d.paid) {
+      setStatus('Authorized · confirming', 'processing');
+      renderProcessing('Payment authorized', 'Waiting for the confirmation webhook…');
+    } else {
+      renderProcessing('Processing…');
+    }
+    startWebhookWatch({ reference: state.reference, payment_id: d.id, onTerminal: handleTerminal });
   } catch (err) {
     renderResponse(0, { error: 'network_error', message: err.message });
     setStatus('Error', 'error');
-    toast(`❌ ${err.message}`, 'err');
+    renderError({ status: 'ERR', message: err.message });
   } finally {
-    btn.disabled = false;
-    btn.textContent = label;
     sent = false;
   }
 }
 
 /* ── Fields ──────────────────────────────────────────────── */
-function updateBrand() {
-  const el = $('#card-brand');
-  if (el) el.textContent = detectBrand(card.number).brand;
-}
+function updateBrand() { const el = $('#card-brand'); if (el) el.textContent = detectBrand(card.number).brand; }
 function showMap(id) { const el = document.getElementById(`map-${id}`); if (el) el.textContent = `↳ maps to  ${FIELD_LABEL[id]}`; }
 function hideMaps() { document.querySelectorAll('.field-map').forEach(e => (e.textContent = '')); }
 
@@ -212,10 +216,11 @@ function fillTestCard() {
 
 export function mount() {
   const els = { number: $('#f-number'), expiry: $('#f-expiry'), cvv: $('#f-cvv'), name: $('#f-name') };
+  if (!els.number) return; // checkout replaced by a screen
   els.number.value = card.number;
   els.expiry.value = card.expiry;
-  els.cvv.value    = card.cvv;
-  els.name.value   = card.name;
+  els.cvv.value = card.cvv;
+  els.name.value = card.name;
   updateBrand();
   sent = false;
   renderRequest();
@@ -229,12 +234,12 @@ export function mount() {
       renderRequest();
     });
     el.addEventListener('focus', () => { focusedId = el.id; showMap(el.id); applyHighlight(); });
-    el.addEventListener('blur',  () => { focusedId = null; hideMaps(); applyHighlight(); });
+    el.addEventListener('blur', () => { focusedId = null; hideMaps(); applyHighlight(); });
   };
   wire('number', els.number, formatNumber);
   wire('expiry', els.expiry, formatExpiry);
-  wire('cvv',    els.cvv,    v => v.replace(/\D/g, '').slice(0, 4));
-  wire('name',   els.name,   null);
+  wire('cvv', els.cvv, v => v.replace(/\D/g, '').slice(0, 4));
+  wire('name', els.name, null);
 
   $('#f-tds').addEventListener('change', e => { tds = e.target.checked; renderRequest(); });
   $('#pay-btn').addEventListener('click', pay);
