@@ -48,8 +48,11 @@ export function stopWebhookWatch() {
 
 function classify(e) {
   const type = (e.type || '').toUpperCase();
-  if (/COMPLETED|SUCCEEDED|CAPTURE/.test(type) || (e.status === 'CLO' && e.paid)) return 'success';
+  // terminal success: COMPLETED/CAPTURE, or a settled CLO+paid status (covers non-3DS SUCCEEDED)
+  if (/COMPLETED|CAPTURE/.test(type) || (e.status === 'CLO' && e.paid)) return 'success';
+  // terminal failure
   if (/FAILED|DECLINED|EXPIRED|CANCEL/.test(type) || FAIL_STATUS.includes(e.status)) return 'failure';
+  // PAYMENT_SUCCEEDED / status ACT (carries redirect_url) = intermediate, NOT terminal
   return 'pending';
 }
 
@@ -97,7 +100,7 @@ async function poll() {
 
   render(events);
   maybeFireTerminal(events);
-  if (elapsed > 120000) stopWebhookWatch();
+  if (elapsed > 300000) stopWebhookWatch(); // 5 min — SE may pause to narrate the 3DS challenge
 }
 
 function pill(text, cls = '') { return `<span class="wh-pill ${cls}">${text}</span>`; }
