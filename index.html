@@ -1,219 +1,87 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-vertical="ecommerce">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Rapyd · Payment Methods Demo</title>
+  <title>PayBridge · API Sandbox</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Epilogue:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/tokens.css" />
+  <link rel="stylesheet" href="css/main.css" />
 </head>
 <body>
+  <div class="app">
 
-  <!-- Header -->
-  <header class="site-header">
-    <div class="header-inner">
+    <!-- ── Header ── -->
+    <header class="topbar">
       <div class="brand">
-        <span class="brand-logo">⬡</span>
-        <span class="brand-name">Rapyd</span>
-        <span class="brand-divider">/</span>
-        <span class="brand-sub">Payments Demo</span>
+        <span class="brand-mark">◆</span>
+        <span class="brand-word">PayBridge</span>
+        <span class="brand-sub">API Sandbox · Live Payment Demo</span>
       </div>
-      <div class="env-toggle" id="env-toggle">
-        <button class="env-btn active" data-env="sandbox">
-          <span class="env-dot sandbox"></span>
-          Sandbox
-        </button>
-        <button class="env-btn" data-env="live">
-          <span class="env-dot live"></span>
-          Live
-        </button>
-      </div>
-    </div>
-  </header>
 
-  <!-- Env Banner -->
-  <div class="env-banner" id="env-banner">
-    <span class="env-banner-dot"></span>
-    <span id="env-banner-text">Connected to <strong>Sandbox</strong> — test transactions only, no real charges.</span>
+      <div class="vertical-pills" id="vertical-pills"><!-- rendered by app.js --></div>
+
+      <div class="topbar-right">
+        <div class="env-switch" id="env-switch">
+          <button data-env="sandbox" class="active">Sandbox</button>
+          <button data-env="live">Live</button>
+        </div>
+        <div class="status-ind idle" id="status-ind">
+          <span class="si-dot"></span><span class="si-text">Awaiting input</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ── Model sub-bar ── -->
+    <div class="subbar">
+      <div class="model-switch" id="model-switch">
+        <button class="model-btn active" data-model="own-fields">
+          <span class="mb-tag">PCI-DSS</span> Own Card Fields
+        </button>
+        <button class="model-btn" data-model="toolkit">
+          <span class="mb-tag">Hosted</span> Checkout Toolkit
+        </button>
+      </div>
+      <div class="model-desc" id="model-desc"></div>
+    </div>
+
+    <!-- ── Split ── -->
+    <main class="split">
+
+      <!-- LEFT: client site -->
+      <section class="pane pane-left">
+        <div class="browser">
+          <div class="browser-chrome">
+            <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+            <div class="urlbar"><span class="lock">🔒</span><span id="client-domain">shop.paybridge.com</span></div>
+            <span class="chrome-tag">Client site</span>
+          </div>
+          <div class="browser-body">
+            <div class="checkout" id="checkout"><!-- rendered by app.js --></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT: engine room -->
+      <section class="pane pane-right">
+        <div class="rtabs">
+          <button class="rtab active" data-tab="request">Request</button>
+          <button class="rtab" data-tab="response">Response</button>
+          <button class="rtab" data-tab="webhooks">Webhooks</button>
+          <span class="rtabs-meta" id="rtabs-meta">real Rapyd API</span>
+        </div>
+        <div class="rpanels">
+          <div class="rpanel active" data-panel="request" id="panel-request"></div>
+          <div class="rpanel" data-panel="response" id="panel-response"></div>
+          <div class="rpanel" data-panel="webhooks" id="panel-webhooks"></div>
+        </div>
+      </section>
+
+    </main>
   </div>
 
-  <!-- Main -->
-  <main class="main">
-
-    <!-- Product -->
-    <section class="section">
-      <div class="section-label">PRODUCT</div>
-      <div class="product-card">
-        <div class="product-info">
-          <div class="product-name">Developer Test Kit</div>
-          <div class="product-desc">A lightweight item for integration testing across payment flows.</div>
-        </div>
-        <div class="product-price">
-          <span class="price-amount">0.01</span>
-          <span class="price-currency">GBP</span>
-        </div>
-      </div>
-    </section>
-
-    <!-- Two columns: configure (left) / preview (right) -->
-    <div class="page-layout">
-
-      <!-- LEFT: configure & launch -->
-      <section class="col col-methods">
-        <div class="col-label">
-          <span class="col-label-main">CONFIGURE &amp; LAUNCH</span>
-          <span class="col-label-hint">what you control</span>
-        </div>
-
-        <div class="method-list">
-
-          <!-- REDIRECT -->
-          <div class="method-card" data-method="hosted" data-display="modal" data-tds="true">
-            <div class="method-head">
-              <span class="method-tag">REDIRECT</span>
-              <div class="method-body">
-                <div class="method-title">Hosted Checkout Page</div>
-                <div class="method-desc">Redirects the customer to a Rapyd-hosted payment page. Supports all available payment methods for the merchant's country.</div>
-              </div>
-            </div>
-            <div class="method-config">
-              <span class="config-note">3DS managed by Rapyd · always redirects</span>
-              <button class="launch-btn" data-launch="hosted">Launch <span class="launch-arrow">→</span></button>
-            </div>
-          </div>
-
-          <!-- IFRAME FULL -->
-          <div class="method-card" data-method="toolkit" data-display="modal" data-tds="true" data-tdsmode="toolkit">
-            <div class="method-head">
-              <span class="method-tag">IFRAME</span>
-              <div class="method-body">
-                <div class="method-title">Embedded Checkout — Full</div>
-                <div class="method-desc">Renders the full Rapyd Checkout Toolkit. Cards, bank transfers, and digital wallets in a single embedded experience.</div>
-              </div>
-            </div>
-            <div class="method-config">
-              <div class="config-group">
-                <span class="config-label">Display</span>
-                <div class="mini-toggle" data-config="display">
-                  <button class="mini-btn active" data-val="modal">Modal</button>
-                  <button class="mini-btn" data-val="inline">Inline</button>
-                </div>
-              </div>
-              <div class="config-group">
-                <span class="config-label">3DS</span>
-                <div class="mini-toggle" data-config="tds">
-                  <button class="mini-btn" data-val="false">Off</button>
-                  <button class="mini-btn active" data-val="true">On</button>
-                </div>
-              </div>
-              <div class="config-group">
-                <span class="config-label">3DS Handling</span>
-                <div class="mini-toggle" data-config="tdsmode">
-                  <button class="mini-btn active" data-val="toolkit">Toolkit-managed</button>
-                  <button class="mini-btn" data-val="manual">Manual</button>
-                </div>
-              </div>
-              <button class="launch-btn" data-launch="toolkit">Launch <span class="launch-arrow">→</span></button>
-            </div>
-          </div>
-
-          <!-- IFRAME WALLETS -->
-          <div class="method-card" data-method="wallets" data-display="modal" data-tds="true">
-            <div class="method-head">
-              <span class="method-tag">IFRAME · WALLETS</span>
-              <div class="method-body">
-                <div class="method-title">Embedded Checkout — Digital Wallets</div>
-                <div class="method-desc">Renders Apple Pay and Google Pay buttons only. Ideal for one-tap checkout experiences on supported devices.</div>
-              </div>
-            </div>
-            <div class="method-config">
-              <div class="config-group">
-                <span class="config-label">Display</span>
-                <div class="mini-toggle" data-config="display">
-                  <button class="mini-btn active" data-val="modal">Modal</button>
-                  <button class="mini-btn" data-val="inline">Inline</button>
-                </div>
-              </div>
-              <div class="config-group">
-                <span class="config-label">3DS</span>
-                <div class="mini-toggle" data-config="tds">
-                  <button class="mini-btn" data-val="false">Off</button>
-                  <button class="mini-btn active" data-val="true">On</button>
-                </div>
-              </div>
-              <button class="launch-btn" data-launch="wallets">Launch <span class="launch-arrow">→</span></button>
-            </div>
-          </div>
-
-        </div>
-      </section>
-
-      <!-- RIGHT: preview -->
-      <section class="col col-preview">
-        <div class="col-label">
-          <span class="col-label-main">PREVIEW</span>
-          <span class="col-label-hint">what your customer sees</span>
-        </div>
-
-        <div class="inline-panel" id="inline-panel">
-          <div class="inline-panel-header">
-            <span class="inline-panel-tag" id="inline-panel-tag">IDLE</span>
-            <span class="inline-panel-title" id="inline-panel-title">No active session</span>
-          </div>
-          <div class="inline-panel-body" id="inline-panel-body">
-            <div class="inline-empty">
-              <div class="inline-empty-icon">⬡</div>
-              <div class="inline-empty-text">Set a method to <strong>Inline</strong> and launch it to preview the embedded checkout here.</div>
-              <div class="inline-empty-sub">Methods set to <strong>Modal</strong> open in an overlay instead.</div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- RIGHT-MOST: event console -->
-      <section class="col col-console">
-        <div class="console-header">
-          <div class="col-label" style="height:auto;">
-            <span class="col-label-main">EVENT CONSOLE</span>
-            <span class="col-label-hint">step by step</span>
-          </div>
-          <div class="console-actions">
-            <label class="console-poll-toggle">
-              <input type="checkbox" id="status-poll-toggle" />
-              <span>Poll status</span>
-            </label>
-            <button class="console-clear" id="console-clear">Clear</button>
-          </div>
-        </div>
-        <div class="event-console" id="event-console">
-          <div class="console-line console-line-muted" id="console-placeholder">
-            <span class="console-time">--:--:--</span>
-            <span class="console-source">SYSTEM</span>
-            <span class="console-msg">Waiting for events. Launch a payment method to begin.</span>
-          </div>
-        </div>
-      </section>
-
-    </div><!-- /page-layout -->
-
-  </main>
-
-  <!-- Modal Overlay -->
-  <div class="modal-overlay hidden" id="modal-overlay">
-    <div class="modal" id="modal">
-      <div class="modal-header">
-        <div class="modal-title-group">
-          <span class="modal-tag" id="modal-tag"></span>
-          <span class="modal-title" id="modal-title"></span>
-        </div>
-        <button class="modal-close" id="modal-close" aria-label="Close">✕</button>
-      </div>
-      <div class="modal-body" id="modal-body"></div>
-    </div>
-  </div>
-
-  <script src="checkout.js" defer></script>
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>

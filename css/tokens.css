@@ -1,0 +1,81 @@
+/* ─────────────────────────────────────────────────────────────
+   PayBridge Demo Suite — Design Tokens (on-brand redesign)
+   Left = warm light "client site". Right = dark "engine room".
+   Accent + engine tint shift per vertical via [data-vertical].
+   Type: Anton (display) · Epilogue (UI) · JetBrains Mono (code).
+   ───────────────────────────────────────────────────────────── */
+
+:root {
+  --font-display: 'Anton', 'Arial Narrow', sans-serif;
+  --font-sans:    'Epilogue', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* ── Left / client site (warm light, shared) ── */
+  --paper:    #f2efe9;
+  --surface:  #ffffff;
+  --surface-2:#fbfaf7;
+  --line:     #e5e1d8;
+  --line-2:   #d8d3c7;
+  --ink:      #17140f;
+  --ink-2:    #4a463d;
+  --ink-3:    #8b8578;
+  --ink-4:    #a7a196;
+
+  /* ── Semantic ── */
+  --ok:   #12b76a;
+  --warn: #f59e0b;
+  --err:  #ef4444;
+  --info: #3b82f6;
+
+  /* ── Code syntax (dark engine) ── */
+  --syn-key:  #8ab4ff;
+  --syn-str:  #86e1a0;
+  --syn-num:  #f6c177;
+  --syn-bool: #c39bff;
+  --syn-punc: #6b7391;
+
+  --sync-hl:   rgba(246,193,119,.14);
+  --sync-edge: #f6c177;
+
+  --shadow-sm: 0 1px 2px rgba(23,20,15,.05);
+  --shadow-md: 0 8px 30px rgba(23,20,15,.08);
+  --shadow-lg: 0 24px 60px rgba(23,20,15,.14);
+
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+
+  /* Defaults (Retail) — overridden per vertical below */
+  --accent:     #5600ef;
+  --accent-2:   #a855f7;
+  --on-accent:  #ffffff;
+  --accent-soft:#efe8ff;
+
+  --eng-bg:     #0f0a17;
+  --eng-surface:#170f22;
+  --eng-surface-2:#1c1230;
+  --eng-line:   #2a1c3b;
+  --eng-text:   #f6ecff;
+  --eng-muted:  #9a86b0;
+  --eng-faint:  #6b5b80;
+}
+
+/* Retail — purple */
+:root[data-vertical="ecommerce"] {
+  --accent: #5600ef; --accent-2: #a855f7; --on-accent: #ffffff; --accent-soft: #efe8ff;
+  --eng-bg: #0f0a17; --eng-surface: #170f22; --eng-surface-2: #1c1230;
+  --eng-line: #2a1c3b; --eng-text: #f6ecff; --eng-muted: #9a86b0; --eng-faint: #6b5b80;
+}
+/* Crypto — neon green */
+:root[data-vertical="crypto"] {
+  --accent: #00e07a; --accent-2: #00ff89; --on-accent: #00140a; --accent-soft: #daffed;
+  --eng-bg: #0a0e0c; --eng-surface: #121814; --eng-surface-2: #16201b;
+  --eng-line: #1d2823; --eng-text: #eafff4; --eng-muted: #6f8a7e; --eng-faint: #4a5f55;
+}
+/* iGaming — magenta */
+:root[data-vertical="gaming"] {
+  --accent: #ff007a; --accent-2: #ff5ca8; --on-accent: #ffffff; --accent-soft: #ffe1ee;
+  --eng-bg: #120410; --eng-surface: #1c0a17; --eng-surface-2: #250d1e;
+  --eng-line: #3a1329; --eng-text: #ffeaf4; --eng-muted: #b07d97; --eng-faint: #7a5266;
+}
