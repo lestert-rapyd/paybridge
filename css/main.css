@@ -100,10 +100,19 @@ code { font-family: var(--font-mono); }
 
 /* ── Browser frame (left) ────────────────────────────────── */
 .browser {
-  max-width: 470px; margin: 0 auto;
+  width: 100%; max-width: 470px; margin: 0 auto;
   background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--r-lg); box-shadow: var(--shadow-md); overflow: hidden;
+  transition: max-width .25s ease;
 }
+/* Iframe-heavy flows (inline 3DS + Rapyd toolkit) render wider/taller than the
+   470px checkout card, so let them expand to the pane and shed body padding.
+   width:100% keeps the card within the pane on smaller screens. */
+.browser:has(.screen-3ds),
+.browser:has(#rapyd-checkout) { max-width: 640px; }
+.browser-body:has(.screen-3ds),
+.browser-body:has(#rapyd-checkout) { padding: 16px; }
+#rapyd-checkout, #rapyd-checkout iframe { width: 100% !important; max-width: 100%; }
 .browser-chrome {
   display: flex; align-items: center; gap: 8px;
   padding: 11px 14px; background: var(--surface-2); border-bottom: 1px solid var(--line);
@@ -383,12 +392,14 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .screen-facts code { font-family: var(--font-mono); font-size: 11px; color: var(--ink); background: var(--surface-2); padding: 2px 7px; border-radius: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .screen .co-cta { margin-top: 8px; }
 
-.screen-3ds { display: flex; flex-direction: column; min-height: 520px; }
+.screen-3ds { display: flex; flex-direction: column; min-height: 0; }
 .screen-3ds-bar { display: flex; align-items: center; gap: 12px; padding: 6px 2px 14px; }
 .tds-lock { font-size: 22px; }
 .screen-3ds-title { font-size: 15px; font-weight: 700; }
 .screen-3ds-sub { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
-.tds-frame { flex: 1; width: 100%; min-height: 440px; border: 1px solid var(--line); border-radius: var(--r-md); background: #fff; }
+/* Height tracks the viewport so the whole Rapyd 3DS simulator (incl. its
+   buttons) is visible without zooming out; the left pane scrolls if shorter. */
+.tds-frame { flex: none; width: 100%; height: clamp(520px, calc(100vh - 220px), 820px); border: 1px solid var(--line); border-radius: var(--r-md); background: #fff; }
 
 /* ── Responsive ──────────────────────────────────────────── */
 @media (max-width: 940px) {
