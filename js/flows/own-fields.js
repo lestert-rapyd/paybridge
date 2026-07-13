@@ -34,7 +34,8 @@ function freshSig() { return { salt: randHex(12), timestamp: Math.floor(Date.now
 
 /* ── Request bodies ──────────────────────────────────────── */
 function displayBody() {
-  const p = VERTICALS[state.vertical].product;
+  const v = VERTICALS[state.vertical];
+  const p = v.product;
   const { type } = detectBrand(card.number);
   const { month, year } = parseExpiry(card.expiry);
   const body = {
@@ -51,6 +52,7 @@ function displayBody() {
         name: card.name,
       },
     },
+    statement_descriptor: v.descriptor,
     merchant_reference_id: state.reference || '(assigned on submit)',
   };
   if (tds) body.payment_method_options = { '3d_required': true };
@@ -160,6 +162,13 @@ async function pay() {
   btn.textContent = 'Processing…';
   setStatus('Processing…', 'processing');
   state.reference = `pb_${state.vertical}_${Date.now()}`;
+  {
+    const v = VERTICALS[state.vertical];
+    const p = v.product;
+    // snapshot for the success screen's bank-statement view (fx reserved
+    // for when FX fields are configured in the demo)
+    state.lastPayment = { descriptor: v.descriptor, amount: p.amount, currency: p.currency, symbol: p.symbol, fx: null };
+  }
   sig = freshSig();
   sent = true;
   renderRequest();

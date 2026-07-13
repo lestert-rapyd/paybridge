@@ -70,13 +70,10 @@ function renderCheckout() {
   controls.innerHTML = flow.renderControlsHTML ? flow.renderControlsHTML() : '';
   controls.hidden = !flow.renderControlsHTML;
 
-  // width + anchoring classes (JS-toggled; see main.css note on :has()).
-  // Full-page flows anchor to the top so the taller post-render iframe
-  // grows downward instead of re-centering the chrome.
+  // width classes (JS-toggled; see main.css note on :has())
   const browser = $('.browser');
   browser.classList.toggle('wide-tk', !!flow.renderPageHTML);
   browser.classList.remove('wide-3ds');
-  $('.pane-left').classList.toggle('anchor-top', !!flow.renderPageHTML || !controls.hidden);
 
   flow.mount();
 }

@@ -10,6 +10,51 @@ import { state, setState } from './state.js';
 const host = () => document.getElementById('checkout');
 const set3DSWidth = (on) => document.querySelector('.browser')?.classList.toggle('wide-3ds', on);
 
+/* ── Customer's bank-app view (statement descriptor) ─────────
+   Reads the real payment from the terminal webhook when present,
+   falling back to the request snapshot (state.lastPayment). Shows
+   the FX variant (charged currency big, original small) when the
+   payment carries FX fields — reactive once FX is configured. */
+function bankViewHTML(event) {
+  const pay = event.raw?.data || {};
+  const lp = state.lastPayment || {};
+  const descriptor = pay.statement_descriptor || lp.descriptor;
+  if (!descriptor) return '';
+
+  const currency = pay.currency_code || lp.currency || '';
+  const amount = fmtAmount(pay.amount ?? lp.amount);
+  const fxRate = Number(pay.fx_rate);
+  const origCurrency = pay.original_currency || pay.merchant_requested_currency || lp.fx?.currency;
+  const origAmount = pay.original_amount ?? pay.merchant_requested_amount ?? lp.fx?.amount;
+  const isFx = !!(origCurrency && origCurrency !== currency && (fxRate ? fxRate !== 1 : true) && origAmount != null);
+
+  const main = isFx
+    ? `− ${currency} ${amount}`
+    : `− ${lp.symbol && currency === lp.currency ? lp.symbol : currency + ' '}${amount}`;
+  const d = new Date();
+  const when = `${d.getDate()} ${d.toLocaleString('en-GB', { month: 'short' })} ${d.getFullYear()}, ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+  return `
+    <div class="bank-view">
+      <div class="bank-view-label">Customer's bank app · <code>statement_descriptor</code></div>
+      <div class="bank-card">
+        <div class="bank-ico">↑</div>
+        <div class="bank-info">
+          <div class="bank-desc">${descriptor}</div>
+          <div class="bank-date">${when}</div>
+        </div>
+        <div class="bank-amt">
+          <div class="bank-amt-main">${main}</div>
+          ${isFx ? `<div class="bank-amt-fx">− ${origCurrency} ${fmtAmount(origAmount)}</div>` : ''}
+        </div>
+      </div>
+    </div>`;
+}
+function fmtAmount(a) {
+  const n = Number(a);
+  return Number.isFinite(n) ? n.toFixed(2) : (a ?? '—');
+}
+
 export function renderProcessing(title = 'Confirming payment…', sub = 'Waiting for Rapyd to confirm via webhook…') {
   host().innerHTML = `
     <div class="screen">
@@ -49,6 +94,7 @@ export function renderSuccess(event = {}) {
         <div><span>Status</span><code>${event.status || 'CLO'}</code></div>
         <div><span>Confirmed by</span><code>${event.type || 'webhook'}</code></div>
       </div>
+      ${bankViewHTML(event)}
       <button class="co-cta" id="screen-reset">Run another payment</button>
     </div>`;
   wireReset();

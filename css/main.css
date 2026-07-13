@@ -97,12 +97,9 @@ code { font-family: var(--font-mono); }
 .split { display: grid; grid-template-columns: 1fr 1fr; flex: 1; min-height: 0; }
 .pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .pane-left  { background: var(--paper); overflow-y: auto; padding: 18px; display: flex; flex-direction: column; }
-/* auto margins = safe centering: centers when there's room, scrolls when there isn't */
-.pane-left > .browser { margin: auto; }
-/* full-page flows anchor to the top — the toolkit iframe grows the card
-   after render, and centering would slide the chrome upward */
-.pane-left.anchor-top > .browser { margin: 0 auto; }
-.pane-left.anchor-top > .demo-controls { margin: 14px auto 0; }
+/* Always top-anchored: iframes and screens change the card's height, and
+   vertical centering would slide the chrome/URL bar with every change. */
+.pane-left > .browser { margin: 0 auto; }
 .pane-right { background: var(--eng-bg); border-left: 1px solid #000; min-height: 0; }
 
 /* ── Browser frame (left) ────────────────────────────────── */
@@ -133,11 +130,14 @@ code { font-family: var(--font-mono); }
 .browser-chrome .dot.g { background: #28c840; }
 .urlbar {
   flex: 1; display: flex; align-items: center; gap: 7px; margin: 0 6px;
+  /* fixed cap so the chrome reads the same at every card width */
+  max-width: 340px;
   background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
   padding: 6px 13px; font-size: 12px; color: var(--ink-2); font-family: var(--font-mono);
 }
 .urlbar .lock { font-size: 10px; }
 .chrome-tag {
+  margin-left: auto;
   font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
   color: var(--ink-3); background: var(--surface); border: 1px solid var(--line);
   padding: 3px 8px; border-radius: 999px;
@@ -472,6 +472,27 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .screen-facts span { color: var(--ink-3); flex: none; }
 .screen-facts code { font-family: var(--font-mono); font-size: 11px; color: var(--ink); background: var(--surface-2); padding: 2px 7px; border-radius: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .screen .co-cta { margin-top: 8px; }
+
+/* customer's bank-app view on the success screen */
+.bank-view { width: 100%; margin: 12px 0 4px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 16px; padding: 10px; text-align: left; }
+.bank-view-label { font-size: 9.5px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; color: var(--ink-3); margin: 1px 2px 8px; }
+.bank-view-label code { font-family: var(--font-mono); font-size: 9.5px; color: var(--accent); text-transform: none; letter-spacing: 0; }
+.bank-card {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  padding: 12px 14px; box-shadow: 0 1px 3px rgba(23,20,15,.06);
+}
+.bank-ico {
+  width: 38px; height: 38px; border-radius: 11px; flex: none;
+  display: grid; place-items: center; font-size: 16px; font-weight: 700;
+  background: #e8ebfd; color: #4f6bed;
+}
+.bank-info { min-width: 0; }
+.bank-desc { font-size: 13px; font-weight: 800; letter-spacing: .02em; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bank-date { font-size: 11px; color: var(--ink-3); margin-top: 2px; }
+.bank-amt { margin-left: auto; text-align: right; flex: none; }
+.bank-amt-main { font-size: 14.5px; font-weight: 800; white-space: nowrap; }
+.bank-amt-fx { font-size: 11px; color: var(--ink-3); margin-top: 2px; white-space: nowrap; }
 
 .screen-3ds { display: flex; flex-direction: column; min-height: 0; }
 .screen-3ds-bar { display: flex; align-items: center; gap: 12px; padding: 6px 2px 14px; }

@@ -58,6 +58,7 @@ function displayBody() {
     currency: p.currency,
     country: p.country,
     description: p.name,
+    statement_descriptor: v.descriptor,
     merchant_reference_id: state.reference || '(assigned on launch)',
     // real pages — the vertical domains (shop.paybridge.com etc.) are display-only fiction
     complete_checkout_url: 'https://rapydtoolkit.com/complete',
@@ -333,6 +334,13 @@ async function launch() {
   lastSession = null;
   renderConsole();
   state.reference = `pb_${state.vertical}_tk_${Date.now()}`;
+  {
+    const v = VERTICALS[state.vertical];
+    const p = v.product;
+    // snapshot for the success screen's bank-statement view (fx reserved
+    // for when FX fields are configured in the demo)
+    state.lastPayment = { descriptor: v.descriptor, amount: p.amount, currency: p.currency, symbol: p.symbol, fx: null };
+  }
   renderRequest();
   setActiveTab('request');
 
