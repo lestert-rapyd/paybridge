@@ -99,6 +99,10 @@ code { font-family: var(--font-mono); }
 .pane-left  { background: var(--paper); overflow-y: auto; padding: 18px; display: flex; flex-direction: column; }
 /* auto margins = safe centering: centers when there's room, scrolls when there isn't */
 .pane-left > .browser { margin: auto; }
+/* with the demo-controls deck visible, anchor to the top — the toolkit iframe
+   grows the card after launch, and centering would slide the chrome upward */
+.pane-left.with-controls > .browser { margin: 0 auto; }
+.pane-left.with-controls > .demo-controls { margin: 14px auto 0; }
 .pane-right { background: var(--eng-bg); border-left: 1px solid #000; min-height: 0; }
 
 /* ── Browser frame (left) ────────────────────────────────── */
@@ -106,16 +110,16 @@ code { font-family: var(--font-mono); }
   width: 100%; max-width: 470px; margin: 0 auto;
   background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--r-lg); box-shadow: var(--shadow-md); overflow: hidden;
-  transition: max-width .25s ease;
+  /* no width transition — an animated resize slides the chrome/URL bar around */
 }
 /* Iframe-heavy flows (inline 3DS + Rapyd toolkit) render wider/taller than the
    470px checkout card, so let them expand to the pane and shed body padding.
-   width:100% keeps the card within the pane on smaller screens. */
-.browser:has(.screen-3ds) { max-width: 640px; }
-.browser:has(.tk-checkout) { max-width: 980px; }
-.browser:has(.tk-modal-backdrop) { max-width: 760px; }
-.browser-body:has(.screen-3ds),
-.browser-body:has(.tk-checkout) { padding: 18px; }
+   Classes are toggled from JS — :has() invalidation is unreliable across the
+   container-type boundary on .browser-body. */
+.browser.wide-3ds { max-width: 640px; }
+.browser.wide-tk { max-width: 980px; }
+.browser.wide-3ds .browser-body,
+.browser.wide-tk .browser-body { padding: 18px; }
 .browser-body { position: relative; container-type: inline-size; }
 #rapyd-checkout { min-width: min(500px, 100%); }  /* toolkit needs ≥500px to lay out */
 #rapyd-checkout, #rapyd-checkout iframe { width: 100% !important; max-width: 100%; }
@@ -343,22 +347,37 @@ code { font-family: var(--font-mono); }
   .tk-summary { border-right: 0; padding-right: 0; position: static; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
 }
 
-/* Modal presentation: merchant page stays behind a dimmed backdrop */
-.tk-modal-backdrop {
-  position: absolute; inset: 0; z-index: 5;
-  background: rgba(23, 20, 15, .45);
-  display: grid; place-items: center; padding: 16px;
-  animation: fadeIn .15s ease;
+/* SE demo controls — a control deck below the fake client site */
+.demo-controls {
+  width: 100%; max-width: 980px; margin: 14px auto 0;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-lg);
+  padding: 13px 16px 15px;
 }
-@keyframes fadeIn { from { opacity: 0; } }
-.tk-modal {
-  background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-lg);
-  width: min(560px, 100%); max-height: 100%; overflow-y: auto; padding: 14px 16px 16px;
+.dc-title { font-size: 10px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 11px; }
+.demo-controls .tk-modes { margin-bottom: 11px; }
+.demo-controls .tk-chip { background: var(--surface); }
+.demo-controls .co-tds { margin: 10px 0 12px; }
+.dc-sec { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+.dc-sec[hidden] { display: none; }
+.dc-sec-title { font-size: 11px; font-weight: 700; color: var(--ink-2); margin-bottom: 8px; }
+.dc-sec-title code { font-family: var(--font-mono); font-size: 10px; color: var(--accent); font-weight: 500; }
+.dc-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+.dc-row:last-child { margin-bottom: 0; }
+.dc-lbl { font-size: 11.5px; font-weight: 600; color: var(--ink-2); width: 76px; flex: none; }
+.dc-input {
+  flex: 1; min-width: 0; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface);
+  padding: 7px 10px; font-size: 12.5px; color: var(--ink); font-family: inherit;
 }
-.tk-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
-.tk-modal-head span { font-size: 12.5px; font-weight: 700; color: var(--ink-2); }
-.tk-modal-x { border: 0; background: var(--surface-2); color: var(--ink-3); width: 26px; height: 26px; border-radius: 8px; font-size: 12px; }
-.tk-modal-x:hover { color: var(--ink); }
+.dc-input:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.dc-color {
+  flex: none; width: 34px; height: 32px; padding: 2px; border: 1px solid var(--line-2);
+  border-radius: 8px; background: var(--surface); cursor: pointer;
+}
+.dc-select {
+  flex: 1; min-width: 0; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface);
+  padding: 6px 8px; font-size: 12px; color: var(--ink); font-family: inherit;
+}
+.tk-opt[hidden] { display: none; }
 
 .tk-redirect { text-align: center; padding: 8px 0; }
 .tk-redirect-title { font-size: 15px; font-weight: 700; }

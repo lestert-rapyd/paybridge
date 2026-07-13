@@ -47,7 +47,7 @@
     <!-- ── Split ── -->
     <main class="split">
 
-      <!-- LEFT: client site -->
+      <!-- LEFT: client site + demo controls -->
       <section class="pane pane-left">
         <div class="browser">
           <div class="browser-chrome">
@@ -59,6 +59,7 @@
             <div class="checkout" id="checkout"><!-- rendered by app.js --></div>
           </div>
         </div>
+        <div class="demo-controls" id="demo-controls" hidden><!-- flow-specific SE controls --></div>
       </section>
 
       <!-- RIGHT: engine room -->
@@ -67,6 +68,7 @@
           <button class="rtab active" data-tab="request">Request</button>
           <button class="rtab" data-tab="response">Response</button>
           <button class="rtab" data-tab="webhooks">Webhooks</button>
+          <button class="rtab" data-tab="console" id="rtab-console">Console</button>
           <div class="status-ind idle" id="status-ind">
             <span class="si-dot"></span><span class="si-text">Awaiting input</span>
           </div>
@@ -75,6 +77,7 @@
           <div class="rpanel active" data-panel="request" id="panel-request"></div>
           <div class="rpanel" data-panel="response" id="panel-response"></div>
           <div class="rpanel" data-panel="webhooks" id="panel-webhooks"></div>
+          <div class="rpanel" data-panel="console" id="panel-console"></div>
         </div>
       </section>
 

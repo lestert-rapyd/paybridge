@@ -36,27 +36,44 @@ function renderCheckout() {
     ? `<div class="co-paylabel"><span class="lbl">Pay by card</span><button class="use-test" id="use-test">Use test card</button></div>`
     : `<div class="co-paylabel"><span class="lbl">Payment method</span></div>`;
 
-  host.innerHTML = `
-    <div class="co-merchant">${v.merchant.toUpperCase()}</div>
-    <div class="co-tagline">${v.headline}</div>
+  // A flow can own the whole client page (toolkit's two-panel stage);
+  // otherwise it slots into the standard checkout shell.
+  if (flow.renderPageHTML) {
+    host.innerHTML = flow.renderPageHTML();
+  } else {
+    host.innerHTML = `
+      <div class="co-merchant">${v.merchant.toUpperCase()}</div>
+      <div class="co-tagline">${v.headline}</div>
 
-    <div class="co-order">
-      <div class="co-thumb" style="background:linear-gradient(135deg,${c1},${c2})">${THUMB_GLYPH[state.vertical]}</div>
-      <div class="co-order-info">
-        <div class="co-order-name">${p.name}</div>
-        <div class="co-order-desc">${p.desc}</div>
+      <div class="co-order">
+        <div class="co-thumb" style="background:linear-gradient(135deg,${c1},${c2})">${THUMB_GLYPH[state.vertical]}</div>
+        <div class="co-order-info">
+          <div class="co-order-name">${p.name}</div>
+          <div class="co-order-desc">${p.desc}</div>
+        </div>
+        <div class="co-order-price">${p.symbol}${p.amount}</div>
       </div>
-      <div class="co-order-price">${p.symbol}${p.amount}</div>
-    </div>
 
-    <div class="co-totals">
-      <div class="co-line"><span>Subtotal</span><span>${p.symbol}${p.amount}</span></div>
-      <div class="co-line"><span>${feeLabel}</span><span>${feeValue}</span></div>
-      <div class="co-line total"><span>Total</span><span class="co-total-amt">${p.symbol}${p.amount}</span></div>
-    </div>
+      <div class="co-totals">
+        <div class="co-line"><span>Subtotal</span><span>${p.symbol}${p.amount}</span></div>
+        <div class="co-line"><span>${feeLabel}</span><span>${feeValue}</span></div>
+        <div class="co-line total"><span>Total</span><span class="co-total-amt">${p.symbol}${p.amount}</span></div>
+      </div>
 
-    ${payLabel}
-    ${flow.renderPaymentHTML()}`;
+      ${payLabel}
+      ${flow.renderPaymentHTML()}`;
+  }
+
+  // SE demo controls live OUTSIDE the fake client site.
+  const controls = $('#demo-controls');
+  controls.innerHTML = flow.renderControlsHTML ? flow.renderControlsHTML() : '';
+  controls.hidden = !flow.renderControlsHTML;
+  $('.pane-left').classList.toggle('with-controls', !controls.hidden);
+
+  // width classes (JS-toggled; see main.css note on :has())
+  const browser = $('.browser');
+  browser.classList.toggle('wide-tk', !!flow.renderPageHTML);
+  browser.classList.remove('wide-3ds');
 
   flow.mount();
 }
@@ -65,6 +82,8 @@ function renderCheckout() {
 function renderBackend() {
   $('#panel-response').innerHTML = emptyState('⇄', `Rapyd's response appears here once a call is made.`);
   $('#panel-webhooks').innerHTML = emptyState('📡', `Incoming webhooks land here as Rapyd fires them. Polling fills in if a webhook is delayed.`);
+  $('#panel-console').innerHTML = emptyState('▸', `Toolkit lifecycle events stream here once the toolkit renders.`);
+  $('#rtab-console').style.display = state.model === 'toolkit' ? '' : 'none';
 }
 function emptyState(ico, text) {
   return `<div class="eng-empty"><div class="ee-ico">${ico}</div><div class="ee-text">${text}</div></div>`;

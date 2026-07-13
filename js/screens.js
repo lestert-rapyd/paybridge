@@ -8,6 +8,7 @@ import { VERTICALS } from './verticals.js';
 import { state, setState } from './state.js';
 
 const host = () => document.getElementById('checkout');
+const set3DSWidth = (on) => document.querySelector('.browser')?.classList.toggle('wide-3ds', on);
 
 export function renderProcessing(title = 'Confirming payment…', sub = 'Waiting for Rapyd to confirm via webhook…') {
   host().innerHTML = `
@@ -20,6 +21,7 @@ export function renderProcessing(title = 'Confirming payment…', sub = 'Waiting
 }
 
 export function render3DS(url) {
+  set3DSWidth(true);
   host().innerHTML = `
     <div class="screen-3ds">
       <div class="screen-3ds-bar">
@@ -34,6 +36,7 @@ export function render3DS(url) {
 }
 
 export function renderSuccess(event = {}) {
+  set3DSWidth(false);
   const v = VERTICALS[state.vertical];
   const p = v.product;
   host().innerHTML = `
@@ -52,6 +55,7 @@ export function renderSuccess(event = {}) {
 }
 
 export function renderError(event = {}) {
+  set3DSWidth(false);
   const v = VERTICALS[state.vertical];
   host().innerHTML = `
     <div class="screen error">
