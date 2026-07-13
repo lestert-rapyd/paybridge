@@ -99,10 +99,10 @@ code { font-family: var(--font-mono); }
 .pane-left  { background: var(--paper); overflow-y: auto; padding: 18px; display: flex; flex-direction: column; }
 /* auto margins = safe centering: centers when there's room, scrolls when there isn't */
 .pane-left > .browser { margin: auto; }
-/* with the demo-controls deck visible, anchor to the top — the toolkit iframe
-   grows the card after launch, and centering would slide the chrome upward */
-.pane-left.with-controls > .browser { margin: 0 auto; }
-.pane-left.with-controls > .demo-controls { margin: 14px auto 0; }
+/* full-page flows anchor to the top — the toolkit iframe grows the card
+   after render, and centering would slide the chrome upward */
+.pane-left.anchor-top > .browser { margin: 0 auto; }
+.pane-left.anchor-top > .demo-controls { margin: 14px auto 0; }
 .pane-right { background: var(--eng-bg); border-left: 1px solid #000; min-height: 0; }
 
 /* ── Browser frame (left) ────────────────────────────────── */
@@ -310,28 +310,67 @@ code { font-family: var(--font-mono); }
 /* ── Toolkit flow (left) ─────────────────────────────────── */
 .tk-note { font-size: 12px; color: var(--ink-3); line-height: 1.5; margin-bottom: 14px; }
 .tk-note b { color: var(--ink-2); }
-.tk-modes { display: flex; gap: 8px; margin-bottom: 14px; }
-.tk-chip {
-  flex: 1; border: 1px solid var(--line-2); background: var(--surface);
-  border-radius: var(--r-md); padding: 11px 9px; text-align: left; transition: all .15s ease;
-}
-.tk-chip:hover { border-color: var(--accent); }
-.tk-chip.active { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 3px var(--accent-soft); }
-.tkc-label { display: block; font-size: 13px; font-weight: 700; color: var(--ink); }
-.tkc-hint { display: block; font-size: 10.5px; color: var(--ink-3); margin-top: 2px; }
-
 #rapyd-checkout { min-height: 120px; }
 
-/* Scenario toggles (pre-launch) */
-.tk-opts { display: flex; flex-direction: column; gap: 7px; margin-bottom: 12px; }
-.tk-opt { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.tk-opt-label { font-size: 12px; font-weight: 600; color: var(--ink-2); }
-.seg { display: flex; gap: 2px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 2px; }
-.seg button {
-  border: 0; background: transparent; color: var(--ink-3);
-  padding: 5px 11px; border-radius: 6px; font-size: 11.5px; font-weight: 600; transition: all .12s ease;
+/* toolkit.config — dark code-styled panel in the payment column,
+   swapped for the toolkit iframe on render */
+.tk-config {
+  display: flex; flex-direction: column; min-height: 100%;
+  background: var(--eng-bg); border: 1px solid var(--eng-line); border-radius: var(--r-md);
+  padding: 13px 15px 15px; font-family: var(--font-mono);
 }
-.seg button.active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.09); }
+.tkc-head { display: flex; align-items: baseline; gap: 7px; }
+.tkc-chev { color: var(--eng-faint); font-size: 10px; }
+.tkc-name { color: var(--eng-text); font-size: 13px; font-weight: 700; }
+.tkc-hint { margin-left: auto; color: var(--eng-faint); font-size: 10px; }
+.tkc-sec { margin-top: 15px; }
+.tkc-sec[hidden] { display: none; }
+.tkc-com { color: var(--eng-faint); font-size: 10.5px; margin-bottom: 8px; }
+.tkc-key { color: var(--syn-key); font-size: 11.5px; margin-bottom: 7px; }
+.tkc-key em { font-style: normal; color: var(--eng-faint); }
+.tkc-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+.tkc-row:last-child { margin-bottom: 0; }
+.tkc-row .tkc-key { margin-bottom: 0; }
+.tkc-row.selects { justify-content: flex-start; gap: 7px; margin-bottom: 11px; }
+.tkc-seg { display: flex; gap: 2px; background: var(--eng-surface); border: 1px solid var(--eng-line); border-radius: 8px; padding: 2px; }
+.tkc-sec > .tkc-seg { width: 100%; }
+.tkc-seg button {
+  flex: 1; border: 0; background: transparent; color: var(--eng-muted);
+  padding: 6px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 11px;
+  white-space: nowrap; transition: all .12s ease;
+}
+.tkc-seg button:hover { color: var(--eng-text); }
+.tkc-seg button.active { background: var(--eng-surface-2); color: var(--eng-text); }
+.tkc-bool { color: var(--syn-bool); font-size: 11.5px; }
+.tkc-switch-wrap { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.tkc-switch {
+  appearance: none; width: 34px; height: 19px; margin: 0; cursor: pointer; position: relative;
+  border-radius: 999px; background: var(--eng-surface-2); border: 1px solid var(--eng-line);
+  transition: background .15s ease, border-color .15s ease;
+}
+.tkc-switch::after {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px;
+  border-radius: 50%; background: var(--eng-muted); transition: left .15s ease, background .15s ease;
+}
+.tkc-switch:checked { background: var(--accent); border-color: var(--accent); }
+.tkc-switch:checked::after { left: 17px; background: #fff; }
+.tkc-inline { display: flex; align-items: center; gap: 6px; flex: 1; max-width: 230px; }
+.tkc-input {
+  flex: 1; min-width: 0; border: 1px solid var(--eng-line); border-radius: 7px;
+  background: var(--eng-surface); padding: 6px 9px; font-size: 11.5px; color: var(--eng-text);
+  font-family: var(--font-mono);
+}
+.tkc-input:focus { outline: 0; border-color: var(--accent); }
+.tkc-color {
+  flex: none; width: 30px; height: 28px; padding: 2px; cursor: pointer;
+  border: 1px solid var(--eng-line); border-radius: 7px; background: var(--eng-surface);
+}
+.tkc-select {
+  flex: 1; min-width: 0; border: 1px solid var(--eng-line); border-radius: 7px;
+  background: var(--eng-surface); padding: 6px 8px; font-size: 11px; color: var(--eng-text);
+  font-family: var(--font-mono);
+}
+.tkc-cta { margin-top: 16px; }
 
 /* Post-launch stage: Stripe-style two-panel — summary | toolkit (≥500px).
    Both columns are fr-based so the summary grows with the card instead of
@@ -347,37 +386,12 @@ code { font-family: var(--font-mono); }
   .tk-summary { border-right: 0; padding-right: 0; position: static; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
 }
 
-/* SE demo controls — a control deck below the fake client site */
+/* optional SE controls deck below the client site (unused by current flows) */
 .demo-controls {
   width: 100%; max-width: 980px; margin: 14px auto 0;
   background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-lg);
   padding: 13px 16px 15px;
 }
-.dc-title { font-size: 10px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 11px; }
-.demo-controls .tk-modes { margin-bottom: 11px; }
-.demo-controls .tk-chip { background: var(--surface); }
-.demo-controls .co-tds { margin: 10px 0 12px; }
-.dc-sec { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
-.dc-sec[hidden] { display: none; }
-.dc-sec-title { font-size: 11px; font-weight: 700; color: var(--ink-2); margin-bottom: 8px; }
-.dc-sec-title code { font-family: var(--font-mono); font-size: 10px; color: var(--accent); font-weight: 500; }
-.dc-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
-.dc-row:last-child { margin-bottom: 0; }
-.dc-lbl { font-size: 11.5px; font-weight: 600; color: var(--ink-2); width: 76px; flex: none; }
-.dc-input {
-  flex: 1; min-width: 0; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface);
-  padding: 7px 10px; font-size: 12.5px; color: var(--ink); font-family: inherit;
-}
-.dc-input:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.dc-color {
-  flex: none; width: 34px; height: 32px; padding: 2px; border: 1px solid var(--line-2);
-  border-radius: 8px; background: var(--surface); cursor: pointer;
-}
-.dc-select {
-  flex: 1; min-width: 0; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface);
-  padding: 6px 8px; font-size: 12px; color: var(--ink); font-family: inherit;
-}
-.tk-opt[hidden] { display: none; }
 
 .tk-redirect { text-align: center; padding: 8px 0; }
 .tk-redirect-title { font-size: 15px; font-weight: 700; }
