@@ -28,9 +28,6 @@
           <button data-env="sandbox" class="active">Sandbox</button>
           <button data-env="live">Live</button>
         </div>
-        <div class="status-ind idle" id="status-ind">
-          <span class="si-dot"></span><span class="si-text">Awaiting input</span>
-        </div>
       </div>
     </header>
 
@@ -70,7 +67,9 @@
           <button class="rtab active" data-tab="request">Request</button>
           <button class="rtab" data-tab="response">Response</button>
           <button class="rtab" data-tab="webhooks">Webhooks</button>
-          <span class="rtabs-meta" id="rtabs-meta">real Rapyd API</span>
+          <div class="status-ind idle" id="status-ind">
+            <span class="si-dot"></span><span class="si-text">Awaiting input</span>
+          </div>
         </div>
         <div class="rpanels">
           <div class="rpanel active" data-panel="request" id="panel-request"></div>

@@ -47,7 +47,6 @@ export function renderSuccess(event = {}) {
         <div><span>Confirmed by</span><code>${event.type || 'webhook'}</code></div>
       </div>
       <button class="co-cta" id="screen-reset">Run another payment</button>
-      <div class="co-secure">🔒 Confirmed via ${event.type ? 'incoming webhook' : 'payment status'}</div>
     </div>`;
   wireReset();
 }

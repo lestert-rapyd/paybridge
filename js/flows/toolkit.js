@@ -39,8 +39,9 @@ function displayBody() {
     country: p.country,
     description: p.name,
     merchant_reference_id: state.reference || '(assigned on launch)',
-    complete_checkout_url: `https://${v.domain}/complete`,
-    cancel_checkout_url: `https://${v.domain}/cancel`,
+    // real pages — the vertical domains (shop.paybridge.com etc.) are display-only fiction
+    complete_checkout_url: 'https://rapydtoolkit.com/complete',
+    cancel_checkout_url: 'https://rapydtoolkit.com/cancel',
     custom_elements: { display_description: true },
     payment_method_type_categories: ['card'],
     payment_method_options: { '3d_required': tds },
@@ -66,10 +67,9 @@ export function renderPaymentHTML() {
       <div class="tk-modes">${chips}</div>
       <label class="co-tds">
         <input type="checkbox" id="tk-tds" ${tds ? 'checked' : ''} />
-        <span>Require 3-D Secure <em>· 3d_required</em></span>
+        <span>Require 3-D Secure</span>
       </label>
       <button class="co-cta" id="tk-launch">${v.cta} ${p.symbol}${p.amount}</button>
-      <div class="co-secure">🔒 Card data captured inside Rapyd's hosted iframe</div>
     </div>`;
 }
 

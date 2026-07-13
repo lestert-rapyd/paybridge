@@ -11,14 +11,6 @@ export const FIELD_MAP = {
   'f-name':   ['payment_method.fields.name'],
 };
 
-/** human label shown under a focused field */
-export const FIELD_LABEL = {
-  'f-number': 'payment_method.fields.number',
-  'f-expiry': 'payment_method.fields.expiration_month / _year',
-  'f-cvv':    'payment_method.fields.cvv',
-  'f-name':   'payment_method.fields.name',
-};
-
 /** Detect scheme from PAN → Rapyd payment_method type (GB methods are enabled on the account). */
 export function detectBrand(number) {
   const n = (number || '').replace(/\D/g, '');

@@ -14,7 +14,7 @@ import { setActiveTab, setStatus } from '../ui.js';
 import { startWebhookWatch } from '../webhooks.js';
 import { renderProcessing, render3DS, renderSuccess, renderError } from '../screens.js';
 import {
-  FIELD_MAP, FIELD_LABEL, detectBrand,
+  FIELD_MAP, detectBrand,
   formatNumber, formatExpiry, parseExpiry,
 } from '../sync.js';
 
@@ -74,31 +74,26 @@ export function renderPaymentHTML() {
         <input id="f-number" inputmode="numeric" autocomplete="cc-number" placeholder="4111 1111 1111 1111" maxlength="23" />
         <span class="card-brand" id="card-brand"></span>
       </div>
-      <div class="field-map" id="map-f-number"></div>
     </div>
     <div class="co-row">
       <div class="co-field">
         <label>Expiry</label>
         <div class="co-input"><input id="f-expiry" inputmode="numeric" autocomplete="cc-exp" placeholder="12 / 27" maxlength="7" /></div>
-        <div class="field-map" id="map-f-expiry"></div>
       </div>
       <div class="co-field">
         <label>CVV</label>
         <div class="co-input"><input id="f-cvv" inputmode="numeric" autocomplete="cc-csc" placeholder="123" maxlength="4" /></div>
-        <div class="field-map" id="map-f-cvv"></div>
       </div>
     </div>
     <div class="co-field">
       <label>Name on card</label>
       <div class="co-input"><input id="f-name" autocomplete="cc-name" placeholder="Jordan Taylor" /></div>
-      <div class="field-map" id="map-f-name"></div>
     </div>
     <label class="co-tds">
       <input type="checkbox" id="f-tds" ${tds ? 'checked' : ''} />
-      <span>Require 3-D Secure <em>· adds <code>payment_method_options</code></em></span>
+      <span>Require 3-D Secure</span>
     </label>
-    <button class="co-cta" id="pay-btn">${v.cta} ${p.symbol}${p.amount}</button>
-    <div class="co-secure">🔒 Card posts from this page to <b>&nbsp;/v1/payments</b></div>`;
+    <button class="co-cta" id="pay-btn">${v.cta} ${p.symbol}${p.amount}</button>`;
 }
 
 /* ── Request panel ───────────────────────────────────────── */
@@ -203,8 +198,6 @@ async function pay() {
 
 /* ── Fields ──────────────────────────────────────────────── */
 function updateBrand() { const el = $('#card-brand'); if (el) el.textContent = detectBrand(card.number).brand; }
-function showMap(id) { const el = document.getElementById(`map-${id}`); if (el) el.textContent = `↳ maps to  ${FIELD_LABEL[id]}`; }
-function hideMaps() { document.querySelectorAll('.field-map').forEach(e => (e.textContent = '')); }
 
 function fillTestCard() {
   const set = (id, val) => { const el = $(`#${id}`); el.value = val; el.dispatchEvent(new Event('input', { bubbles: true })); };
@@ -233,8 +226,8 @@ export function mount() {
       setStatus('Drafting request', 'drafting');
       renderRequest();
     });
-    el.addEventListener('focus', () => { focusedId = el.id; showMap(el.id); applyHighlight(); });
-    el.addEventListener('blur', () => { focusedId = null; hideMaps(); applyHighlight(); });
+    el.addEventListener('focus', () => { focusedId = el.id; applyHighlight(); });
+    el.addEventListener('blur', () => { focusedId = null; applyHighlight(); });
   };
   wire('number', els.number, formatNumber);
   wire('expiry', els.expiry, formatExpiry);
