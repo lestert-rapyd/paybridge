@@ -9,6 +9,27 @@ import { state, setState } from './state.js';
 
 const host = () => document.getElementById('checkout');
 const set3DSWidth = (on) => document.querySelector('.browser')?.classList.toggle('wide-3ds', on);
+/* End screens always render in the standard narrow card — the toolkit's
+   wide stage would otherwise stretch the success/error layout. */
+const resetWide = () => document.querySelector('.browser')?.classList.remove('wide-tk');
+
+/* "Visa ending 1111" / "Apple Pay" / "Google Pay ending 4242" */
+function cardLabel(pay, lp) {
+  const pmd = pay.payment_method_data || {};
+  const hint = `${pmd.type || ''} ${pmd.name || ''}`.toLowerCase();
+  const last4 = pmd.last4 || lp.last4;
+  const ending = last4 ? ` ending ${last4}` : '';
+  if (/apple/.test(hint)) return `Apple Pay${ending}`;
+  if (/google/.test(hint)) return `Google Pay${ending}`;
+  const network =
+    /visa/.test(hint) ? 'Visa' :
+    /master/.test(hint) ? 'Mastercard' :
+    /amex|american_?express/.test(hint) ? 'Amex' :
+    lp.network || null;
+  if (network && last4) return `${network}${ending}`;
+  if (last4) return `Card${ending}`;
+  return '—';
+}
 
 /* Standalone annotations rendered OUTSIDE the client-site window. */
 function setOffstage(html) {
@@ -62,6 +83,7 @@ function fmtAmount(a) {
 }
 
 export function renderProcessing(title = 'Confirming payment…', sub = 'Waiting for Rapyd to confirm via webhook…') {
+  resetWide();
   setOffstage(null);
   host().innerHTML = `
     <div class="screen">
@@ -90,12 +112,12 @@ export function render3DS(url) {
 
 export function renderSuccess(event = {}) {
   set3DSWidth(false);
+  resetWide();
   const v = VERTICALS[state.vertical];
   const p = v.product;
   const pay = event.raw?.data || {};
   const lp = state.lastPayment || {};
   const reference = pay.merchant_reference_id || state.reference || '—';
-  const last4 = pay.payment_method_data?.last4 || lp.last4;
   host().innerHTML = `
     <div class="screen success">
       <div class="screen-badge ok">✓</div>
@@ -105,7 +127,7 @@ export function renderSuccess(event = {}) {
       <div class="screen-facts">
         <div><span>Payment</span><code>${event.payment_id || '—'}</code></div>
         <div><span>Reference</span><code>${reference}</code></div>
-        <div><span>Card</span><code>${last4 ? `•••• ${last4}` : '—'}</code></div>
+        <div><span>Card</span><code>${cardLabel(pay, lp)}</code></div>
         <div><span>Status</span><code>${event.status || 'CLO'}</code></div>
         <div><span>Confirmed by</span><code>${event.type || 'webhook'}</code></div>
       </div>
@@ -117,6 +139,7 @@ export function renderSuccess(event = {}) {
 
 export function renderError(event = {}) {
   set3DSWidth(false);
+  resetWide();
   setOffstage(null);
   const v = VERTICALS[state.vertical];
   host().innerHTML = `

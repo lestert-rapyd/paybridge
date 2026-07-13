@@ -17,29 +17,35 @@ const FAIL_STATUS = ['ERR', 'EXP', 'CAN', 'DEC'];
 let timer = null;
 let ref = null;
 let paymentId = null;
+let paymentIdAt = 0;    // when we learned the payment id — fallback timing keys off this
 let startedAt = 0;
 let configured = null;
 let fallbackDone = false;
 let fallbackStatus = null;
 let onTerminal = null;
-let terminalFired = false;
+let terminalSource = null; // null | 'fallback' | 'webhook'
 
 export function startWebhookWatch({ reference, payment_id, onTerminal: cb } = {}) {
   stopWebhookWatch();
   ref = reference;
   paymentId = payment_id || null;
+  paymentIdAt = payment_id ? Date.now() : 0;
   onTerminal = cb || null;
   startedAt = Date.now();
   configured = null;
   fallbackDone = false;
   fallbackStatus = null;
-  terminalFired = false;
+  terminalSource = null;
   render([]);
   poll();
   timer = setInterval(poll, 2500);
 }
 
-export function setWatchPaymentId(id) { if (id) paymentId = id; }
+export function setWatchPaymentId(id) {
+  if (!id) return;
+  if (!paymentId) paymentIdAt = Date.now(); // toolkit: payment exists only now
+  paymentId = id;
+}
 
 export function stopWebhookWatch() {
   if (timer) clearInterval(timer);
@@ -59,12 +65,14 @@ function classify(e) {
 }
 
 function maybeFireTerminal(events) {
-  if (terminalFired || !onTerminal) return;
+  if (terminalSource === 'webhook' || !onTerminal) return;
   const success = events.find(e => classify(e) === 'success');
   const failure = events.find(e => classify(e) === 'failure');
   const hit = success || failure;
   if (hit) {
-    terminalFired = true;
+    // Fires even after a poll-fallback confirmation — the webhook is the
+    // canonical signal, so it upgrades the screen ("Confirmed by …").
+    terminalSource = 'webhook';
     onTerminal(hit);
     stopWebhookWatch();
     render(events);
@@ -82,8 +90,11 @@ async function poll() {
 
   const elapsed = Date.now() - startedAt;
 
-  // Fallback: no webhook after 12s + we have a payment id → poll status once.
-  if (!events.length && !fallbackDone && paymentId && elapsed > 12000) {
+  // Fallback: no webhook 15s after the PAYMENT exists → poll status once.
+  // Timed from paymentIdAt, not watch start — the toolkit watcher starts at
+  // session creation, long before the customer finishes the iframe/3DS, and
+  // timing from startedAt made the fallback race (and beat) the real webhook.
+  if (!events.length && !fallbackDone && paymentId && paymentIdAt && Date.now() - paymentIdAt > 15000) {
     fallbackDone = true;
     try {
       const r = await fetch(`${BACKEND_URL}/api/retrieve-payment?id=${encodeURIComponent(paymentId)}&env=${state.env}`);
@@ -91,10 +102,11 @@ async function poll() {
       const p = j?.data;
       if (p) {
         fallbackStatus = { status: p.status, paid: p.paid, id: p.id };
-        if (!terminalFired && onTerminal && (p.status === 'CLO' ? p.paid : FAIL_STATUS.includes(p.status))) {
-          terminalFired = true;
+        if (!terminalSource && onTerminal && (p.status === 'CLO' ? p.paid : FAIL_STATUS.includes(p.status))) {
+          terminalSource = 'fallback';
           onTerminal({ type: '(status poll)', status: p.status, paid: p.paid, payment_id: p.id });
-          stopWebhookWatch();
+          // keep watching — the late webhook still lands in the panel and
+          // upgrades the confirmation via maybeFireTerminal()
         }
       }
     } catch { /* ignore */ }

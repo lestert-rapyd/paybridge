@@ -168,7 +168,9 @@ async function pay() {
     // snapshot for the success screen's bank-statement view (fx reserved
     // for when FX fields are configured in the demo)
     const digits = card.number.replace(/\D/g, '');
-    state.lastPayment = { descriptor: v.descriptor, amount: p.amount, currency: p.currency, last4: digits.slice(-4), fx: null };
+    const brand = detectBrand(card.number).brand; // 'VISA' | 'MASTERCARD' | ''
+    const network = brand ? brand[0] + brand.slice(1).toLowerCase() : null;
+    state.lastPayment = { descriptor: v.descriptor, amount: p.amount, currency: p.currency, last4: digits.slice(-4), network, fx: null };
   }
   sig = freshSig();
   sent = true;
