@@ -32,8 +32,9 @@ let tds = true;               // payment_method_options.3d_required
 let tdsFlow = 'iframe';       // iframe | redirect  (wait_on_payment_redirect)
 let payBtn = 'rapyd';         // rapyd | custom     (hide_submit_button)
 const custom = {
-  btnText: 'Pay Now',         // pay_button_text (max 16 chars)
+  btnText: 'Pay Now',         // pay_button_text (max 16 chars) — Rapyd's button
   btnColor: null,             // pay_button_color — null = vertical accent
+  ownText: 'Complete purchase', // label of the merchant's own (custom) button
   ap: { button_color: 'black', button_type: 'buy' },
   gp: { button_color: 'black', button_type: 'buy' },
 };
@@ -131,50 +132,52 @@ function selectEl(id, values, current) {
     `<option value="${o}" ${o === current ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
 }
 
+const APPLE_SVG = `<svg viewBox="0 0 384 512" width="12" height="12" fill="#fff" aria-hidden="true"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>`;
+const GOOGLE_SVG = `<svg viewBox="0 0 48 48" width="13" height="13" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>`;
+
+function row(label, param, control, attrs = '') {
+  return `
+    <div class="tkc-row" ${attrs}>
+      <div class="tkc-lab">${label}<code>${param}</code></div>
+      ${control}
+    </div>`;
+}
+
 function configPanelHTML() {
   return `
     <div class="tk-config" id="tk-config">
-      <div class="tkc-head"><span class="tkc-chev">▸</span><span class="tkc-name">toolkit.config</span><span class="tkc-hint">// iframe not yet mounted</span></div>
+      <div class="tkc-head"><span class="tkc-title">Toolkit config</span><span class="tkc-hint">updates the request →</span></div>
 
       <div class="tkc-sec">
-        <div class="tkc-com">// integration</div>
-        <div class="tkc-key">integration_mode</div>
-        ${seg('mode', [['embedded', 'full_toolkit'], ['wallets', 'wallet'], ['hosted', 'hosted']], mode)}
-      </div>
-
-      <div class="tkc-sec" id="tkc-3ds">
-        <div class="tkc-com">// 3d_secure</div>
-        <div class="tkc-row">
-          <span class="tkc-key">3d_required</span>
-          <label class="tkc-switch-wrap"><span class="tkc-bool" id="tkc-tds-val">${tds}</span>
-            <input type="checkbox" class="tkc-switch" id="tk-tds" ${tds ? 'checked' : ''} />
-          </label>
-        </div>
-        <div class="tkc-row" id="tkc-tdsflow">
-          <span class="tkc-key">wait_on_payment_redirect</span>
-          ${seg('tdsFlow', [['iframe', 'true · in iframe'], ['redirect', 'false · redirect']], tdsFlow)}
-        </div>
+        <div class="tkc-sec-label">Integration mode</div>
+        ${seg('mode', [['embedded', 'Full toolkit'], ['wallets', 'Wallet buttons'], ['hosted', 'Hosted page']], mode)}
       </div>
 
       <div class="tkc-sec" id="tkc-paybtn">
-        <div class="tkc-com">// payment_button</div>
-        <div class="tkc-key">hide_submit_button</div>
-        ${seg('payBtn', [['rapyd', "false · Rapyd's"], ['custom', 'true · custom']], payBtn)}
-        <div class="tkc-row">
-          <span class="tkc-key">pay_button_text <em>/ _color</em></span>
-          <span class="tkc-inline">
-            <input type="text" class="tkc-input" id="dc-btn-text" maxlength="16" value="${custom.btnText}" placeholder="Pay Now" />
-            <input type="color" class="tkc-color" id="dc-btn-color" value="${accent()}" title="pay_button_color" />
-          </span>
-        </div>
+        <div class="tkc-sec-label">Payment button</div>
+        ${row('Style', 'hide_submit_button', seg('payBtn', [['rapyd', "Rapyd's"], ['custom', 'Custom']], payBtn))}
+        ${row('Label', 'pay_button_text', `<input type="text" class="tkc-input" id="dc-btn-text" maxlength="16" value="${custom.btnText}" placeholder="Pay Now" />`, 'id="tkc-row-label"')}
+        ${row('Color', 'pay_button_color', `<input type="color" class="tkc-color" id="dc-btn-color" value="${accent()}" />`, 'id="tkc-row-color"')}
+        ${row('Button label', 'your own button · demo', `<input type="text" class="tkc-input" id="dc-own-text" value="${custom.ownText}" />`, 'id="tkc-row-own" hidden')}
+      </div>
+
+      <div class="tkc-sec" id="tkc-3ds">
+        <div class="tkc-sec-label">3-D Secure</div>
+        ${row('Require 3-D Secure', 'payment_method_options.3d_required',
+          `<label class="tkc-switch-wrap"><input type="checkbox" class="tkc-switch" id="tk-tds" ${tds ? 'checked' : ''} /></label>`)}
+        ${row('Challenge', 'wait_on_payment_redirect', seg('tdsFlow', [['iframe', 'In iframe'], ['redirect', 'Redirect']], tdsFlow), `id="tkc-row-challenge" ${tds ? '' : 'hidden'}`)}
       </div>
 
       <div class="tkc-sec" id="tkc-wallets">
-        <div class="tkc-com">// digital_wallets_buttons_customization</div>
-        <div class="tkc-key">apple_pay</div>
-        <div class="tkc-row selects">${selectEl('dc-ap-color', AP_COLORS, custom.ap.button_color)}${selectEl('dc-ap-type', AP_TYPES, custom.ap.button_type)}</div>
-        <div class="tkc-key">google_pay</div>
-        <div class="tkc-row selects">${selectEl('dc-gp-color', GP_COLORS, custom.gp.button_color)}${selectEl('dc-gp-type', GP_TYPES, custom.gp.button_type)}</div>
+        <div class="tkc-sec-label">Digital wallets<span class="tkc-sec-hint">digital_wallets_buttons_customization</span></div>
+        <div class="tkc-row">
+          <div class="tkc-wallet"><span class="dw-logo apple">${APPLE_SVG}</span>Apple Pay</div>
+          <span class="tkc-selects">${selectEl('dc-ap-color', AP_COLORS, custom.ap.button_color)}${selectEl('dc-ap-type', AP_TYPES, custom.ap.button_type)}</span>
+        </div>
+        <div class="tkc-row">
+          <div class="tkc-wallet"><span class="dw-logo google">${GOOGLE_SVG}</span>Google Pay</div>
+          <span class="tkc-selects">${selectEl('dc-gp-color', GP_COLORS, custom.gp.button_color)}${selectEl('dc-gp-type', GP_TYPES, custom.gp.button_type)}</span>
+        </div>
       </div>
 
       <button class="co-cta tkc-cta" id="tk-launch">${mode === 'hosted' ? 'Create session →' : 'Render toolkit →'}</button>
@@ -192,9 +195,15 @@ export function renderPageHTML() {
 function syncControlVisibility() {
   const hosted = mode === 'hosted';
   const wallets = mode === 'wallets';
-  $('#tkc-tdsflow')?.toggleAttribute('hidden', hosted);
+  const isCustom = payBtn === 'custom';
   $('#tkc-paybtn')?.toggleAttribute('hidden', hosted || wallets);
   $('#tkc-wallets')?.toggleAttribute('hidden', hosted);
+  // Custom style: Rapyd's label/color give way to the merchant button's own label
+  $('#tkc-row-label')?.toggleAttribute('hidden', isCustom);
+  $('#tkc-row-color')?.toggleAttribute('hidden', isCustom);
+  $('#tkc-row-own')?.toggleAttribute('hidden', !isCustom);
+  // Challenge placement only matters when a 3DS challenge can occur
+  $('#tkc-row-challenge')?.toggleAttribute('hidden', hosted || !tds);
   const launch = $('#tk-launch');
   if (launch) launch.textContent = hosted ? 'Create session →' : 'Render toolkit →';
 }
@@ -370,7 +379,7 @@ async function launch() {
       await loadToolkitScript();
       // The page shape stays put — the config panel swaps for the iframe.
       const ownBtn = payBtn === 'custom' && mode !== 'wallets'
-        ? `<button class="co-cta" id="tk-own-pay" style="background:${accent()}">${custom.btnText}</button>`
+        ? `<button class="co-cta" id="tk-own-pay" style="background:${accent()}">${custom.ownText}</button>`
         : '';
       area.innerHTML = `<div id="rapyd-checkout"></div>${ownBtn}`;
       $('#tk-own-pay')?.addEventListener('click', function () {
@@ -406,22 +415,23 @@ export function mount() {
     row.addEventListener('click', e => {
       const btn = e.target.closest('button[data-val]');
       if (!btn) return;
-      if (row.dataset.opt === 'mode') { mode = btn.dataset.val; syncControlVisibility(); }
+      if (row.dataset.opt === 'mode') mode = btn.dataset.val;
       if (row.dataset.opt === 'tdsFlow') tdsFlow = btn.dataset.val;
       if (row.dataset.opt === 'payBtn') payBtn = btn.dataset.val;
       row.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
+      syncControlVisibility();
       renderRequest();
     });
   });
 
   $('#tk-tds').addEventListener('change', e => {
     tds = e.target.checked;
-    const v = $('#tkc-tds-val');
-    if (v) v.textContent = tds;
+    syncControlVisibility();
     renderRequest();
   });
   $('#dc-btn-text').addEventListener('input', e => { custom.btnText = e.target.value || 'Pay Now'; renderRequest(); });
   $('#dc-btn-color').addEventListener('input', e => { custom.btnColor = e.target.value; renderRequest(); });
+  $('#dc-own-text').addEventListener('input', e => { custom.ownText = e.target.value || 'Complete purchase'; });
   const wire = (id, obj, key) => $(`#${id}`).addEventListener('change', e => { obj[key] = e.target.value; renderRequest(); });
   wire('dc-ap-color', custom.ap, 'button_color');
   wire('dc-ap-type', custom.ap, 'button_type');
