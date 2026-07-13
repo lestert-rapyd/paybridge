@@ -111,10 +111,13 @@ code { font-family: var(--font-mono); }
 /* Iframe-heavy flows (inline 3DS + Rapyd toolkit) render wider/taller than the
    470px checkout card, so let them expand to the pane and shed body padding.
    width:100% keeps the card within the pane on smaller screens. */
-.browser:has(.screen-3ds),
-.browser:has(#rapyd-checkout) { max-width: 640px; }
+.browser:has(.screen-3ds) { max-width: 640px; }
+.browser:has(.tk-checkout) { max-width: 980px; }
+.browser:has(.tk-modal-backdrop) { max-width: 760px; }
 .browser-body:has(.screen-3ds),
-.browser-body:has(#rapyd-checkout) { padding: 16px; }
+.browser-body:has(.tk-checkout) { padding: 18px; }
+.browser-body { position: relative; container-type: inline-size; }
+#rapyd-checkout { min-width: min(500px, 100%); }  /* toolkit needs ≥500px to lay out */
 #rapyd-checkout, #rapyd-checkout iframe { width: 100% !important; max-width: 100%; }
 .browser-chrome {
   display: flex; align-items: center; gap: 8px;
@@ -314,6 +317,49 @@ code { font-family: var(--font-mono); }
 .tkc-hint { display: block; font-size: 10.5px; color: var(--ink-3); margin-top: 2px; }
 
 #rapyd-checkout { min-height: 120px; }
+
+/* Scenario toggles (pre-launch) */
+.tk-opts { display: flex; flex-direction: column; gap: 7px; margin-bottom: 12px; }
+.tk-opt { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.tk-opt-label { font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.seg { display: flex; gap: 2px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 2px; }
+.seg button {
+  border: 0; background: transparent; color: var(--ink-3);
+  padding: 5px 11px; border-radius: 6px; font-size: 11.5px; font-weight: 600; transition: all .12s ease;
+}
+.seg button.active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.09); }
+
+/* Post-launch stage: Stripe-style two-panel — summary | toolkit (≥500px).
+   Both columns are fr-based so the summary grows with the card instead of
+   pinning to its minimum; the 170px floor keeps two columns on a 14" MBP. */
+.tk-checkout { display: grid; grid-template-columns: minmax(164px, 1fr) minmax(500px, 1fr); gap: 14px; align-items: start; }
+.tk-summary { border-right: 1px solid var(--line); padding-right: 16px; position: sticky; top: 0; }
+.tk-sum-merchant { font-family: var(--font-display); font-size: 19px; letter-spacing: .02em; margin-bottom: 4px; }
+.tk-summary .co-order { margin: 12px 0 10px; }
+.tk-paycol { min-width: 0; }
+.tk-paycol .co-cta { margin-top: 12px; }
+@container (max-width: 668px) {
+  .tk-checkout { grid-template-columns: 1fr; gap: 14px; }
+  .tk-summary { border-right: 0; padding-right: 0; position: static; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+}
+
+/* Modal presentation: merchant page stays behind a dimmed backdrop */
+.tk-modal-backdrop {
+  position: absolute; inset: 0; z-index: 5;
+  background: rgba(23, 20, 15, .45);
+  display: grid; place-items: center; padding: 16px;
+  animation: fadeIn .15s ease;
+}
+@keyframes fadeIn { from { opacity: 0; } }
+.tk-modal {
+  background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-lg);
+  width: min(560px, 100%); max-height: 100%; overflow-y: auto; padding: 14px 16px 16px;
+}
+.tk-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.tk-modal-head span { font-size: 12.5px; font-weight: 700; color: var(--ink-2); }
+.tk-modal-x { border: 0; background: var(--surface-2); color: var(--ink-3); width: 26px; height: 26px; border-radius: 8px; font-size: 12px; }
+.tk-modal-x:hover { color: var(--ink); }
+
 .tk-redirect { text-align: center; padding: 8px 0; }
 .tk-redirect-title { font-size: 15px; font-weight: 700; }
 .tk-redirect-desc { font-size: 12px; color: var(--ink-3); line-height: 1.5; margin: 7px 0 15px; }

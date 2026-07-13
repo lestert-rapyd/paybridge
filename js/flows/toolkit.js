@@ -2,8 +2,13 @@
    Checkout Toolkit flow (non-PCI model).
    Rapyd's hosted iframe collects the card. We make the real
    POST /v1/checkout call, render the toolkit (embedded / wallets) or
-   hand off (hosted). Right panel shows the real session + lifecycle
-   events; the left success/error screen is driven by the webhook.
+   hand off (hosted). Scenario toggles map 1:1 onto the client-side
+   RapydCheckoutToolkit config, mirrored live in the Request tab:
+     · Wallet buttons only  → digital_wallets_buttons_only
+     · Inline vs modal      → where the merchant page puts the container
+     · 3DS in iframe/popup  → wait_on_payment_redirect
+     · Toolkit vs own button→ hide_submit_button + CHECKOUT_SUBMIT_PAYMENT
+   The left success/error screen is driven by the terminal webhook.
    ───────────────────────────────────────────────────────────── */
 
 import { state } from '../state.js';
@@ -16,19 +21,29 @@ import { renderProcessing, renderSuccess, renderError } from '../screens.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
-let mode = 'embedded';
-let tds = true;
+let mode = 'embedded';        // embedded | wallets | hosted
+let tds = true;               // adds payment_method_options.3d_required
+let display = 'inline';       // inline | modal   (merchant-side presentation)
+let tdsFlow = 'iframe';       // iframe | popup   (wait_on_payment_redirect)
+let payBtn = 'toolkit';       // toolkit | own    (hide_submit_button)
 let events = [];
 let listenersBound = false;
 let lastSession = null;
 
 const TOOLKIT_MODES = [
-  { id: 'embedded', label: 'Embedded', hint: 'iframe on your page' },
-  { id: 'wallets',  label: 'Wallets',  hint: 'Apple / Google Pay' },
-  { id: 'hosted',   label: 'Hosted',   hint: 'full redirect' },
+  { id: 'embedded', label: 'Full toolkit', hint: 'card + wallets iframe' },
+  { id: 'wallets',  label: 'Wallet buttons', hint: 'AP / GP only' },
+  { id: 'hosted',   label: 'Hosted page',   hint: 'full redirect' },
 ];
 
-/* ── Request body ────────────────────────────────────────── */
+const SCENARIOS = [
+  { key: 'display', label: 'Display', options: [['inline', 'Inline'], ['modal', 'Modal']] },
+  { key: 'tdsFlow', label: '3-D Secure', options: [['iframe', 'In iframe'], ['popup', 'Popup']] },
+  { key: 'payBtn',  label: 'Pay button', options: [['toolkit', "Toolkit's"], ['own', "Merchant's"]] },
+];
+const SCENARIO_STATE = { display: () => display, tdsFlow: () => tdsFlow, payBtn: () => payBtn };
+
+/* ── Request body (server-side POST /v1/checkout) ────────── */
 function displayBody() {
   const v = VERTICALS[state.vertical];
   const p = v.product;
@@ -53,7 +68,23 @@ function postBody() {
   return { ...b, env: state.env };
 }
 
-/* ── Left panel markup ───────────────────────────────────── */
+/* ── Client-side toolkit config (mirrors the toggles) ────── */
+function toolkitConfig(checkoutId) {
+  return {
+    id: checkoutId || '(data.id from the response)',
+    pay_button_text: 'Pay Now',
+    pay_button_color: VERTICALS[state.vertical].dot,
+    hide_submit_button: payBtn === 'own',
+    digital_wallets_buttons_only: mode === 'wallets',
+    digital_wallets_include_methods: ['google_pay', 'apple_pay'],
+    wait_on_payment_confirmation: true,
+    wait_on_payment_redirect: tdsFlow === 'iframe',
+    close_on_complete: true,
+    page_type: 'collection',
+  };
+}
+
+/* ── Left panel markup (pre-launch) ──────────────────────── */
 export function renderPaymentHTML() {
   const v = VERTICALS[state.vertical];
   const p = v.product;
@@ -61,16 +92,86 @@ export function renderPaymentHTML() {
     <button class="tk-chip ${m.id === mode ? 'active' : ''}" data-mode="${m.id}">
       <span class="tkc-label">${m.label}</span><span class="tkc-hint">${m.hint}</span>
     </button>`).join('');
+  const toggles = SCENARIOS.map(s => `
+    <div class="tk-opt" data-opt="${s.key}">
+      <span class="tk-opt-label">${s.label}</span>
+      <div class="seg">${s.options.map(([val, label]) =>
+        `<button data-val="${val}" class="${SCENARIO_STATE[s.key]() === val ? 'active' : ''}">${label}</button>`).join('')}
+      </div>
+    </div>`).join('');
   return `
     <div id="tk-area">
       <div class="tk-note">Rapyd's secure iframe collects the card. Your page only creates the session and receives the outcome — <b>never the card data</b>.</div>
       <div class="tk-modes">${chips}</div>
+      <div class="tk-opts" id="tk-opts" ${mode === 'hosted' ? 'hidden' : ''}>${toggles}</div>
       <label class="co-tds">
         <input type="checkbox" id="tk-tds" ${tds ? 'checked' : ''} />
         <span>Require 3-D Secure</span>
       </label>
       <button class="co-cta" id="tk-launch">${v.cta} ${p.symbol}${p.amount}</button>
     </div>`;
+}
+
+/* ── Post-launch checkout stage (inline L/R or modal) ────── */
+function summaryHTML() {
+  const v = VERTICALS[state.vertical];
+  const p = v.product;
+  const [c1, c2] = p.thumb;
+  const glyph = { ecommerce: '🪑', crypto: '₿', gaming: '🎲' }[state.vertical] || '◆';
+  const feeLabel = p.delivery ? 'Delivery' : 'Fees';
+  return `
+    <aside class="tk-summary">
+      <div class="tk-sum-merchant">${v.merchant}</div>
+      <div class="co-order">
+        <div class="co-thumb" style="background:linear-gradient(135deg,${c1},${c2})">${glyph}</div>
+        <div class="co-order-info">
+          <div class="co-order-name">${p.name}</div>
+          <div class="co-order-desc">${p.desc}</div>
+        </div>
+      </div>
+      <div class="co-totals">
+        <div class="co-line"><span>Subtotal</span><span>${p.symbol}${p.amount}</span></div>
+        <div class="co-line"><span>${feeLabel}</span><span>${p.delivery || 'Free'}</span></div>
+        <div class="co-line total"><span>Total</span><span class="co-total-amt">${p.symbol}${p.amount}</span></div>
+      </div>
+    </aside>`;
+}
+
+function payColHTML() {
+  const v = VERTICALS[state.vertical];
+  const p = v.product;
+  const ownBtn = payBtn === 'own' && mode !== 'wallets'
+    ? `<button class="co-cta" id="tk-own-pay">${v.cta} ${p.symbol}${p.amount} — merchant button</button>`
+    : '';
+  return `<div class="tk-paycol"><div id="rapyd-checkout"></div>${ownBtn}</div>`;
+}
+
+function renderStage() {
+  const host = document.getElementById('checkout');
+  if (display === 'modal' && mode !== 'hosted') {
+    // Merchant page stays put behind a dimmed backdrop — the toolkit lives in a modal.
+    $('#tk-launch')?.setAttribute('disabled', '');
+    host.insertAdjacentHTML('beforeend', `
+      <div class="tk-modal-backdrop">
+        <div class="tk-modal">
+          <div class="tk-modal-head"><span>Checkout · ${VERTICALS[state.vertical].merchant}</span><button class="tk-modal-x" id="tk-modal-close">✕</button></div>
+          ${payColHTML()}
+        </div>
+      </div>`);
+    $('#tk-modal-close')?.addEventListener('click', () => {
+      host.querySelector('.tk-modal-backdrop')?.remove();
+      $('#tk-launch')?.removeAttribute('disabled');
+    });
+  } else {
+    // Inline: Stripe-style two-panel — order summary left, toolkit right.
+    host.innerHTML = `<div class="tk-checkout">${summaryHTML()}${payColHTML()}</div>`;
+  }
+  $('#tk-own-pay')?.addEventListener('click', () => {
+    const iframe = document.querySelector('#rapyd-checkout iframe');
+    if (!iframe) return;
+    iframe.contentWindow.postMessage({ type: 'CHECKOUT_SUBMIT_PAYMENT' }, '*');
+    logEvent('CHECKOUT_SUBMIT_PAYMENT', 'postMessage from merchant button', 'action');
+  });
 }
 
 /* ── Right: request / response ───────────────────────────── */
@@ -87,10 +188,14 @@ function headerRows() {
 function renderRequest() {
   const el = $('#panel-request');
   if (!el) return;
+  const tkSection = mode === 'hosted' ? '' : `
+    <div class="req-bodylabel" style="margin-top:18px"><p class="eng-label">Toolkit config · client-side JS</p><span class="hint">updates with the toggles</span></div>
+    ${renderJSONView(toolkitConfig(lastSession?.data?.id))}`;
   el.innerHTML = `
     ${headerRows()}
     <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">no card data — collected by the iframe</span></div>
-    ${renderJSONView(displayBody())}`;
+    ${renderJSONView(displayBody())}
+    ${tkSection}`;
 }
 
 function renderResponse() {
@@ -150,6 +255,12 @@ function bindToolkitEvents() {
     if (e.detail?.id) setWatchPaymentId(e.detail.id);
     logEvent('onCheckoutPaymentPending', `${e.detail?.status || ''} ${e.detail?.next_action || ''}`.trim(), 'action');
     setStatus('Pending · 3DS', 'action');
+    // Popup scenario: the merchant page handles the 3DS redirect itself.
+    const redirect = e.detail?.redirect_url;
+    if (tdsFlow === 'popup' && redirect) {
+      window.open(redirect, 'rapyd-3ds', 'width=480,height=720');
+      logEvent('3DS popup opened', 'window.open(redirect_url)', 'action');
+    }
   });
   window.addEventListener('onCheckoutPaymentSuccess', e => {
     if (e.detail?.id) setWatchPaymentId(e.detail.id);
@@ -165,20 +276,9 @@ function bindToolkitEvents() {
 }
 
 function renderToolkit(checkoutId) {
-  const config = {
-    id: checkoutId,
-    pay_button_text: 'Pay Now',
-    pay_button_color: VERTICALS[state.vertical].dot,
-    wait_on_payment_confirmation: true,
-    wait_on_payment_redirect: true,
-    close_on_complete: true,
-    page_type: 'collection',
-    digital_wallets_buttons_only: mode === 'wallets',
-    digital_wallets_include_methods: ['google_pay', 'apple_pay'],
-  };
   bindToolkitEvents();
   try {
-    const checkout = new RapydCheckoutToolkit(config);
+    const checkout = new RapydCheckoutToolkit(toolkitConfig(checkoutId));
     checkout.displayCheckout();
     logEvent('displayCheckout()', 'iframe rendering', '');
   } catch (err) {
@@ -201,6 +301,7 @@ async function launch() {
   try {
     const { data } = await createCheckoutSession(postBody());
     lastSession = data;
+    renderRequest(); // config now shows the real checkout id
     renderResponse();
     setActiveTab('response');
     const id = data?.data?.id;
@@ -220,7 +321,7 @@ async function launch() {
       $('#tk-open').addEventListener('click', () => window.open(redirect, '_blank', 'noopener'));
     } else {
       await loadToolkitScript();
-      $('#tk-area').innerHTML = `<div id="rapyd-checkout"></div>`;
+      renderStage();
       renderToolkit(id);
       setStatus('Toolkit rendered', 'processing');
     }
@@ -243,8 +344,25 @@ export function mount() {
     chip.addEventListener('click', () => {
       mode = chip.dataset.mode;
       $('#tk-area').querySelectorAll('.tk-chip').forEach(c => c.classList.toggle('active', c === chip));
+      $('#tk-opts').hidden = mode === 'hosted';
+      renderRequest();
     });
   });
+
+  $('#tk-area').querySelectorAll('.tk-opt').forEach(row => {
+    row.addEventListener('click', e => {
+      const btn = e.target.closest('button[data-val]');
+      if (!btn) return;
+      const val = btn.dataset.val;
+      const key = row.dataset.opt;
+      if (key === 'display') display = val;
+      if (key === 'tdsFlow') tdsFlow = val;
+      if (key === 'payBtn') payBtn = val;
+      row.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
+      renderRequest(); // toolkit config JSON syncs with the toggles
+    });
+  });
+
   $('#tk-tds').addEventListener('change', e => { tds = e.target.checked; renderRequest(); });
   $('#tk-launch').addEventListener('click', launch);
 }
