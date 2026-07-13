@@ -217,26 +217,32 @@ code { font-family: var(--font-mono); }
 .rtabs-meta { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--eng-faint); }
 
 .rpanels { flex: 1; min-height: 0; position: relative; }
-.rpanel { display: none; position: absolute; inset: 0; overflow-y: auto; padding: 18px; }
+/* Everything in the engine room reads as technical output → monospace. */
+.rpanel { display: none; position: absolute; inset: 0; overflow-y: auto; padding: 18px; font-family: var(--font-mono); }
 .rpanel.active { display: block; }
 
 /* ── Request panel ───────────────────────────────────────── */
-.req-headline { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
-.method-pill { font-family: var(--font-mono); font-size: 10.5px; font-weight: 700; padding: 3px 8px; border-radius: 5px; letter-spacing: .04em; }
-.method-pill.post { background: #f6c177; color: #3a2a0a; }
-.method-pill.get  { background: #86b4ff; color: #0a1f3a; }
-.req-path { font-family: var(--font-mono); font-size: 13.5px; font-weight: 700; color: var(--eng-text); word-break: break-all; }
-.req-host { font-family: var(--font-mono); font-size: 11px; color: var(--eng-faint); margin-bottom: 15px; }
+/* method + endpoint on one line, with room to breathe before HEADERS */
+.req-headline { display: flex; align-items: center; gap: 11px; margin-bottom: 22px; }
+.method-pill { font-family: var(--font-mono); font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 6px; letter-spacing: .06em; }
+/* colours mirror docs.rapyd.net: POST green · GET blue · DELETE red */
+.method-pill.post   { background: rgba(18,183,106,.14);  color: #3ddc8a; }
+.method-pill.get    { background: rgba(59,130,246,.16);  color: #6fa8ff; }
+.method-pill.put,
+.method-pill.patch  { background: rgba(245,158,11,.16);  color: #f0b45c; }
+.method-pill.delete { background: rgba(239,68,68,.16);   color: #ff8a8a; }
+.req-path { font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: var(--eng-text); word-break: break-all; }
 
-.eng-label { font-size: 10px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; color: var(--eng-faint); margin: 0 0 8px; }
+.eng-label { font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; color: var(--eng-faint); margin: 0 0 8px; }
 .req-headers {
-  display: flex; flex-direction: column; gap: 4px;
-  padding: 12px 13px; margin-bottom: 16px;
+  display: grid; grid-template-columns: max-content 1fr;
+  column-gap: 18px; row-gap: 7px; align-items: baseline;
+  padding: 13px 15px; margin-bottom: 18px;
   background: var(--eng-surface); border: 1px solid var(--eng-line); border-radius: var(--r-sm);
+  font-family: var(--font-mono); font-size: 11.5px;
 }
-.req-headers > div { font-family: var(--font-mono); font-size: 11px; }
-.req-headers .hk { color: var(--syn-key); }
-.req-headers .hv { color: var(--eng-muted); }
+.req-headers .hk { color: var(--syn-key); white-space: nowrap; }
+.req-headers .hv { color: var(--eng-muted); word-break: break-all; }
 .req-bodylabel { display: flex; align-items: baseline; gap: 8px; }
 .req-bodylabel .hint { font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--eng-faint); font-style: italic; }
 

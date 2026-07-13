@@ -75,14 +75,13 @@ export function renderPaymentHTML() {
 
 /* ── Right: request / response ───────────────────────────── */
 function headerRows() {
-  const host = state.env === 'live' ? 'api.rapyd.net' : 'sandboxapi.rapyd.net';
   return `
-    <div class="req-headline"><span class="method-pill post">POST</span><span class="req-path">https://${host}/v1/checkout</span></div>
+    <div class="req-headline"><span class="method-pill post">POST</span><span class="req-path">/v1/checkout</span></div>
     <p class="eng-label">Headers</p>
     <div class="req-headers">
-      <div><span class="hk">access_key:</span> <span class="hv">‹your access key›</span></div>
-      <div><span class="hk">signature:</span> <span class="hv">‹HMAC-SHA256 · signed on your server›</span></div>
-      <div><span class="hk">Content-Type:</span> <span class="hv">application/json</span></div>
+      <span class="hk">access_key</span><span class="hv">‹your access key›</span>
+      <span class="hk">signature</span><span class="hv">‹HMAC-SHA256 · signed on your server›</span>
+      <span class="hk">Content-Type</span><span class="hv">application/json</span>
     </div>`;
 }
 function renderRequest() {
@@ -123,7 +122,9 @@ function logEvent(name, detail = '', cls = '') {
 
 /* ── Terminal (webhook / fallback) → left screen ─────────── */
 function handleTerminal(ev) {
-  const success = (ev.status === 'CLO' && ev.paid) || /COMPLETED|SUCCEEDED|CAPTURE/.test((ev.type || '').toUpperCase());
+  // Terminal PAYMENT_COMPLETED/PAYMENT_FAILED webhook, or the poll fallback's
+  // status object (CLO+paid). Never confirmed off PAYMENT_SUCCEEDED.
+  const success = /COMPLETED|CAPTURE/.test((ev.type || '').toUpperCase()) || (ev.status === 'CLO' && ev.paid);
   if (success) { setStatus('Paid', 'ok'); renderSuccess(ev); }
   else { setStatus('Failed', 'error'); renderError(ev); }
 }

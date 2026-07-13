@@ -98,16 +98,15 @@ export function renderPaymentHTML() {
 
 /* ── Request panel ───────────────────────────────────────── */
 function headerRows() {
-  const host = state.env === 'live' ? 'api.rapyd.net' : 'sandboxapi.rapyd.net';
   return `
-    <div class="req-headline"><span class="method-pill post">POST</span><span class="req-path">https://${host}/v1/payments</span></div>
+    <div class="req-headline"><span class="method-pill post">POST</span><span class="req-path">/v1/payments</span></div>
     <p class="eng-label">Headers</p>
     <div class="req-headers">
-      <div><span class="hk">access_key:</span> <span class="hv">${ACCESS_KEY}</span></div>
-      <div><span class="hk">salt:</span> <span class="hv">${sig.salt}</span></div>
-      <div><span class="hk">timestamp:</span> <span class="hv">${sig.timestamp}</span></div>
-      <div><span class="hk">signature:</span> <span class="hv">${sig.signature}</span></div>
-      <div><span class="hk">Content-Type:</span> <span class="hv">application/json</span></div>
+      <span class="hk">access_key</span><span class="hv">${ACCESS_KEY}</span>
+      <span class="hk">salt</span><span class="hv">${sig.salt}</span>
+      <span class="hk">timestamp</span><span class="hv">${sig.timestamp}</span>
+      <span class="hk">signature</span><span class="hv">${sig.signature}</span>
+      <span class="hk">Content-Type</span><span class="hv">application/json</span>
     </div>`;
 }
 function renderRequest() {
@@ -147,7 +146,9 @@ function renderResponse(httpStatus, data) {
 
 /* ── Terminal (webhook or fallback) → left screen ────────── */
 function handleTerminal(ev) {
-  const success = (ev.status === 'CLO' && ev.paid) || /COMPLETED|SUCCEEDED|CAPTURE/.test((ev.type || '').toUpperCase());
+  // ev is a terminal PAYMENT_COMPLETED/PAYMENT_FAILED webhook, or the poll
+  // fallback's status object (CLO+paid) when no webhook was delivered.
+  const success = /COMPLETED|CAPTURE/.test((ev.type || '').toUpperCase()) || (ev.status === 'CLO' && ev.paid);
   if (success) { setStatus('Paid · CLO', 'ok'); renderSuccess(ev); toast('✅ Confirmed by webhook'); }
   else { setStatus('Failed', 'error'); renderError(ev); toast('❌ Payment failed', 'err'); }
 }

@@ -48,11 +48,13 @@ export function stopWebhookWatch() {
 
 function classify(e) {
   const type = (e.type || '').toUpperCase();
-  // terminal success: COMPLETED/CAPTURE, or a settled CLO+paid status (covers non-3DS SUCCEEDED)
-  if (/COMPLETED|CAPTURE/.test(type) || (e.status === 'CLO' && e.paid)) return 'success';
-  // terminal failure
-  if (/FAILED|DECLINED|EXPIRED|CANCEL/.test(type) || FAIL_STATUS.includes(e.status)) return 'failure';
-  // PAYMENT_SUCCEEDED / status ACT (carries redirect_url) = intermediate, NOT terminal
+  // Best practice: only the terminal webhook confirms an outcome.
+  // PAYMENT_COMPLETED (or a capture) = terminal success.
+  if (/COMPLETED|CAPTURE/.test(type)) return 'success';
+  // PAYMENT_FAILED / declined / expired / cancelled = terminal failure.
+  if (/FAILED|DECLINED|EXPIRED|CANCEL/.test(type)) return 'failure';
+  // PAYMENT_SUCCEEDED (even CLO+paid) and status ACT are intermediate — wait
+  // for the terminal event; never confirm off PAYMENT_SUCCEEDED.
   return 'pending';
 }
 
