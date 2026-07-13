@@ -167,7 +167,8 @@ async function pay() {
     const p = v.product;
     // snapshot for the success screen's bank-statement view (fx reserved
     // for when FX fields are configured in the demo)
-    state.lastPayment = { descriptor: v.descriptor, amount: p.amount, currency: p.currency, symbol: p.symbol, fx: null };
+    const digits = card.number.replace(/\D/g, '');
+    state.lastPayment = { descriptor: v.descriptor, amount: p.amount, currency: p.currency, last4: digits.slice(-4), fx: null };
   }
   sig = freshSig();
   sent = true;

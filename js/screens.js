@@ -10,6 +10,14 @@ import { state, setState } from './state.js';
 const host = () => document.getElementById('checkout');
 const set3DSWidth = (on) => document.querySelector('.browser')?.classList.toggle('wide-3ds', on);
 
+/* Standalone annotations rendered OUTSIDE the client-site window. */
+function setOffstage(html) {
+  const el = document.getElementById('offstage');
+  if (!el) return;
+  el.innerHTML = html || '';
+  el.hidden = !html;
+}
+
 /* ── Customer's bank-app view (statement descriptor) ─────────
    Reads the real payment from the terminal webhook when present,
    falling back to the request snapshot (state.lastPayment). Shows
@@ -28,9 +36,7 @@ function bankViewHTML(event) {
   const origAmount = pay.original_amount ?? pay.merchant_requested_amount ?? lp.fx?.amount;
   const isFx = !!(origCurrency && origCurrency !== currency && (fxRate ? fxRate !== 1 : true) && origAmount != null);
 
-  const main = isFx
-    ? `− ${currency} ${amount}`
-    : `− ${lp.symbol && currency === lp.currency ? lp.symbol : currency + ' '}${amount}`;
+  const main = `− ${amount} ${currency}`;
   const d = new Date();
   const when = `${d.getDate()} ${d.toLocaleString('en-GB', { month: 'short' })} ${d.getFullYear()}, ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
@@ -45,7 +51,7 @@ function bankViewHTML(event) {
         </div>
         <div class="bank-amt">
           <div class="bank-amt-main">${main}</div>
-          ${isFx ? `<div class="bank-amt-fx">− ${origCurrency} ${fmtAmount(origAmount)}</div>` : ''}
+          ${isFx ? `<div class="bank-amt-fx">− ${fmtAmount(origAmount)} ${origCurrency}</div>` : ''}
         </div>
       </div>
     </div>`;
@@ -56,6 +62,7 @@ function fmtAmount(a) {
 }
 
 export function renderProcessing(title = 'Confirming payment…', sub = 'Waiting for Rapyd to confirm via webhook…') {
+  setOffstage(null);
   host().innerHTML = `
     <div class="screen">
       <div class="screen-spinner"></div>
@@ -67,6 +74,7 @@ export function renderProcessing(title = 'Confirming payment…', sub = 'Waiting
 
 export function render3DS(url) {
   set3DSWidth(true);
+  setOffstage(null);
   host().innerHTML = `
     <div class="screen-3ds">
       <div class="screen-3ds-bar">
@@ -84,24 +92,32 @@ export function renderSuccess(event = {}) {
   set3DSWidth(false);
   const v = VERTICALS[state.vertical];
   const p = v.product;
+  const pay = event.raw?.data || {};
+  const lp = state.lastPayment || {};
+  const reference = pay.merchant_reference_id || state.reference || '—';
+  const last4 = pay.payment_method_data?.last4 || lp.last4;
   host().innerHTML = `
     <div class="screen success">
       <div class="screen-badge ok">✓</div>
       <div class="screen-title">${successVerb(v)} confirmed</div>
       <div class="screen-sub">${v.merchant} · <b>${p.symbol}${p.amount}</b> ${p.currency}</div>
+      ${v.successNote ? `<div class="screen-next">${v.successNote}</div>` : ''}
       <div class="screen-facts">
         <div><span>Payment</span><code>${event.payment_id || '—'}</code></div>
+        <div><span>Reference</span><code>${reference}</code></div>
+        <div><span>Card</span><code>${last4 ? `•••• ${last4}` : '—'}</code></div>
         <div><span>Status</span><code>${event.status || 'CLO'}</code></div>
         <div><span>Confirmed by</span><code>${event.type || 'webhook'}</code></div>
       </div>
-      ${bankViewHTML(event)}
       <button class="co-cta" id="screen-reset">Run another payment</button>
     </div>`;
+  setOffstage(bankViewHTML(event)); // bank-app view lives OUTSIDE the client window
   wireReset();
 }
 
 export function renderError(event = {}) {
   set3DSWidth(false);
+  setOffstage(null);
   const v = VERTICALS[state.vertical];
   host().innerHTML = `
     <div class="screen error">

@@ -64,6 +64,11 @@ function renderCheckout() {
       ${flow.renderPaymentHTML()}`;
   }
 
+  // Clear out-of-window annotations (bank-app view) on any re-render.
+  const off = $('#offstage');
+  off.innerHTML = '';
+  off.hidden = true;
+
   // Optional SE controls deck outside the fake client site (unused by
   // current flows — toolkit config lives inside its page).
   const controls = $('#demo-controls');

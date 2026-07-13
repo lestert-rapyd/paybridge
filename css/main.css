@@ -473,8 +473,19 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .screen-facts code { font-family: var(--font-mono); font-size: 11px; color: var(--ink); background: var(--surface-2); padding: 2px 7px; border-radius: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .screen .co-cta { margin-top: 8px; }
 
-/* customer's bank-app view on the success screen */
-.bank-view { width: 100%; margin: 12px 0 4px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 16px; padding: 10px; text-align: left; }
+/* next-step callout on the success screen */
+.screen-next {
+  font-size: 12.5px; color: var(--ink-2); line-height: 1.55;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md);
+  padding: 10px 14px; margin-top: 4px; max-width: 360px;
+}
+
+/* out-of-window annotations below the client site */
+.offstage { width: 100%; max-width: 470px; margin: 12px auto 0; }
+.browser.wide-tk ~ .offstage { max-width: 980px; }
+
+/* customer's bank-app view (standalone, outside the window) */
+.bank-view { width: 100%; background: var(--surface-2); border: 1px solid var(--line); border-radius: 16px; padding: 10px; text-align: left; }
 .bank-view-label { font-size: 9.5px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; color: var(--ink-3); margin: 1px 2px 8px; }
 .bank-view-label code { font-family: var(--font-mono); font-size: 9.5px; color: var(--accent); text-transform: none; letter-spacing: 0; }
 .bank-card {

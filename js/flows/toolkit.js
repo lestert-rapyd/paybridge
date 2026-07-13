@@ -338,8 +338,8 @@ async function launch() {
     const v = VERTICALS[state.vertical];
     const p = v.product;
     // snapshot for the success screen's bank-statement view (fx reserved
-    // for when FX fields are configured in the demo)
-    state.lastPayment = { descriptor: v.descriptor, amount: p.amount, currency: p.currency, symbol: p.symbol, fx: null };
+    // for when FX fields are configured in the demo; last4 arrives via webhook)
+    state.lastPayment = { descriptor: v.descriptor, amount: p.amount, currency: p.currency, last4: null, fx: null };
   }
   renderRequest();
   setActiveTab('request');
