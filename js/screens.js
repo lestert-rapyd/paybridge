@@ -108,7 +108,7 @@ export function render3DS(url) {
           <div class="screen-3ds-sub">Complete the challenge — then we wait for the outcome webhook.</div>
         </div>
       </div>
-      <div class="tds-wrap"><iframe class="tds-frame" src="${url}" title="3-D Secure challenge"></iframe></div>
+      <iframe class="tds-frame" src="${url}" title="3-D Secure challenge"></iframe>
     </div>`;
 }
 
