@@ -570,6 +570,9 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .rise-6 { animation: cs-rise .5s ease-out .48s both; }
 
 .pane-left { background: #e9e6df; font-family: 'Hanken Grotesk', var(--font-sans), sans-serif; }
+/* Never flex-shrink the card/annotations: a compressed card clips its own
+   content via overflow:hidden instead of letting the pane scroll. */
+.pane-left > * { flex-shrink: 0; }
 .pane-left .browser {
   border: 0; border-radius: 24px;
   box-shadow: 0 1px 2px rgba(30,20,10,.05), 0 24px 60px -20px rgba(30,20,10,.22);
@@ -587,9 +590,13 @@ details[open] .wh-chev { transform: rotate(90deg); }
   font-size: 11px; font-weight: 600; letter-spacing: .06em; color: #8a857b;
   background: transparent; border: 1px solid #e3e0d9; border-radius: 8px; padding: 7px 11px;
 }
-.browser-body { padding: 30px 32px 32px; }
+.browser-body { padding: 26px 30px 28px; }
 .browser.wide-tk .browser-body { padding: 0; }
-.browser.wide-3ds .browser-body { padding: 26px 28px 32px; }
+/* 3DS: slimmer padding + wider card so the ~560px simulator fits the frame */
+.browser.wide-3ds { max-width: 680px; }
+.browser.wide-3ds .browser-body { padding: 20px 22px 24px; }
+.tds-wrap { padding: 12px; }
+.tds-frame { height: clamp(480px, calc(100vh - 350px), 820px); }
 
 /* checkout (PCI flow) */
 .co-merchant { font-family: inherit; font-size: 27px; font-weight: 800; letter-spacing: -.01em; color: #191714; text-transform: uppercase; }
@@ -608,8 +615,10 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .co-paylabel .lbl { font-size: 11px; letter-spacing: .11em; color: #a8a297; }
 .use-test { font-size: 13px; font-weight: 600; }
 .co-field { margin-bottom: 0; }
-.co-field label { font-size: 13px; font-weight: 600; color: #3f3b34; margin: 16px 0 7px; }
+.co-field label { font-size: 13px; font-weight: 600; color: #3f3b34; margin: 13px 0 7px; }
 .co-row { gap: 14px; }
+/* flex min-width:auto would let the inputs' intrinsic width overflow the card */
+.co-row .co-field { min-width: 0; }
 .co-input { height: 52px; padding: 0 16px; border: 1.5px solid #e6e2da; border-radius: 12px; }
 .co-input:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
 .co-input input { font-family: var(--font-mono); font-size: 15px; color: #211e19; }
