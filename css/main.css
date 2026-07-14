@@ -592,10 +592,13 @@ details[open] .wh-chev { transform: rotate(90deg); }
 }
 .browser-body { padding: 26px 30px 28px; }
 .browser.wide-tk .browser-body { padding: 0; }
-/* 3DS: card wide enough for the ~540px simulator, iframe centered, no boxes */
+/* 3DS: the simulator page needs a ≥610px viewport to centre its ~545px card,
+   so the iframe runs the full card width edge-to-edge — the simulator's own
+   page margins do the framing. */
 .browser.wide-3ds { max-width: 680px; }
-.browser.wide-3ds .browser-body { padding: 20px 22px 16px; }
-.tds-frame { height: clamp(420px, calc(100vh - 380px), 540px); }
+.browser.wide-3ds .browser-body { padding: 20px 0 10px; }
+.browser.wide-3ds .screen-3ds-bar { padding: 0 22px 16px; }
+.tds-frame { height: clamp(380px, calc(100vh - 400px), 460px); }
 
 /* checkout (PCI flow) */
 .co-merchant { font-family: inherit; font-size: 27px; font-weight: 800; letter-spacing: -.01em; color: #191714; text-transform: uppercase; }
@@ -702,9 +705,9 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .tds-ico { width: 34px; height: 34px; flex: none; border-radius: 9px; background: #f4f2ee; display: grid; place-items: center; }
 .screen-3ds-title { font-size: 16px; font-weight: 700; color: #191714; }
 .screen-3ds-sub { font-size: 13.5px; color: #94908a; line-height: 1.4; }
-/* simulator rendered directly — no wrapper boxes; iframe sized to the
-   simulator's natural width (~540px) and centered in the card */
-.tds-frame { border: 0; border-radius: 0; width: min(600px, 100%); margin: 8px auto 0; }
+/* simulator rendered directly — no wrapper boxes; full-bleed iframe, the
+   simulator page centres its own card within it */
+.tds-frame { border: 0; border-radius: 0; width: 100%; margin: 4px auto 0; }
 
 /* toolkit stage: white summary | dark config panel */
 .tk-summary { background: transparent; border-right: 1px solid #f0eee9; padding: 26px 26px 22px; }
