@@ -57,7 +57,9 @@ function displayBody() {
     amount: Number(p.amount),
     capture: true,
     currency: p.currency,
-    country: p.country,
+    // demo corridor: everything flows through DE regardless of vertical skin
+    // (US/MT aren't enabled on this sandbox MID and fail the session)
+    country: 'DE',
     description: p.name,
     statement_descriptor: v.descriptor,
     merchant_reference_id: state.reference || '(assigned on launch)',

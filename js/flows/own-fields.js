@@ -54,6 +54,9 @@ function displayBody() {
     },
     statement_descriptor: v.descriptor,
     merchant_reference_id: state.reference || '(assigned on submit)',
+    // post-ACS redirect targets (the webhook remains the fulfilment trigger)
+    complete_payment_url: 'https://rapydtoolkit.com/complete',
+    error_payment_url: 'https://rapydtoolkit.com/cancel',
   };
   if (tds) body.payment_method_options = { '3d_required': true };
   return body;
