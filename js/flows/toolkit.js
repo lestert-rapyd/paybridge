@@ -24,6 +24,7 @@ import { renderJSONView } from '../json-view.js';
 import { setActiveTab, setStatus } from '../ui.js';
 import { startWebhookWatch, setWatchPaymentId } from '../webhooks.js';
 import { renderProcessing, renderSuccess, renderError } from '../screens.js';
+import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -221,27 +222,21 @@ function syncControlVisibility() {
 }
 
 /* ── Right: request / response / console ─────────────────── */
-function headerRows() {
-  return `
-    <div class="req-headline"><span class="method-pill post">POST</span><span class="req-path">/v1/checkout</span></div>
-    <p class="eng-label">Headers</p>
-    <div class="req-headers">
-      <span class="hk">access_key</span><span class="hv">‹your access key›</span>
-      <span class="hk">signature</span><span class="hv">‹HMAC-SHA256 · signed on your server›</span>
-      <span class="hk">Content-Type</span><span class="hv">application/json</span>
-    </div>`;
-}
 function renderRequest() {
   const el = $('#panel-request');
   if (!el) return;
+  const st = newSaltTimestamp();
+  const body = displayBody();
   const tkSection = mode === 'hosted' ? '' : `
     <div class="req-bodylabel" style="margin-top:18px"><p class="eng-label">Toolkit config · client-side JS</p><span class="hint">updates with toolkit.config on the left</span></div>
     ${renderJSONView(toolkitConfig(lastSession?.data?.id))}`;
   el.innerHTML = `
-    ${headerRows()}
+    <div class="req-headline"><span class="method-pill post">POST</span><span class="req-path">/v1/checkout</span></div>
+    ${headersHTML(st)}
     <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">no card data — collected by the iframe</span></div>
-    ${renderJSONView(displayBody())}
+    ${renderJSONView(body)}
     ${tkSection}`;
+  fillSignature(el, 'post', '/v1/checkout', st, body); // live — recomputes with the body
 }
 
 function renderResponse() {

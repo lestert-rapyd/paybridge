@@ -266,8 +266,12 @@ code { font-family: var(--font-mono); }
 .jsonv-gutter span { display: block; }
 .jsonv-body { flex: 1; min-width: 0; overflow-x: auto; padding: 11px 13px; }
 .jsonv-line { white-space: pre; color: var(--eng-text); }
-.jv { border-radius: 3px; transition: background .12s ease, box-shadow .12s ease; }
-.jv.sync-hit { background: var(--sync-hl); box-shadow: inset 3px 0 0 var(--sync-edge), 0 0 0 1px rgba(246,193,119,.3); }
+/* full-row field↔JSON highlight, Claude Code style: tinted line + coloured
+   gutter number. The body row bleeds edge-to-edge via negative margins. */
+.jsonv-line { transition: background .12s ease; margin: 0 -13px; padding: 0 13px; }
+.jsonv-line.sync-hit { background: var(--sync-hl); box-shadow: inset 3px 0 0 var(--sync-edge); }
+.jsonv-gutter span { transition: background .12s ease, color .12s ease; margin: 0 -9px 0 -12px; padding: 0 9px 0 12px; }
+.jsonv-gutter span.sync-hit { background: var(--sync-hl); color: var(--sync-edge); font-weight: 700; }
 .jv-empty { color: var(--eng-faint); }
 
 /* ── Empty / sending states ──────────────────────────────── */

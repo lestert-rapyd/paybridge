@@ -17,6 +17,7 @@ import {
   FIELD_MAP, detectBrand,
   formatNumber, formatExpiry, parseExpiry,
 } from '../sync.js';
+import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -24,13 +25,6 @@ const card = { number: '', expiry: '', cvv: '', name: '' };
 let tds = false;
 let focusedId = null;
 let sent = false;
-
-const ACCESS_KEY = 'rak_' + randHex(20).toUpperCase();
-let sig = freshSig();
-
-function randHex(n) { let s = ''; for (let i = 0; i < n; i++) s += '0123456789abcdef'[Math.floor(Math.random() * 16)]; return s; }
-function randB64(n) { const c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'; let s = ''; for (let i = 0; i < n; i++) s += c[Math.floor(Math.random() * c.length)]; return s; }
-function freshSig() { return { salt: randHex(12), timestamp: Math.floor(Date.now() / 1000).toString(), signature: randB64(43) + '=' }; }
 
 /* ── Request bodies ──────────────────────────────────────── */
 function displayBody() {
@@ -54,9 +48,9 @@ function displayBody() {
     },
     statement_descriptor: v.descriptor,
     merchant_reference_id: state.reference || '(assigned on submit)',
-    // post-ACS redirect targets (the webhook remains the fulfilment trigger)
-    complete_payment_url: 'https://rapydtoolkit.com/complete',
-    error_payment_url: 'https://rapydtoolkit.com/cancel',
+    // NO complete/error_payment_url here: those are for full-redirect flows.
+    // With the embedded 3DS iframe they'd render inside the frame after the
+    // ACS and flash before the webhook-driven success screen takes over.
   };
   if (tds) body.payment_method_options = { '3d_required': true };
   return body;
@@ -102,25 +96,17 @@ export function renderPaymentHTML() {
 }
 
 /* ── Request panel ───────────────────────────────────────── */
-function headerRows() {
-  return `
-    <div class="req-headline"><span class="method-pill post">POST</span><span class="req-path">/v1/payments</span></div>
-    <p class="eng-label">Headers</p>
-    <div class="req-headers">
-      <span class="hk">access_key</span><span class="hv">${ACCESS_KEY}</span>
-      <span class="hk">salt</span><span class="hv">${sig.salt}</span>
-      <span class="hk">timestamp</span><span class="hv">${sig.timestamp}</span>
-      <span class="hk">signature</span><span class="hv">${sig.signature}</span>
-      <span class="hk">Content-Type</span><span class="hv">application/json</span>
-    </div>`;
-}
 function renderRequest() {
   const el = $('#panel-request');
   if (!el) return;
+  const st = newSaltTimestamp();
+  const body = displayBody();
   el.innerHTML = `
-    ${headerRows()}
+    <div class="req-headline"><span class="method-pill post">POST</span><span class="req-path">/v1/payments</span></div>
+    ${headersHTML(st)}
     <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${sent ? 'signed &amp; sent' : 'updates as you type'}</span></div>
-    <div id="req-json">${renderJSONView(displayBody())}</div>`;
+    <div id="req-json">${renderJSONView(body)}</div>`;
+  fillSignature(el, 'post', '/v1/payments', st, body); // live — recomputes with the body
   applyHighlight();
 }
 function applyHighlight() {
@@ -175,9 +161,8 @@ async function pay() {
     const network = brand ? brand[0] + brand.slice(1).toLowerCase() : null;
     state.lastPayment = { descriptor: v.descriptor, amount: p.amount, currency: p.currency, last4: digits.slice(-4), network, fx: null };
   }
-  sig = freshSig();
   sent = true;
-  renderRequest();
+  renderRequest(); // fresh salt/timestamp/signature for the send
   setActiveTab('response');
   renderResponseSending();
 

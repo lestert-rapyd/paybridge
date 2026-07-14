@@ -59,12 +59,17 @@ export function renderJSONView(obj) {
   return `<div class="jsonv"><div class="jsonv-gutter">${gutter}</div><div class="jsonv-body">${body}</div></div>`;
 }
 
-/** Add .sync-hit to the value spans at the given paths, clear the rest. */
+/** Highlight the FULL row (line + gutter number) for the given paths —
+    Claude Code style — clearing any previous hits. */
 export function highlightPaths(container, paths = []) {
   if (!container) return;
-  container.querySelectorAll('.jv.sync-hit').forEach(e => e.classList.remove('sync-hit'));
+  container.querySelectorAll('.sync-hit').forEach(e => e.classList.remove('sync-hit'));
   paths.forEach(p => {
     const el = container.querySelector(`.jv[data-path="${CSS.escape(p)}"]`);
-    if (el) el.classList.add('sync-hit');
+    const line = el?.closest('.jsonv-line');
+    if (!line) return;
+    line.classList.add('sync-hit');
+    const idx = [...line.parentElement.children].indexOf(line);
+    line.closest('.jsonv')?.querySelector('.jsonv-gutter')?.children[idx]?.classList.add('sync-hit');
   });
 }
