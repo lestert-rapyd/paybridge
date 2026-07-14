@@ -94,19 +94,53 @@ export function renderProcessing(title = 'Confirming payment…', sub = 'Waiting
     </div>`;
 }
 
+const LOCK_SVG = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#5b564d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2.5"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path><circle cx="12" cy="15.5" r="1.3" fill="#5b564d"></circle></svg>`;
+
 export function render3DS(url) {
   set3DSWidth(true);
   setOffstage(null);
   host().innerHTML = `
     <div class="screen-3ds">
       <div class="screen-3ds-bar">
-        <span class="tds-lock">🔐</span>
+        <span class="tds-ico">${LOCK_SVG}</span>
         <div>
           <div class="screen-3ds-title">3-D Secure verification</div>
           <div class="screen-3ds-sub">Complete the challenge — then we wait for the outcome webhook.</div>
         </div>
       </div>
-      <iframe class="tds-frame" src="${url}" title="3-D Secure challenge"></iframe>
+      <div class="tds-wrap"><iframe class="tds-frame" src="${url}" title="3-D Secure challenge"></iframe></div>
+    </div>`;
+}
+
+/* facts rows: click any value to copy it ("Copied ✓" feedback) */
+function factsHTML(rows) {
+  return `<div class="screen-facts rise-4">` + rows
+    .filter(([, value]) => value != null && value !== '')
+    .map(([label, value, danger]) =>
+      `<div><span>${label}</span><code ${danger ? 'class="danger"' : ''} data-copy="${value}" title="Click to copy">${value}</code></div>`)
+    .join('') + `</div>`;
+}
+function wireCopy() {
+  host().querySelectorAll('[data-copy]').forEach(el => {
+    el.addEventListener('click', () => {
+      try { navigator.clipboard?.writeText(el.dataset.copy); } catch { /* clipboard unavailable */ }
+      const orig = el.textContent;
+      el.textContent = 'Copied ✓';
+      setTimeout(() => { el.textContent = orig; }, 1400);
+    });
+  });
+}
+
+const CHECK_SVG = `<svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg>`;
+const CROSS_SVG = `<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M7 7l10 10"></path><path d="M17 7L7 17"></path></svg>`;
+
+function badgeHTML(kind) {
+  const err = kind === 'err';
+  return `
+    <div class="cs-badge-wrap">
+      <span class="cs-ring ${err ? 'err' : ''}"></span>
+      <span class="cs-glow ${err ? 'err' : ''}"></span>
+      <span class="cs-badge ${err ? 'err' : 'ok'}">${err ? CROSS_SVG : CHECK_SVG}</span>
     </div>`;
 }
 
@@ -120,20 +154,21 @@ export function renderSuccess(event = {}) {
   const reference = pay.merchant_reference_id || state.reference || '—';
   host().innerHTML = `
     <div class="screen success">
-      <div class="screen-badge ok">✓</div>
-      <div class="screen-title">${successVerb(v)} confirmed</div>
-      <div class="screen-sub">${v.merchant} · <b>${p.symbol}${p.amount}</b> ${p.currency}</div>
-      ${v.successNote ? `<div class="screen-next">${v.successNote}</div>` : ''}
-      <div class="screen-facts">
-        <div><span>Payment</span><code>${event.payment_id || '—'}</code></div>
-        <div><span>Reference</span><code>${reference}</code></div>
-        <div><span>Card</span><code>${cardLabel(pay, lp)}</code></div>
-        <div><span>Status</span><code>${event.status || 'CLO'}</code></div>
-        <div><span>Confirmed by</span><code>${event.type || 'webhook'}</code></div>
-      </div>
-      <button class="co-cta" id="screen-reset">Run another payment</button>
+      ${badgeHTML('ok')}
+      <div class="screen-title rise-1">${successVerb(v)} confirmed</div>
+      <div class="screen-sub rise-2">${v.merchant} · <strong>${p.amount} ${p.currency}</strong></div>
+      ${v.successNote ? `<div class="screen-next rise-3">${v.successNote}</div>` : ''}
+      ${factsHTML([
+        ['Payment', event.payment_id || '—'],
+        ['Reference', reference],
+        ['Card', cardLabel(pay, lp)],
+        ['Status', event.status || 'CLO'],
+        ['Confirmed by', event.type || 'webhook'],
+      ])}
+      <button class="co-cta rise-5" id="screen-reset">Run another payment</button>
     </div>`;
   setOffstage(bankViewHTML(event)); // bank-app view lives OUTSIDE the client window
+  wireCopy();
   wireReset();
 }
 
@@ -142,19 +177,33 @@ export function renderError(event = {}) {
   resetWide();
   setOffstage(null);
   const v = VERTICALS[state.vertical];
+  const p = v.product;
+  const pay = event.raw?.data || {};
+  const lp = state.lastPayment || {};
+  const declineCode = pay.failure_code || event.code || null;
+  const note = event.message && event.message !== 'The payment did not complete.'
+    ? event.message
+    : 'Your card was declined — no charge was made. Try a different card, or contact your bank if it keeps happening.';
   host().innerHTML = `
     <div class="screen error">
-      <div class="screen-badge err">✕</div>
-      <div class="screen-title">Payment ${event.status || 'failed'}</div>
-      <div class="screen-sub">${event.message || 'The payment did not complete.'}</div>
-      <div class="screen-facts">
-        <div><span>Payment</span><code>${event.payment_id || '—'}</code></div>
-        <div><span>Status</span><code>${event.status || 'ERR'}</code></div>
-        <div><span>Signalled by</span><code>${event.type || 'webhook'}</code></div>
-      </div>
-      <button class="co-cta" id="screen-reset">Try again</button>
+      ${badgeHTML('err')}
+      <div class="screen-title rise-1">Payment declined</div>
+      <div class="screen-sub rise-2">${v.merchant} · <strong>${p.amount} ${p.currency}</strong></div>
+      <div class="screen-next err rise-3">${note}</div>
+      ${factsHTML([
+        ['Payment', event.payment_id || '—'],
+        ['Reference', pay.merchant_reference_id || state.reference || '—'],
+        ['Card', cardLabel(pay, lp)],
+        ['Status', event.status || 'ERR', true],
+        ['Decline code', declineCode, true],
+        ['Signalled by', event.type || 'webhook'],
+      ])}
+      <button class="co-cta rise-5" id="screen-reset">Try a different card</button>
+      <button class="cs-secondary rise-6" id="screen-back">Back to store</button>
     </div>`;
+  wireCopy();
   wireReset();
+  document.getElementById('screen-back')?.addEventListener('click', () => setState({}));
 }
 
 function successVerb(v) {

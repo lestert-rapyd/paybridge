@@ -42,8 +42,8 @@ function renderCheckout() {
     host.innerHTML = flow.renderPageHTML();
   } else {
     host.innerHTML = `
-      <div class="co-merchant">${v.merchant.toUpperCase()}</div>
-      <div class="co-tagline">${v.headline}</div>
+      <div class="co-merchant">${v.merchant}</div>
+      <div class="co-tagline"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#a8a297" stroke-width="2.6"><rect x="4" y="10" width="16" height="11" rx="2.5"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>${v.headline.toUpperCase()}</div>
 
       <div class="co-order">
         <div class="co-thumb" style="background:linear-gradient(135deg,${c1},${c2})">${THUMB_GLYPH[state.vertical]}</div>
@@ -56,7 +56,7 @@ function renderCheckout() {
 
       <div class="co-totals">
         <div class="co-line"><span>Subtotal</span><span>${p.symbol}${p.amount}</span></div>
-        <div class="co-line"><span>${feeLabel}</span><span>${feeValue}</span></div>
+        <div class="co-line"><span>${feeLabel}</span><span class="${feeValue === 'Free' ? 'free' : ''}">${feeValue}</span></div>
         <div class="co-line total"><span>Total</span><span class="co-total-amt">${p.symbol}${p.amount}</span></div>
       </div>
 

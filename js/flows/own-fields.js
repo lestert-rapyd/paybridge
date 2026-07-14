@@ -72,7 +72,7 @@ export function renderPaymentHTML() {
     <div class="co-field">
       <label>Card number</label>
       <div class="co-input">
-        <span class="field-ico">💳</span>
+        <span class="field-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="2" y="5" width="20" height="14" rx="2.5" fill="#e8e3f7"></rect><rect x="2" y="8" width="20" height="3" fill="#7c3aed"></rect><rect x="5" y="14" width="6" height="2" rx="1" fill="#b8a9e6"></rect></svg></span>
         <input id="f-number" inputmode="numeric" autocomplete="cc-number" placeholder="4111 1111 1111 1111" maxlength="23" />
         <span class="card-brand" id="card-brand"></span>
       </div>
