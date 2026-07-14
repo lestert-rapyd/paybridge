@@ -115,8 +115,9 @@ code { font-family: var(--font-mono); }
    container-type boundary on .browser-body. */
 .browser.wide-3ds { max-width: 640px; }
 .browser.wide-tk { max-width: 980px; }
-.browser.wide-3ds .browser-body,
-.browser.wide-tk .browser-body { padding: 18px; }
+.browser.wide-3ds .browser-body { padding: 18px; }
+/* toolkit stage runs edge-to-edge: the two-tone columns own their padding */
+.browser.wide-tk .browser-body { padding: 0; }
 .browser-body { position: relative; container-type: inline-size; }
 #rapyd-checkout { min-width: min(500px, 100%); }  /* toolkit needs ≥500px to lay out */
 #rapyd-checkout, #rapyd-checkout iframe { width: 100% !important; max-width: 100%; }
@@ -375,18 +376,42 @@ code { font-family: var(--font-mono); }
 }
 .tkc-cta { margin-top: 16px; }
 
-/* Post-launch stage: Stripe-style two-panel — summary | toolkit (≥500px).
-   Both columns are fr-based so the summary grows with the card instead of
-   pinning to its minimum; the 170px floor keeps two columns on a 14" MBP. */
-.tk-checkout { display: grid; grid-template-columns: minmax(164px, 1fr) minmax(500px, 1fr); gap: 14px; align-items: start; }
-.tk-summary { border-right: 1px solid var(--line); padding-right: 16px; position: sticky; top: 0; }
-.tk-sum-merchant { font-family: var(--font-display); font-size: 19px; letter-spacing: .02em; margin-bottom: 4px; }
-.tk-summary .co-order { margin: 12px 0 10px; }
-.tk-paycol { min-width: 0; }
+/* Two-tone checkout stage: tinted merchant summary | white Rapyd column.
+   Columns stretch full height so the tone fills the card. Both tracks are
+   fr-based so they share growth; minimums fit a 14" MBP (188+532=720). */
+.tk-checkout { display: grid; grid-template-columns: minmax(186px, 2fr) minmax(532px, 4.5fr); gap: 0; align-items: stretch; min-height: 540px; }
+.tk-summary {
+  display: flex; flex-direction: column; min-width: 0;
+  background: var(--surface-2); border-right: 1px solid var(--line);
+  padding: 20px 18px;
+}
+.tk-brand { display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-size: 19px; letter-spacing: .02em; }
+.tk-brand-mark {
+  width: 30px; height: 30px; border-radius: 9px; flex: none;
+  display: grid; place-items: center; color: #fff;
+  font-family: var(--font-display); font-size: 15px;
+}
+.tk-sum-label { font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); margin: 16px 0 9px; }
+.tk-summary .co-order { background: var(--surface); margin: 0 0 12px; }
+.co-line .free { color: #129e63; font-weight: 600; }
+.tk-secure { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--line); }
+.tk-secure-head { font-size: 12px; font-weight: 700; }
+.tk-secure p { font-size: 11px; color: var(--ink-3); line-height: 1.5; margin: 7px 0 10px; }
+.tk-badges { display: flex; gap: 6px; align-items: center; }
+.tk-badges span { font-size: 8.5px; font-weight: 800; letter-spacing: .04em; padding: 3px 7px; border-radius: 4px; }
+.b-visa { background: #1a1f71; color: #fff; }
+.b-amex { background: #2e77bc; color: #fff; }
+.b-mc { display: flex; align-items: center; background: var(--surface); border: 1px solid var(--line); padding: 4px 6px !important; }
+.b-mc i { width: 9px; height: 9px; border-radius: 50%; display: block; }
+.b-mc i:first-child { background: #eb001b; }
+.b-mc i:last-child { background: #f79e1b; margin-left: -4px; }
+/* 16px sides: 532px track − 32 = 500px, the toolkit's minimum */
+.tk-paycol { min-width: 0; padding: 16px; }
 .tk-paycol .co-cta { margin-top: 12px; }
-@container (max-width: 668px) {
-  .tk-checkout { grid-template-columns: 1fr; gap: 14px; }
-  .tk-summary { border-right: 0; padding-right: 0; position: static; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+@container (max-width: 717px) {
+  .tk-checkout { grid-template-columns: 1fr; min-height: 0; }
+  .tk-summary { border-right: 0; border-bottom: 1px solid var(--line); }
+  .tk-secure { margin-top: 14px; }
 }
 
 /* optional SE controls deck below the client site (unused by current flows) */

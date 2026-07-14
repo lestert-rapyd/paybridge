@@ -102,9 +102,14 @@ function summaryHTML() {
   const [c1, c2] = p.thumb;
   const glyph = { ecommerce: '🪑', crypto: '₿', gaming: '🎲' }[state.vertical] || '◆';
   const feeLabel = p.delivery ? 'Delivery' : 'Fees';
+  const feeValue = p.delivery || 'Free';
   return `
     <aside class="tk-summary">
-      <div class="tk-sum-merchant">${v.merchant}</div>
+      <div class="tk-brand">
+        <span class="tk-brand-mark" style="background:linear-gradient(135deg,${c1},${c2})">${v.merchant[0]}</span>
+        <span>${v.merchant}</span>
+      </div>
+      <div class="tk-sum-label">Your order</div>
       <div class="co-order">
         <div class="co-thumb" style="background:linear-gradient(135deg,${c1},${c2})">${glyph}</div>
         <div class="co-order-info">
@@ -114,8 +119,13 @@ function summaryHTML() {
       </div>
       <div class="co-totals">
         <div class="co-line"><span>Subtotal</span><span>${p.symbol}${p.amount}</span></div>
-        <div class="co-line"><span>${feeLabel}</span><span>${p.delivery || 'Free'}</span></div>
+        <div class="co-line"><span>${feeLabel}</span><span class="${feeValue === 'Free' ? 'free' : ''}">${feeValue}</span></div>
         <div class="co-line total"><span>Total</span><span class="co-total-amt">${p.symbol}${p.amount}</span></div>
+      </div>
+      <div class="tk-secure">
+        <div class="tk-secure-head">🔒 Secure checkout</div>
+        <p>Payments are encrypted end-to-end and processed by Rapyd. Card details never touch ${v.merchant}'s servers.</p>
+        <div class="tk-badges"><span class="b-visa">VISA</span><span class="b-mc"><i></i><i></i></span><span class="b-amex">AMEX</span></div>
       </div>
     </aside>`;
 }
@@ -288,6 +298,7 @@ function bindToolkitEvents() {
   window.addEventListener('onLoading', e => logEvent('onLoading', `loading: ${e.detail?.loading}`));
   window.addEventListener('onCheckoutPaymentPending', e => {
     if (e.detail?.id) setWatchPaymentId(e.detail.id);
+    document.getElementById('tk-own-pay')?.remove(); // payment sent for authorisation
     logEvent('onCheckoutPaymentPending', `${e.detail?.status || ''} ${e.detail?.next_action || ''}`.trim(), 'action');
     setStatus('Pending · 3DS', 'action');
     // Redirect scenario: the merchant page handles the 3DS challenge itself.
@@ -299,6 +310,7 @@ function bindToolkitEvents() {
   });
   window.addEventListener('onCheckoutPaymentSuccess', e => {
     if (e.detail?.id) setWatchPaymentId(e.detail.id);
+    document.getElementById('tk-own-pay')?.remove(); // payment sent for authorisation
     logEvent('onCheckoutPaymentSuccess', `${e.detail?.status || ''} · paid:${e.detail?.paid}`, 'ok');
     setStatus('Confirming…', 'processing');
     renderProcessing('Payment received', 'Confirming via webhook…');
@@ -382,12 +394,14 @@ async function launch() {
         ? `<button class="co-cta" id="tk-own-pay" style="background:${accent()}">${custom.ownText}</button>`
         : '';
       area.innerHTML = `<div id="rapyd-checkout"></div>${ownBtn}`;
-      $('#tk-own-pay')?.addEventListener('click', function () {
+      $('#tk-own-pay')?.addEventListener('click', () => {
         const iframe = document.querySelector('#rapyd-checkout iframe');
         if (!iframe) return;
         iframe.contentWindow.postMessage({ type: 'CHECKOUT_SUBMIT_PAYMENT' }, '*');
         logEvent('CHECKOUT_SUBMIT_PAYMENT', 'postMessage from custom button', 'action');
-        this.remove(); // one-shot: the button leaves once payment is submitted
+        // NOT removed here — the toolkit may reject the submit (required-field
+        // validation). It leaves once the payment is accepted for authorisation
+        // (onCheckoutPaymentPending / onCheckoutPaymentSuccess).
       });
       renderToolkit(id);
       setStatus('Toolkit rendered', 'processing');
