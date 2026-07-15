@@ -384,9 +384,10 @@ code { font-family: var(--font-mono); }
 .tkc-cta { margin-top: 16px; }
 
 /* Two-tone checkout stage: tinted merchant summary | white Rapyd column.
-   Columns stretch full height so the tone fills the card. Both tracks are
-   fr-based so they share growth; minimums fit a 14" MBP (188+532=720). */
-.tk-checkout { display: grid; grid-template-columns: minmax(186px, 2fr) minmax(532px, 4.5fr); gap: 0; align-items: stretch; min-height: 540px; }
+   Columns stretch to match each other's real content height (no fixed floor —
+   that left the config panel with dead space when its content was short).
+   Both tracks are fr-based so they share growth; minimums fit a 14" MBP. */
+.tk-checkout { display: grid; grid-template-columns: minmax(186px, 2fr) minmax(532px, 4.5fr); gap: 0; align-items: stretch; }
 .tk-summary {
   display: flex; flex-direction: column; min-width: 0;
   background: var(--surface-2); border-right: 1px solid var(--line);
