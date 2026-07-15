@@ -431,18 +431,29 @@ code { font-family: var(--font-mono); }
 .tk-redirect-title { font-size: 15px; font-weight: 700; }
 .tk-redirect-desc { font-size: 12px; color: var(--ink-3); line-height: 1.5; margin: 7px 0 15px; }
 
-/* ── Toolkit lifecycle events (right) ────────────────────── */
-.tk-events { display: flex; flex-direction: column; gap: 6px; }
-.tk-event {
-  display: flex; align-items: baseline; gap: 10px; font-family: var(--font-mono); font-size: 11.5px;
-  padding: 8px 11px; border-radius: var(--r-sm);
-  background: var(--eng-surface); border: 1px solid var(--eng-line); border-left: 3px solid var(--eng-faint);
+/* ── Console (right) — terminal log, tag-per-line ────────── */
+.tk-console {
+  font-family: var(--font-mono); font-size: 11.5px; line-height: 1.9;
+  background: var(--eng-bg); border: 1px solid var(--eng-line); border-radius: var(--r-sm);
+  padding: 12px 14px;
 }
-.tk-event.ok  { border-left-color: var(--ok); }
-.tk-event.err { border-left-color: var(--err); }
-.tk-event.action { border-left-color: var(--warn); }
-.tke-name { color: var(--eng-text); font-weight: 700; }
-.tke-detail { color: var(--eng-muted); }
+.cl-line { display: flex; align-items: baseline; gap: 10px; white-space: nowrap; }
+.cl-time { color: var(--eng-faint); flex: none; }
+.cl-tag {
+  flex: none; width: 34px; font-weight: 700; text-transform: lowercase;
+}
+.cl-tag.cl-sys  { color: var(--eng-muted); }
+.cl-tag.cl-app  { color: #6fa8ff; }
+.cl-tag.cl-api  { color: #4fd08a; }
+.cl-tag.cl-tk   { color: #f0b45c; }
+.cl-tag.cl-poll { color: var(--eng-faint); }
+.cl-msg { color: var(--eng-text); overflow: hidden; text-overflow: ellipsis; }
+.cl-msg.cl-ok  { color: #4fd08a; }
+.cl-msg.cl-err { color: #ff8a8a; }
+.cl-msg.cl-action { color: #f0b45c; }
+.cl-detail { color: var(--eng-muted); }
+.cl-cursor { color: var(--eng-faint); animation: cl-blink 1s step-end infinite; }
+@keyframes cl-blink { 50% { opacity: 0; } }
 
 /* ── Webhooks panel (Phase 4) ────────────────────────────── */
 .wh-status {
@@ -471,13 +482,14 @@ code { font-family: var(--font-mono); }
 .wh-pill.success { background: rgba(18,183,106,.16); color: #4fd08a; }
 .wh-pill.failure { background: rgba(239,68,68,.16); color: #ff8a8a; }
 .wh-pill.pending { background: rgba(245,158,11,.16); color: #f0b45c; }
+.wh-pill.field { font-weight: 500; }
 
 /* expandable webhook cards */
 .wh-card { border: 1px solid var(--eng-line); border-radius: var(--r-sm); background: var(--eng-surface); margin-bottom: 8px; overflow: hidden; border-left: 3px solid var(--eng-faint); }
 .wh-card.success { border-left-color: var(--ok); }
 .wh-card.failure { border-left-color: var(--err); }
 .wh-card.pending { border-left-color: var(--warn); }
-.wh-card-head { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 11px 13px; }
+.wh-card-head { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 11px 13px; flex-wrap: wrap; }
 .wh-card-head::-webkit-details-marker { display: none; }
 .wh-chev { color: var(--eng-faint); font-size: 10px; transition: transform .15s ease; }
 details[open] .wh-chev { transform: rotate(90deg); }

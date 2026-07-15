@@ -11,17 +11,37 @@
    re-computes as the request body changes.
    ───────────────────────────────────────────────────────────── */
 
+import { state } from './state.js';
+
 const HEXC = '0123456789abcdef';
 function randHex(n) { let s = ''; for (let i = 0; i < n; i++) s += HEXC[Math.floor(Math.random() * 16)]; return s; }
 
-export const DEMO_ACCESS_KEY = 'rak_' + randHex(20).toUpperCase();
-const DEMO_SECRET = 'rsk_' + randHex(40);
+// Separate demo identities per environment, so the header visibly changes
+// when the Sandbox/Live switch flips (mirrors the real access_key/secret_key
+// pairing being per-environment on Rapyd's side).
+const DEMO_KEYS = {
+  sandbox: { access: 'rak_' + randHex(20).toUpperCase(), secret: 'rsk_' + randHex(40) },
+  live:    { access: 'rak_' + randHex(20).toUpperCase(), secret: 'rsk_' + randHex(40) },
+};
+
+const accessKey = () => DEMO_KEYS[state.env].access;
+const secretKey = () => DEMO_KEYS[state.env].secret;
+
+// "rak_A1B***X9Z" — first 3 / last 3 chars of the key body, prefix kept in full.
+export function redactKey(key) {
+  const m = /^([a-z]+_)(.+)$/i.exec(key);
+  if (!m) return key;
+  const [, prefix, body] = m;
+  if (body.length <= 6) return key;
+  return `${prefix}${body.slice(0, 3)}***${body.slice(-3)}`;
+}
 
 const enc = (s) => new TextEncoder().encode(s);
-let keyPromise = null;
+const keyPromises = {};
 function hmacKey() {
-  keyPromise ||= crypto.subtle.importKey('raw', enc(DEMO_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  return keyPromise;
+  const env = state.env;
+  keyPromises[env] ||= crypto.subtle.importKey('raw', enc(secretKey()), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return keyPromises[env];
 }
 
 export function newSaltTimestamp() {
@@ -30,7 +50,7 @@ export function newSaltTimestamp() {
 
 export async function signDemo(method, path, salt, timestamp, body) {
   const bodyStr = body ? JSON.stringify(body) : ''; // no whitespace — as signed on the wire
-  const toSign = method.toLowerCase() + path + salt + timestamp + DEMO_ACCESS_KEY + DEMO_SECRET + bodyStr;
+  const toSign = method.toLowerCase() + path + salt + timestamp + accessKey() + secretKey() + bodyStr;
   const sig = await crypto.subtle.sign('HMAC', await hmacKey(), enc(toSign));
   const hex = [...new Uint8Array(sig)].map(b => b.toString(16).padStart(2, '0')).join('');
   return btoa(hex).replace(/\+/g, '-').replace(/\//g, '_');
@@ -41,7 +61,7 @@ export function headersHTML(st) {
   return `
     <p class="eng-label">Headers</p>
     <div class="req-headers">
-      <span class="hk">access_key</span><span class="hv">${DEMO_ACCESS_KEY}</span>
+      <span class="hk">access_key</span><span class="hv">${redactKey(accessKey())}</span>
       <span class="hk">salt</span><span class="hv">${st.salt}</span>
       <span class="hk">timestamp</span><span class="hv">${st.timestamp}</span>
       <span class="hk">signature</span><span class="hv hv-sig">calculating…</span>

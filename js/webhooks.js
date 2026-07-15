@@ -23,14 +23,16 @@ let configured = null;
 let fallbackDone = false;
 let fallbackStatus = null;
 let onTerminal = null;
+let onPoll = null;
 let terminalSource = null; // null | 'fallback' | 'webhook'
 
-export function startWebhookWatch({ reference, payment_id, onTerminal: cb } = {}) {
+export function startWebhookWatch({ reference, payment_id, onTerminal: cb, onPoll: pollCb } = {}) {
   stopWebhookWatch();
   ref = reference;
   paymentId = payment_id || null;
   paymentIdAt = payment_id ? Date.now() : 0;
   onTerminal = cb || null;
+  onPoll = pollCb || null;
   startedAt = Date.now();
   configured = null;
   fallbackDone = false;
@@ -80,6 +82,7 @@ function maybeFireTerminal(events) {
 }
 
 async function poll() {
+  onPoll?.();
   let events = [];
   try {
     const r = await fetch(`${BACKEND_URL}/api/webhooks?ref=${encodeURIComponent(ref)}`);
@@ -119,6 +122,23 @@ async function poll() {
 
 function pill(text, cls = '') { return `<span class="wh-pill ${cls}">${text}</span>`; }
 
+// One pill per field Rapyd actually sends, rather than one combined string —
+// easier to scan, and each field only appears when the event carries it.
+function fieldPills(e) {
+  const d = e.raw?.data || {};
+  const ar = d.authentication_result || {};
+  return [
+    ['status', e.status ?? d.status, classify(e)],
+    ['paid', d.paid ?? e.paid, null],
+    ['next_action', d.next_action, null],
+    ['eci', ar.eci, null],
+    ['result', ar.result, null],
+  ]
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v, kind]) => pill(`${k}: ${v}`, kind || 'field'))
+    .join('');
+}
+
 function verifyChip(v) {
   if (v === 'verified')   return `<span class="wh-verify ok">✓ signature verified</span>`;
   if (v === 'unverified') return `<span class="wh-verify warn">signature n/a</span>`;
@@ -144,13 +164,12 @@ function render(events) {
   if (events.length) {
     html += events.map((e, i) => {
       const kind = classify(e);
-      const statusText = `${e.status || '—'}${e.paid != null ? ` · paid:${e.paid}` : ''}`;
       return `
         <details class="wh-card ${kind}" ${i === 0 ? 'open' : ''}>
           <summary class="wh-card-head">
             <span class="wh-chev">▸</span>
             ${pill(e.type || 'EVENT', 'evt')}
-            ${pill(statusText, kind)}
+            ${fieldPills(e)}
             ${verifyChip(e.verified)}
           </summary>
           <div class="wh-card-json">${renderJSONView(e.raw || e)}</div>

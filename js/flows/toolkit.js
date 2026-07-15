@@ -42,6 +42,7 @@ const custom = {
 };
 const wallets = { apple_pay: true, google_pay: true }; // digital_wallets_include_methods
 let events = [];
+let lastHeartbeat = null;
 let listenersBound = false;
 let lastSession = null;
 
@@ -269,22 +270,31 @@ function renderResponse() {
     ${renderJSONView(lastSession)}`;
 }
 
+// Terminal-style log, tagged like a real dev console: HH:MM:SS  tag  message
+const fmtTime = (d) => d.toLocaleTimeString('en-GB', { hour12: false });
+function logLineHTML(e) {
+  return `
+    <div class="cl-line">
+      <span class="cl-time">${fmtTime(e.at)}</span>
+      <span class="cl-tag cl-${e.tag}">${e.tag}</span>
+      <span class="cl-msg${e.kind ? ` cl-${e.kind}` : ''}">${e.name}${e.detail ? ` <span class="cl-detail">${e.detail}</span>` : ''}</span>
+    </div>`;
+}
+
 function renderConsole() {
   const el = $('#panel-console');
   if (!el) return;
-  if (!events.length) {
+  if (!events.length && !lastHeartbeat) {
     el.innerHTML = `<div class="eng-empty"><div class="ee-ico">▸</div><div class="ee-text">Toolkit lifecycle events stream here once the toolkit renders.</div></div>`;
     return;
   }
-  el.innerHTML = `<p class="eng-label">Toolkit lifecycle</p><div class="tk-events">` + events.map(e => `
-    <div class="tk-event ${e.cls || ''}">
-      <span class="tke-name">${e.name}</span>
-      ${e.detail ? `<span class="tke-detail">${e.detail}</span>` : ''}
-    </div>`).join('') + `</div>`;
+  const lines = events.map(logLineHTML).join('');
+  const heartbeat = lastHeartbeat ? logLineHTML({ name: 'heartbeat', tag: 'poll', at: lastHeartbeat }) : '';
+  el.innerHTML = `<div class="tk-console">${lines}${heartbeat}<span class="cl-cursor">▏</span></div>`;
 }
 
-function logEvent(name, detail = '', cls = '') {
-  events.push({ name, detail, cls });
+function logEvent(name, detail = '', tag = 'tk', kind = '') {
+  events.push({ name, detail, tag, kind, at: new Date() });
   renderConsole();
 }
 
@@ -313,42 +323,42 @@ function loadToolkitScript() {
 function bindToolkitEvents() {
   if (listenersBound) return;
   listenersBound = true;
-  window.addEventListener('onLoading', e => logEvent('onLoading', `loading: ${e.detail?.loading}`));
+  window.addEventListener('onLoading', e => logEvent('onLoading', `loading: ${e.detail?.loading}`, 'tk'));
   window.addEventListener('onCheckoutPaymentPending', e => {
     if (e.detail?.id) setWatchPaymentId(e.detail.id);
     document.getElementById('tk-own-pay')?.remove(); // payment sent for authorisation
-    logEvent('onCheckoutPaymentPending', `${e.detail?.status || ''} ${e.detail?.next_action || ''}`.trim(), 'action');
+    logEvent('onCheckoutPaymentPending', `${e.detail?.status || ''} ${e.detail?.next_action || ''}`.trim(), 'tk', 'action');
     setStatus('Pending · 3DS', 'action');
     // Redirect scenario: the merchant page handles the 3DS challenge itself.
     const redirect = e.detail?.redirect_url;
     if (tdsFlow === 'redirect' && redirect) {
       window.open(redirect, 'rapyd-3ds', 'width=480,height=720');
-      logEvent('3DS redirect opened', 'window.open(redirect_url)', 'action');
+      logEvent('3DS redirect opened', 'window.open(redirect_url)', 'tk', 'action');
     }
   });
   window.addEventListener('onCheckoutPaymentSuccess', e => {
     if (e.detail?.id) setWatchPaymentId(e.detail.id);
     document.getElementById('tk-own-pay')?.remove(); // payment sent for authorisation
-    logEvent('onCheckoutPaymentSuccess', `${e.detail?.status || ''} · paid:${e.detail?.paid}`, 'ok');
+    logEvent('onCheckoutPaymentSuccess', `${e.detail?.status || ''} · paid:${e.detail?.paid}`, 'tk', 'ok');
     setStatus('Confirming…', 'processing');
     renderProcessing('Payment received', 'Confirming via webhook…');
   });
   window.addEventListener('onCheckoutPaymentFailure', e => {
-    logEvent('onCheckoutPaymentFailure', (e.detail?.error && (e.detail.error.message || e.detail.error)) || 'failure', 'err');
+    logEvent('onCheckoutPaymentFailure', (e.detail?.error && (e.detail.error.message || e.detail.error)) || 'failure', 'tk', 'err');
     setStatus('Failed', 'error');
     renderError({ status: 'ERR', message: 'The payment failed in the toolkit.' });
   });
   window.addEventListener('onCheckoutPaymentExpired', e => {
-    logEvent('onCheckoutPaymentExpired', e.detail?.status || 'checkout page expired', 'err');
+    logEvent('onCheckoutPaymentExpired', e.detail?.status || 'checkout page expired', 'tk', 'err');
     setStatus('Expired', 'error');
     renderError({ status: 'EXP', message: 'The checkout session expired.' });
   });
   // Card-on-file lifecycle — logged for later save/update/delete-card demos.
   window.addEventListener('onCheckoutUpdateCardSuccess', e => {
-    logEvent('onCheckoutUpdateCardSuccess', e.detail?.id || '', 'ok');
+    logEvent('onCheckoutUpdateCardSuccess', e.detail?.id || '', 'tk', 'ok');
   });
   window.addEventListener('onCheckoutDeleteCardSuccess', e => {
-    logEvent('onCheckoutDeleteCardSuccess', e.detail?.id || '', 'ok');
+    logEvent('onCheckoutDeleteCardSuccess', e.detail?.id || '', 'tk', 'ok');
   });
 }
 
@@ -357,9 +367,9 @@ function renderToolkit(checkoutId) {
   try {
     const checkout = new RapydCheckoutToolkit(toolkitConfig(checkoutId));
     checkout.displayCheckout();
-    logEvent('displayCheckout()', 'iframe rendering', '');
+    logEvent('displayCheckout()', 'iframe rendering', 'tk');
   } catch (err) {
-    logEvent('toolkit error', err.message, 'err');
+    logEvent('toolkit error', err.message, 'tk', 'err');
   }
 }
 
@@ -370,6 +380,7 @@ async function launch() {
   btn.textContent = 'Creating session…';
   setStatus('Creating session…', 'processing');
   events = [];
+  lastHeartbeat = null;
   lastSession = null;
   renderConsole();
   state.reference = `pb_${state.vertical}_tk_${Date.now()}`;
@@ -392,8 +403,8 @@ async function launch() {
     const id = data?.data?.id;
     const redirect = data?.data?.redirect_url;
     if (!id) throw new Error(data?.message || 'No checkout id returned');
-    logEvent('session created', id, 'ok');
-    startWebhookWatch({ reference: state.reference, onTerminal: handleTerminal });
+    logEvent('POST /v1/checkout', `${id} · 201`, 'api', 'ok');
+    startWebhookWatch({ reference: state.reference, onTerminal: handleTerminal, onPoll: () => { lastHeartbeat = new Date(); renderConsole(); } });
 
     const area = $('#tk-area');
     if (mode === 'hosted') {
@@ -416,7 +427,7 @@ async function launch() {
         const iframe = document.querySelector('#rapyd-checkout iframe');
         if (!iframe) return;
         iframe.contentWindow.postMessage({ type: 'CHECKOUT_SUBMIT_PAYMENT' }, '*');
-        logEvent('CHECKOUT_SUBMIT_PAYMENT', 'postMessage from custom button', 'action');
+        logEvent('CHECKOUT_SUBMIT_PAYMENT', 'postMessage from custom button', 'tk', 'action');
         // NOT removed here — the toolkit may reject the submit (required-field
         // validation). It leaves once the payment is accepted for authorisation
         // (onCheckoutPaymentPending / onCheckoutPaymentSuccess).
@@ -429,6 +440,7 @@ async function launch() {
     lastSession = { error: 'error', message: err.message };
     renderResponse();
     setStatus('Error', 'error');
+    logEvent('POST /v1/checkout', err.message, 'api', 'err');
     renderError({ status: 'ERR', message: err.message });
   }
 }
@@ -439,8 +451,10 @@ export function mount() {
   if (!panel) return;
   renderRequest();
   events = [];
+  lastHeartbeat = null;
   lastSession = null;
-  renderConsole();
+  logEvent(`${state.env} session started`, '', 'sys');
+  logEvent('toolkit.mount(inline) ok', '', 'app');
   syncControlVisibility();
 
   panel.querySelectorAll('.tkc-seg[data-opt]').forEach(row => {
