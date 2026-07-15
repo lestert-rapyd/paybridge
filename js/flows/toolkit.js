@@ -11,6 +11,7 @@
      · hide_submit_button (Rapyd's / custom one-shot button that
        fires postMessage CHECKOUT_SUBMIT_PAYMENT then removes itself)
      · pay_button_text / pay_button_color
+     · digital_wallets_include_methods (AP / GP include chips)
      · digital_wallets_buttons_customization (AP / GP color + type)
    The same config is mirrored live in the Request tab. Toolkit
    lifecycle events stream to the Console tab. The left success /
@@ -18,7 +19,7 @@
    ───────────────────────────────────────────────────────────── */
 
 import { state } from '../state.js';
-import { VERTICALS } from '../verticals.js';
+import { VERTICALS, activeProduct } from '../verticals.js';
 import { createCheckoutSession } from '../api.js';
 import { renderJSONView } from '../json-view.js';
 import { setActiveTab, setStatus } from '../ui.js';
@@ -39,6 +40,7 @@ const custom = {
   ap: { button_color: 'black', button_type: 'buy' },
   gp: { button_color: 'black', button_type: 'buy' },
 };
+const wallets = { apple_pay: true, google_pay: true }; // digital_wallets_include_methods
 let events = [];
 let listenersBound = false;
 let lastSession = null;
@@ -53,7 +55,7 @@ const accent = () => custom.btnColor || VERTICALS[state.vertical].dot;
 /* ── Request body (server-side POST /v1/checkout) ────────── */
 function displayBody() {
   const v = VERTICALS[state.vertical];
-  const p = v.product;
+  const p = activeProduct();
   return {
     amount: Number(p.amount),
     capture: true,
@@ -86,10 +88,10 @@ function toolkitConfig(checkoutId) {
     pay_button_color: accent(),
     hide_submit_button: payBtn === 'custom' && mode !== 'wallets',
     digital_wallets_buttons_only: mode === 'wallets',
-    digital_wallets_include_methods: ['google_pay', 'apple_pay'],
+    digital_wallets_include_methods: ['apple_pay', 'google_pay'].filter(m => wallets[m]),
     digital_wallets_buttons_customization: {
-      apple_pay: { ...custom.ap },
-      google_pay: { ...custom.gp },
+      ...(wallets.apple_pay && { apple_pay: { ...custom.ap } }),
+      ...(wallets.google_pay && { google_pay: { ...custom.gp } }),
     },
     wait_on_payment_confirmation: true,
     wait_on_payment_redirect: tdsFlow === 'iframe',
@@ -101,7 +103,7 @@ function toolkitConfig(checkoutId) {
 /* ── Client page: stable two-panel stage ─────────────────── */
 function summaryHTML() {
   const v = VERTICALS[state.vertical];
-  const p = v.product;
+  const p = activeProduct();
   const [c1, c2] = p.thumb;
   const glyph = { ecommerce: '🪑', crypto: '₿', gaming: '🎲' }[state.vertical] || '◆';
   const feeLabel = p.delivery ? 'Delivery' : 'Fees';
@@ -128,7 +130,7 @@ function summaryHTML() {
       <div class="tk-secure">
         <div class="tk-secure-head">🔒 Secure checkout</div>
         <p>Payments are encrypted end-to-end and processed by Rapyd. Card details never touch ${v.merchant}'s servers.</p>
-        <div class="tk-badges"><span class="b-visa">VISA</span><span class="b-mc">MC</span><span class="b-amex">AMEX</span></div>
+        <div class="tk-badges"><span class="b-visa">VISA</span><span class="b-mc">MC</span></div>
       </div>
     </aside>`;
 }
@@ -183,11 +185,16 @@ function configPanelHTML() {
 
       <div class="tkc-sec" id="tkc-wallets">
         <div class="tkc-sec-label">Digital wallets<span class="tkc-sec-hint">digital_wallets_buttons_customization</span></div>
-        <div class="tkc-row">
+        ${row('Include', 'digital_wallets_include_methods', `
+          <div class="tkc-seg tkc-multi" id="dc-dw-include">
+            <button data-val="apple_pay" class="${wallets.apple_pay ? 'active' : ''}">Apple Pay</button>
+            <button data-val="google_pay" class="${wallets.google_pay ? 'active' : ''}">Google Pay</button>
+          </div>`)}
+        <div class="tkc-row" id="tkc-row-ap" ${wallets.apple_pay ? '' : 'hidden'}>
           <div class="tkc-wallet"><span class="dw-logo apple">${APPLE_SVG}</span>Apple Pay</div>
           <span class="tkc-selects">${selectEl('dc-ap-color', AP_COLORS, custom.ap.button_color)}${selectEl('dc-ap-type', AP_TYPES, custom.ap.button_type)}</span>
         </div>
-        <div class="tkc-row">
+        <div class="tkc-row" id="tkc-row-gp" ${wallets.google_pay ? '' : 'hidden'}>
           <div class="tkc-wallet"><span class="dw-logo google">${GOOGLE_SVG}</span>Google Pay</div>
           <span class="tkc-selects">${selectEl('dc-gp-color', GP_COLORS, custom.gp.button_color)}${selectEl('dc-gp-type', GP_TYPES, custom.gp.button_type)}</span>
         </div>
@@ -207,9 +214,9 @@ export function renderPageHTML() {
 
 function syncControlVisibility() {
   const hosted = mode === 'hosted';
-  const wallets = mode === 'wallets';
+  const walletsOnly = mode === 'wallets';
   const isCustom = payBtn === 'custom';
-  $('#tkc-paybtn')?.toggleAttribute('hidden', hosted || wallets);
+  $('#tkc-paybtn')?.toggleAttribute('hidden', hosted || walletsOnly);
   $('#tkc-wallets')?.toggleAttribute('hidden', hosted);
   // Custom style: Rapyd's label/color give way to the merchant button's own label
   $('#tkc-row-label')?.toggleAttribute('hidden', isCustom);
@@ -217,6 +224,9 @@ function syncControlVisibility() {
   $('#tkc-row-own')?.toggleAttribute('hidden', !isCustom);
   // Challenge placement only matters when a 3DS challenge can occur
   $('#tkc-row-challenge')?.toggleAttribute('hidden', hosted || !tds);
+  // Customization rows only for wallets that are actually included
+  $('#tkc-row-ap')?.toggleAttribute('hidden', !wallets.apple_pay);
+  $('#tkc-row-gp')?.toggleAttribute('hidden', !wallets.google_pay);
   const launch = $('#tk-launch');
   if (launch) launch.textContent = hosted ? 'Create session →' : 'Render toolkit →';
 }
@@ -354,7 +364,7 @@ async function launch() {
   state.reference = `pb_${state.vertical}_tk_${Date.now()}`;
   {
     const v = VERTICALS[state.vertical];
-    const p = v.product;
+    const p = activeProduct();
     // snapshot for the success screen's bank-statement view (fx reserved
     // for when FX fields are configured in the demo; last4 arrives via webhook)
     state.lastPayment = { descriptor: v.descriptor, amount: p.amount, currency: p.currency, last4: null, fx: null };
@@ -422,7 +432,7 @@ export function mount() {
   renderConsole();
   syncControlVisibility();
 
-  panel.querySelectorAll('.tkc-seg').forEach(row => {
+  panel.querySelectorAll('.tkc-seg[data-opt]').forEach(row => {
     row.addEventListener('click', e => {
       const btn = e.target.closest('button[data-val]');
       if (!btn) return;
@@ -437,6 +447,16 @@ export function mount() {
 
   $('#tk-tds').addEventListener('change', e => {
     tds = e.target.checked;
+    syncControlVisibility();
+    renderRequest();
+  });
+  // Include chips are independent toggles, not a single-select seg
+  $('#dc-dw-include').addEventListener('click', e => {
+    const btn = e.target.closest('button[data-val]');
+    if (!btn) return;
+    const m = btn.dataset.val;
+    wallets[m] = !wallets[m];
+    btn.classList.toggle('active', wallets[m]);
     syncControlVisibility();
     renderRequest();
   });

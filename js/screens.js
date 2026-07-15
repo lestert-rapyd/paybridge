@@ -4,7 +4,7 @@
    PAYMENT_COMPLETED / PAYMENT_FAILED webhook (see webhooks.js).
    ───────────────────────────────────────────────────────────── */
 
-import { VERTICALS } from './verticals.js';
+import { VERTICALS, activeProduct } from './verticals.js';
 import { state, setState } from './state.js';
 
 const host = () => document.getElementById('checkout');
@@ -148,7 +148,7 @@ export function renderSuccess(event = {}) {
   set3DSWidth(false);
   resetWide();
   const v = VERTICALS[state.vertical];
-  const p = v.product;
+  const p = activeProduct();
   const pay = event.raw?.data || {};
   const lp = state.lastPayment || {};
   const reference = pay.merchant_reference_id || state.reference || '—';
@@ -177,7 +177,7 @@ export function renderError(event = {}) {
   resetWide();
   setOffstage(null);
   const v = VERTICALS[state.vertical];
-  const p = v.product;
+  const p = activeProduct();
   const pay = event.raw?.data || {};
   const lp = state.lastPayment || {};
   const declineCode = pay.failure_code || event.code || null;

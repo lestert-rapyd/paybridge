@@ -7,7 +7,7 @@
    ───────────────────────────────────────────────────────────── */
 
 import { state } from '../state.js';
-import { VERTICALS } from '../verticals.js';
+import { VERTICALS, activeProduct } from '../verticals.js';
 import { createDirectPayment } from '../api.js';
 import { renderJSONView, highlightPaths } from '../json-view.js';
 import { setActiveTab, setStatus } from '../ui.js';
@@ -29,7 +29,7 @@ let sent = false;
 /* ── Request bodies ──────────────────────────────────────── */
 function displayBody() {
   const v = VERTICALS[state.vertical];
-  const p = v.product;
+  const p = activeProduct();
   const { type } = detectBrand(card.number);
   const { month, year } = parseExpiry(card.expiry);
   const body = {
@@ -64,7 +64,7 @@ function postBody() {
 /* ── Left panel markup ───────────────────────────────────── */
 export function renderPaymentHTML() {
   const v = VERTICALS[state.vertical];
-  const p = v.product;
+  const p = activeProduct();
   return `
     <div class="co-field">
       <label>Card number</label>
@@ -153,7 +153,7 @@ async function pay() {
   state.reference = `pb_${state.vertical}_${Date.now()}`;
   {
     const v = VERTICALS[state.vertical];
-    const p = v.product;
+    const p = activeProduct();
     // snapshot for the success screen's bank-statement view (fx reserved
     // for when FX fields are configured in the demo)
     const digits = card.number.replace(/\D/g, '');

@@ -2,7 +2,7 @@
    PayBridge Demo Suite — bootstrap (on-brand redesign)
    ───────────────────────────────────────────────────────────── */
 
-import { VERTICALS, VERTICAL_ORDER } from './verticals.js';
+import { VERTICALS, VERTICAL_ORDER, activeProduct } from './verticals.js';
 import { state, setState, subscribe } from './state.js';
 import { setActiveTab, setStatus } from './ui.js';
 import { stopWebhookWatch } from './webhooks.js';
@@ -24,7 +24,7 @@ const THUMB_GLYPH = { ecommerce: '🪑', crypto: '₿', gaming: '🎲' };
 /* ── Left: checkout ──────────────────────────────────────── */
 function renderCheckout() {
   const v = VERTICALS[state.vertical];
-  const p = v.product;
+  const p = activeProduct();
   const flow = FLOWS[state.model];
   const host = $('#checkout');
   const [c1, c2] = p.thumb;

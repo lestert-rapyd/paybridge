@@ -4,6 +4,8 @@
    sub-brands. Only context, product framing, colours and copy change.
    ───────────────────────────────────────────────────────────── */
 
+import { state } from './state.js';
+
 export const VERTICALS = {
   ecommerce: {
     id: 'ecommerce',
@@ -73,3 +75,10 @@ export const VERTICALS = {
 };
 
 export const VERTICAL_ORDER = ['ecommerce', 'crypto', 'gaming'];
+
+/* The active vertical's product for the current environment.
+   Live charges a real card — every price collapses to one penny. */
+export function activeProduct(verticalId = state.vertical) {
+  const p = VERTICALS[verticalId].product;
+  return state.env === 'live' ? { ...p, amount: '0.01' } : p;
+}

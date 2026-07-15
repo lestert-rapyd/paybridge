@@ -404,7 +404,6 @@ code { font-family: var(--font-mono); }
 .tk-badges { display: flex; gap: 6px; align-items: center; }
 .tk-badges span { font-size: 8.5px; font-weight: 800; letter-spacing: .04em; padding: 3px 7px; border-radius: 4px; }
 .b-visa { background: #1a1f71; color: #fff; }
-.b-amex { background: #2e77bc; color: #fff; }
 .b-mc { display: flex; align-items: center; background: var(--surface); border: 1px solid var(--line); padding: 4px 6px !important; }
 .b-mc i { width: 9px; height: 9px; border-radius: 50%; display: block; }
 .b-mc i:first-child { background: #eb001b; }
@@ -605,7 +604,7 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .tds-frame { height: clamp(380px, calc(100vh - 400px), 460px); }
 
 /* checkout (PCI flow) */
-.co-merchant { font-family: inherit; font-size: 27px; font-weight: 800; letter-spacing: -.01em; color: #191714; text-transform: uppercase; }
+.co-merchant { font-family: inherit; font-size: 27px; font-weight: 800; letter-spacing: -.01em; color: #191714; }
 .co-tagline { display: flex; align-items: center; gap: 6px; font-size: 11px; letter-spacing: .11em; color: #a8a297; margin-top: 6px; }
 .co-order { gap: 14px; margin: 22px 0 0; padding: 14px 16px; background: #faf8f4; border: 1px solid #efece5; border-radius: 14px; }
 .co-thumb { width: 48px; height: 48px; border-radius: 12px; font-size: 22px; }
@@ -727,7 +726,6 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .tk-badges span { font-size: 9.5px; font-weight: 800; letter-spacing: .04em; color: #fff; border-radius: 5px; padding: 5px 8px; }
 .b-visa { background: #1a1f71; }
 .b-mc { background: #eb001b !important; border: 0 !important; color: #fff; padding: 5px 8px !important; }
-.b-amex { background: #016fd0; }
 .tk-paycol { padding: 20px; }
 
 /* config panel — dark #100f16 recolor */
