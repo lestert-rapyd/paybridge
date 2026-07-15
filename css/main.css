@@ -373,6 +373,9 @@ code { font-family: var(--font-mono); }
   flex: none; width: 30px; height: 28px; padding: 2px; cursor: pointer;
   border: 1px solid var(--eng-line); border-radius: 7px; background: var(--eng-surface);
 }
+.tkc-colorfield { display: flex; align-items: center; gap: 6px; }
+.tkc-hex { max-width: 90px; text-transform: uppercase; }
+.tkc-wallet-custom { margin: -3px 0 11px 35px; }
 .tkc-select {
   flex: 1; min-width: 0; border: 1px solid var(--eng-line); border-radius: 7px;
   background: var(--eng-surface); padding: 6px 8px; font-size: 11px; color: var(--eng-text);
@@ -753,6 +756,8 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .tkc-switch:checked::after { left: 23px; }
 .tkc-input { max-width: 220px; height: 42px; background: #1a1824; border: 1px solid #2a2740; border-radius: 9px; color: #fff; font-family: inherit; font-size: 14px; padding: 0 14px; }
 .tkc-input:focus { border-color: var(--accent); }
+.tkc-hex { max-width: 100px; padding: 0 12px; }
+.tkc-wallet-custom { margin-left: 41px; }
 .tkc-select { height: 38px; background: #1a1824; border: 1px solid #2a2740; border-radius: 9px; color: #fff; font-family: inherit; font-size: 13px; padding: 0 10px; cursor: pointer; }
 .tkc-color { width: 40px; height: 40px; background: #1a1824; border: 1px solid #2a2740; border-radius: 9px; }
 .tkc-wallet { font-size: 15px; color: #fff; gap: 11px; }

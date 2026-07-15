@@ -142,9 +142,11 @@ function seg(key, options, current) {
       `<button data-val="${val}" class="${current === val ? 'active' : ''}">${text}</button>`).join('')}
     </div>`;
 }
+// "white-outline" → "White Outline" — display only, the option's value (sent to the API) is untouched
+const humanize = s => s.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
 function selectEl(id, values, current) {
   return `<select class="tkc-select" id="${id}">${values.map(o =>
-    `<option value="${o}" ${o === current ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
+    `<option value="${o}" ${o === current ? 'selected' : ''}>${humanize(o)}</option>`).join('')}</select>`;
 }
 
 const APPLE_SVG = `<svg viewBox="0 0 384 512" width="13" height="13" fill="#000" aria-hidden="true"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>`;
@@ -172,7 +174,11 @@ function configPanelHTML() {
         <div class="tkc-sec-label">Payment button</div>
         ${row('Style', 'hide_submit_button', seg('payBtn', [['rapyd', "Rapyd's"], ['custom', 'Custom']], payBtn))}
         ${row('Label', 'pay_button_text', `<input type="text" class="tkc-input" id="dc-btn-text" maxlength="16" value="${custom.btnText}" placeholder="Pay Now" />`, 'id="tkc-row-label"')}
-        ${row('Color', 'pay_button_color', `<input type="color" class="tkc-color" id="dc-btn-color" value="${accent()}" />`, 'id="tkc-row-color"')}
+        ${row('Color', 'pay_button_color', `
+          <div class="tkc-colorfield">
+            <input type="color" class="tkc-color" id="dc-btn-color" value="${accent()}" />
+            <input type="text" class="tkc-input tkc-hex" id="dc-btn-color-hex" maxlength="7" value="${accent()}" placeholder="#5600ef" />
+          </div>`, 'id="tkc-row-color"')}
         ${row('Button label', 'your own button · demo', `<input type="text" class="tkc-input" id="dc-own-text" value="${custom.ownText}" />`, 'id="tkc-row-own" hidden')}
       </div>
 
@@ -184,18 +190,23 @@ function configPanelHTML() {
       </div>
 
       <div class="tkc-sec" id="tkc-wallets">
-        <div class="tkc-sec-label">Digital wallets<span class="tkc-sec-hint">digital_wallets_buttons_customization</span></div>
-        ${row('Include', 'digital_wallets_include_methods', `
-          <div class="tkc-seg tkc-multi" id="dc-dw-include">
-            <button data-val="apple_pay" class="${wallets.apple_pay ? 'active' : ''}">Apple Pay</button>
-            <button data-val="google_pay" class="${wallets.google_pay ? 'active' : ''}">Google Pay</button>
-          </div>`)}
-        <div class="tkc-row" id="tkc-row-ap" ${wallets.apple_pay ? '' : 'hidden'}>
+        <div class="tkc-sec-label">Digital wallets<span class="tkc-sec-hint">digital_wallets_include_methods</span></div>
+
+        <div class="tkc-row">
           <div class="tkc-wallet"><span class="dw-logo apple">${APPLE_SVG}</span>Apple Pay</div>
+          <label class="tkc-switch-wrap"><input type="checkbox" class="tkc-switch" id="dc-ap-toggle" ${wallets.apple_pay ? 'checked' : ''} /></label>
+        </div>
+        <div class="tkc-row tkc-wallet-custom" id="tkc-cust-ap" ${wallets.apple_pay ? '' : 'hidden'}>
+          <div class="tkc-lab">Style<code>digital_wallets_buttons_customization.apple_pay</code></div>
           <span class="tkc-selects">${selectEl('dc-ap-color', AP_COLORS, custom.ap.button_color)}${selectEl('dc-ap-type', AP_TYPES, custom.ap.button_type)}</span>
         </div>
-        <div class="tkc-row" id="tkc-row-gp" ${wallets.google_pay ? '' : 'hidden'}>
+
+        <div class="tkc-row">
           <div class="tkc-wallet"><span class="dw-logo google">${GOOGLE_SVG}</span>Google Pay</div>
+          <label class="tkc-switch-wrap"><input type="checkbox" class="tkc-switch" id="dc-gp-toggle" ${wallets.google_pay ? 'checked' : ''} /></label>
+        </div>
+        <div class="tkc-row tkc-wallet-custom" id="tkc-cust-gp" ${wallets.google_pay ? '' : 'hidden'}>
+          <div class="tkc-lab">Style<code>digital_wallets_buttons_customization.google_pay</code></div>
           <span class="tkc-selects">${selectEl('dc-gp-color', GP_COLORS, custom.gp.button_color)}${selectEl('dc-gp-type', GP_TYPES, custom.gp.button_type)}</span>
         </div>
       </div>
@@ -225,8 +236,8 @@ function syncControlVisibility() {
   // Challenge placement only matters when a 3DS challenge can occur
   $('#tkc-row-challenge')?.toggleAttribute('hidden', hosted || !tds);
   // Customization rows only for wallets that are actually included
-  $('#tkc-row-ap')?.toggleAttribute('hidden', !wallets.apple_pay);
-  $('#tkc-row-gp')?.toggleAttribute('hidden', !wallets.google_pay);
+  $('#tkc-cust-ap')?.toggleAttribute('hidden', !wallets.apple_pay);
+  $('#tkc-cust-gp')?.toggleAttribute('hidden', !wallets.google_pay);
   const launch = $('#tk-launch');
   if (launch) launch.textContent = hosted ? 'Create session →' : 'Render toolkit →';
 }
@@ -450,18 +461,27 @@ export function mount() {
     syncControlVisibility();
     renderRequest();
   });
-  // Include chips are independent toggles, not a single-select seg
-  $('#dc-dw-include').addEventListener('click', e => {
-    const btn = e.target.closest('button[data-val]');
-    if (!btn) return;
-    const m = btn.dataset.val;
-    wallets[m] = !wallets[m];
-    btn.classList.toggle('active', wallets[m]);
+  // Each wallet is its own on/off switch, independent of the other
+  const wireWallet = (id, key) => $(`#${id}`).addEventListener('change', e => {
+    wallets[key] = e.target.checked;
     syncControlVisibility();
     renderRequest();
   });
+  wireWallet('dc-ap-toggle', 'apple_pay');
+  wireWallet('dc-gp-toggle', 'google_pay');
   $('#dc-btn-text').addEventListener('input', e => { custom.btnText = e.target.value || 'Pay Now'; renderRequest(); });
-  $('#dc-btn-color').addEventListener('input', e => { custom.btnColor = e.target.value; renderRequest(); });
+  $('#dc-btn-color').addEventListener('input', e => {
+    custom.btnColor = e.target.value;
+    $('#dc-btn-color-hex').value = e.target.value;
+    renderRequest();
+  });
+  $('#dc-btn-color-hex').addEventListener('input', e => {
+    const v = e.target.value.startsWith('#') ? e.target.value : `#${e.target.value}`;
+    if (!/^#[0-9a-fA-F]{6}$/.test(v)) return;
+    custom.btnColor = v;
+    $('#dc-btn-color').value = v;
+    renderRequest();
+  });
   $('#dc-own-text').addEventListener('input', e => { custom.ownText = e.target.value || 'Complete purchase'; });
   const wire = (id, obj, key) => $(`#${id}`).addEventListener('change', e => { obj[key] = e.target.value; renderRequest(); });
   wire('dc-ap-color', custom.ap, 'button_color');
