@@ -335,8 +335,10 @@ code { font-family: var(--font-mono); }
 .tkc-sec-hint { margin-left: auto; font-family: var(--font-mono); font-size: 9px; font-weight: 400; letter-spacing: 0; text-transform: none; }
 .tkc-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 11px; }
 .tkc-row[hidden] { display: none; }
-.tkc-lab { font-size: 12.5px; font-weight: 600; color: var(--eng-text); line-height: 1.25; }
-.tkc-lab code { display: block; font-family: var(--font-mono); font-size: 9.5px; font-weight: 400; color: var(--eng-faint); margin-top: 2px; }
+.tkc-lab { font-size: 12.5px; font-weight: 600; color: var(--eng-text); line-height: 1.25; min-width: 0; }
+/* long unbreakable params (digital_wallets_buttons_customization.apple_pay)
+   must wrap, or the label's min-content width pushes the controls out of the panel */
+.tkc-lab code { display: block; font-family: var(--font-mono); font-size: 9.5px; font-weight: 400; color: var(--eng-faint); margin-top: 2px; overflow-wrap: anywhere; }
 .tkc-seg { display: flex; gap: 2px; background: var(--eng-surface); border: 1px solid var(--eng-line); border-radius: 8px; padding: 2px; flex: none; }
 .tkc-sec > .tkc-seg { width: 100%; margin-bottom: 11px; }
 .tkc-seg button {
@@ -777,3 +779,42 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .dw-logo { width: 30px; height: 30px; border-radius: 8px; background: #fff; }
 .dw-logo.apple { background: #fff; border: 0; }
 .tkc-cta { margin-top: 26px; height: 60px; font-size: 17px; }
+
+/* ── Compact fit — 14" laptop @ 100% ─────────────────────────
+   Below ~920px of viewport height the full-size client card overflows the
+   fold. Zoom the client pane down (the engine room is untouched — its
+   text-heavy panels keep full size) and tighten the most generous spacing
+   so both flows fit without scrolling. Larger displays keep the full-size
+   design exactly as approved. */
+@media (max-height: 920px) {
+  .pane-left { zoom: 0.85; }
+
+  /* checkout card */
+  .browser-body { padding: 22px 26px 24px; }
+  .co-order { margin-top: 18px; }
+  .co-totals { margin-top: 16px; }
+  .co-paylabel { margin-top: 20px; }
+  .co-field label { margin: 11px 0 6px; }
+  .co-cta { margin-top: 20px; height: 52px; }
+
+  /* toolkit config panel */
+  .tk-paycol { padding: 12px; }
+  .tk-summary { padding: 20px 22px 18px; }
+  .tk-config { padding: 16px 20px 18px; }
+  .tkc-sec { padding-top: 11px; }
+  .tkc-sec ~ .tkc-sec { margin-top: 11px; }
+  .tkc-row { margin-bottom: 8px; }
+  .tkc-lab { font-size: 13.5px; }
+  .tkc-lab code { font-size: 11px; }
+  .tkc-input { height: 34px; font-size: 13px; }
+  .tkc-select { height: 30px; font-size: 12px; }
+  .tkc-seg button { padding: 6px 12px; font-size: 13px; }
+  .tkc-switch { width: 40px; height: 22px; }
+  .tkc-switch::after { width: 16px; height: 16px; }
+  .tkc-switch:checked::after { left: 21px; }
+  .tkc-color { width: 32px; height: 32px; }
+  .tkc-wallet { font-size: 13.5px; }
+  .dw-logo { width: 26px; height: 26px; }
+  .tkc-wallet-custom { margin-left: 37px; }
+  .tkc-cta { margin-top: 14px; height: 46px; font-size: 15px; }
+}
