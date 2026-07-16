@@ -47,8 +47,13 @@
     <!-- ── Split ── -->
     <main class="split">
 
-      <!-- LEFT: client site + demo controls -->
+      <!-- LEFT: client site / back office + demo controls -->
       <section class="pane pane-left">
+        <div class="left-tabs" id="left-tabs">
+          <button class="left-tab active" data-view="client">Client Site</button>
+          <button class="left-tab" data-view="backoffice">Client Back Office</button>
+        </div>
+
         <div class="browser">
           <div class="browser-chrome">
             <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
@@ -61,6 +66,8 @@
         </div>
         <div class="offstage" id="offstage" hidden><!-- out-of-window annotations (e.g. bank-app view) --></div>
         <div class="demo-controls" id="demo-controls" hidden><!-- flow-specific SE controls --></div>
+
+        <div class="backoffice" id="backoffice" hidden><!-- rendered by flows/back-office.js --></div>
       </section>
 
       <!-- RIGHT: engine room -->

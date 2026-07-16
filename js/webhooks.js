@@ -10,6 +10,7 @@
 import { BACKEND_URL } from './api.js';
 import { state } from './state.js';
 import { renderJSONView } from './json-view.js';
+import { classify } from './classify.js';
 
 const $ = (s) => document.querySelector(s);
 const FAIL_STATUS = ['ERR', 'EXP', 'CAN', 'DEC'];
@@ -52,18 +53,6 @@ export function setWatchPaymentId(id) {
 export function stopWebhookWatch() {
   if (timer) clearInterval(timer);
   timer = null;
-}
-
-function classify(e) {
-  const type = (e.type || '').toUpperCase();
-  // Best practice: only the terminal webhook confirms an outcome.
-  // PAYMENT_COMPLETED (or a capture) = terminal success.
-  if (/COMPLETED|CAPTURE/.test(type)) return 'success';
-  // PAYMENT_FAILED / declined / expired / cancelled = terminal failure.
-  if (/FAILED|DECLINED|EXPIRED|CANCEL/.test(type)) return 'failure';
-  // PAYMENT_SUCCEEDED (even CLO+paid) and status ACT are intermediate — wait
-  // for the terminal event; never confirm off PAYMENT_SUCCEEDED.
-  return 'pending';
 }
 
 function maybeFireTerminal(events) {
@@ -146,6 +135,11 @@ function verifyChip(v) {
 }
 
 function render(events) {
+  // Back office has its own renderer for the same shared DOM targets — while
+  // it's the active left tab, this watcher keeps polling/tracking terminal
+  // state (so the hidden client screen updates correctly in the background)
+  // but skips the DOM write so it can't clobber back office's own paint.
+  if (state.leftView && state.leftView !== 'client') return;
   const el = $('#panel-webhooks');
   if (!el) return;
   const listening = !!timer;

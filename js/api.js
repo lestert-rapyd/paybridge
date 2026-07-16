@@ -28,3 +28,24 @@ export async function createCheckoutSession(body) {
   try { data = await res.json(); } catch { /* non-JSON */ }
   return { ok: res.ok, httpStatus: res.status, data };
 }
+
+/** POST /api/create-refund → Rapyd POST /v1/refunds (back office) */
+export async function createRefund(body) {
+  const res = await fetch(`${BACKEND_URL}/api/create-refund`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  let data = null;
+  try { data = await res.json(); } catch { /* non-JSON */ }
+  return { ok: res.ok, httpStatus: res.status, data };
+}
+
+/** GET /api/webhooks?refs=ref1,ref2,... → batched status for the back-office ledger poller */
+export async function fetchWebhooksBatch(refs) {
+  const qs = encodeURIComponent(refs.join(','));
+  const res = await fetch(`${BACKEND_URL}/api/webhooks?refs=${qs}`);
+  let data = null;
+  try { data = await res.json(); } catch { /* non-JSON */ }
+  return data || { byRef: {}, configured: false };
+}

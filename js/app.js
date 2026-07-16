@@ -8,6 +8,13 @@ import { setActiveTab, setStatus } from './ui.js';
 import { stopWebhookWatch } from './webhooks.js';
 import * as ownFields from './flows/own-fields.js';
 import * as toolkit from './flows/toolkit.js';
+import * as backOffice from './flows/back-office.js';
+
+// Patch keys that mean "the customer's flow/context actually changed" —
+// only these trigger the full client-flow reset (mount() etc). Everything
+// else (leftView toggling, ledger updates, in-flow bookkeeping) must be able
+// to re-render its own surface without disturbing an in-progress checkout.
+const RESET_KEYS = ['vertical', 'model', 'env'];
 
 const $  = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -94,6 +101,24 @@ function emptyState(ico, text) {
   return `<div class="eng-empty"><div class="ee-ico">${ico}</div><div class="ee-text">${text}</div></div>`;
 }
 
+/* ── Left-pane tabs (Client Site / Client Back Office) ───────
+   Toggling this NEVER touches the client flow's DOM — it only shows/hides
+   already-rendered sections, so an in-progress checkout (e.g. mid-3DS)
+   resumes exactly where it was when the SE switches back. */
+function toggleLeftView() {
+  const isBackoffice = state.leftView === 'backoffice';
+  $$('.left-tab').forEach(b => b.classList.toggle('active', b.dataset.view === state.leftView));
+  $('.browser').hidden = isBackoffice;
+  $('#offstage').hidden = isBackoffice || !$('#offstage').innerHTML;
+  $('#demo-controls').hidden = isBackoffice || !FLOWS[state.model].renderControlsHTML;
+  $('#backoffice').hidden = !isBackoffice;
+  if (isBackoffice) backOffice.render();
+  // Back office may have repainted the right panel's Request/Response while
+  // the SE was away — repaint them from the client flow's own persisted
+  // state on the way back (webhooks.js already guards its own panel).
+  else FLOWS[state.model].refreshRightPanel?.();
+}
+
 /* ── Header controls ─────────────────────────────────────── */
 function renderVerticalPills() {
   $('#vertical-pills').innerHTML = VERTICAL_ORDER.map(id => {
@@ -131,10 +156,23 @@ function wire() {
     const btn = e.target.closest('.rtab');
     if (btn) setActiveTab(btn.dataset.tab);
   });
+  $('#left-tabs').addEventListener('click', e => {
+    const btn = e.target.closest('.left-tab');
+    if (btn && btn.dataset.view !== state.leftView) setState({ leftView: btn.dataset.view });
+  });
 }
 
 /* ── Render orchestration ────────────────────────────────── */
-function renderAll() {
+function renderAll(_state, patch) {
+  const isInitial = !patch;
+  const touchesClientFlow = isInitial || Object.keys(patch).some(k => RESET_KEYS.includes(k));
+
+  if (!touchesClientFlow) {
+    // e.g. a leftView toggle — re-sync only what that actually affects.
+    if ('leftView' in patch) toggleLeftView();
+    return;
+  }
+
   stopWebhookWatch();
   syncControlStates();
   setActiveTab('request');
@@ -148,4 +186,5 @@ subscribe(renderAll);
 document.documentElement.dataset.vertical = state.vertical;
 renderVerticalPills();
 wire();
+backOffice.mount();
 renderAll();

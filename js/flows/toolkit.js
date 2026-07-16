@@ -26,6 +26,7 @@ import { setActiveTab, setStatus } from '../ui.js';
 import { startWebhookWatch, setWatchPaymentId } from '../webhooks.js';
 import { renderProcessing, renderSuccess, renderError } from '../screens.js';
 import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
+import * as ledger from '../ledger.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -33,6 +34,19 @@ let mode = 'embedded';        // embedded | wallets | hosted
 let tds = true;               // payment_method_options.3d_required
 let tdsFlow = 'iframe';       // iframe | redirect  (wait_on_payment_redirect)
 let payBtn = 'rapyd';         // rapyd | custom     (hide_submit_button)
+
+// FX: engaged only when `fx` is on — requested_currency + fixed_side must be
+// absent entirely on a no-FX call (sending them errors it). `expiration` is
+// computed silently, never exposed as a control.
+const FX_CURRENCIES = ['USD', 'EUR', 'GBP', 'SGD'];
+let fx = false;
+let requestedCurrency = null;
+let fixedSide = 'sell'; // 'sell' (merchant bears FX risk) | 'buy' (customer bears it)
+
+function fxCurrencyOptions() {
+  const p = activeProduct();
+  return FX_CURRENCIES.filter(c => c !== p.currency);
+}
 const custom = {
   btnText: 'Pay Now',         // pay_button_text (max 16 chars) — Rapyd's button
   btnColor: null,             // pay_button_color — null = vertical accent
@@ -73,6 +87,13 @@ function displayBody() {
     custom_elements: { display_description: true },
     payment_method_type_categories: ['card'],
     payment_method_options: { '3d_required': tds },
+    // No-FX flows must omit all three fields entirely — sending any of them
+    // without the others errors the call.
+    ...(fx && requestedCurrency ? {
+      requested_currency: requestedCurrency,
+      fixed_side: fixedSide,
+      expiration: Math.floor(Date.now() / 1000) + 24 * 3600, // silent — not an SE-facing control
+    } : {}),
   };
 }
 function postBody() {
@@ -190,6 +211,16 @@ function configPanelHTML() {
         ${row('Challenge', 'wait_on_payment_redirect', seg('tdsFlow', [['iframe', 'In iframe'], ['redirect', 'Redirect']], tdsFlow), `id="tkc-row-challenge" ${tds ? '' : 'hidden'}`)}
       </div>
 
+      <div class="tkc-sec" id="tkc-fx">
+        <div class="tkc-sec-label">FX</div>
+        ${row('Enable FX', 'requested_currency', `<label class="tkc-switch-wrap"><input type="checkbox" class="tkc-switch" id="tk-fx" ${fx ? 'checked' : ''} /></label>`)}
+        <div class="tkc-row" id="tkc-row-fx-currency" ${fx ? '' : 'hidden'}>
+          <div class="tkc-lab">Requested currency<code>requested_currency</code></div>
+          ${selectEl('tk-fx-currency', fxCurrencyOptions(), requestedCurrency)}
+        </div>
+        ${row('Fixed side', 'fixed_side', seg('fixedSide', [['sell', 'Sell · merchant risk'], ['buy', 'Buy · customer risk']], fixedSide), `id="tkc-row-fx-side" ${fx ? '' : 'hidden'}`)}
+      </div>
+
       <div class="tkc-sec" id="tkc-wallets">
         <div class="tkc-sec-label">Digital wallets<span class="tkc-sec-hint">digital_wallets_include_methods</span></div>
 
@@ -239,6 +270,8 @@ function syncControlVisibility() {
   // Customization rows only for wallets that are actually included
   $('#tkc-cust-ap')?.toggleAttribute('hidden', !wallets.apple_pay);
   $('#tkc-cust-gp')?.toggleAttribute('hidden', !wallets.google_pay);
+  $('#tkc-row-fx-currency')?.toggleAttribute('hidden', !fx);
+  $('#tkc-row-fx-side')?.toggleAttribute('hidden', !fx);
   const launch = $('#tk-launch');
   if (launch) launch.textContent = hosted ? 'Create session →' : 'Render toolkit →';
 }
@@ -268,6 +301,13 @@ function renderResponse() {
   el.innerHTML = `
     <div class="eng-pillrow"><span class="wh-pill ${ok ? 'success' : 'failure'}">HTTP ${ok ? 200 : 400}</span><span class="wh-pill ${ok ? 'success' : 'failure'}">${ok ? 'CHECKOUT CREATED' : 'ERROR'}</span></div>
     ${renderJSONView(lastSession)}`;
+}
+
+/** See own-fields.js's refreshRightPanel — same reasoning. renderResponse()
+    here already reads off persisted `lastSession`, so it's idempotent. */
+export function refreshRightPanel() {
+  renderRequest();
+  renderResponse();
 }
 
 // Terminal-style log, tagged like a real dev console: HH:MM:SS  tag  message
@@ -303,8 +343,13 @@ function handleTerminal(ev) {
   // Terminal PAYMENT_COMPLETED/PAYMENT_FAILED webhook, or the poll fallback's
   // status object (CLO+paid). Never confirmed off PAYMENT_SUCCEEDED.
   const success = /COMPLETED|CAPTURE/.test((ev.type || '').toUpperCase()) || (ev.status === 'CLO' && ev.paid);
-  if (success) { setStatus('Paid', 'ok'); renderSuccess(ev); }
-  else { setStatus('Failed', 'error'); renderError(ev); }
+  if (success) {
+    setStatus('Paid', 'ok'); renderSuccess(ev);
+    ledger.updateStatus(state.reference, { status: 'completed', phase: 'completed' });
+  } else {
+    setStatus('Failed', 'error'); renderError(ev);
+    ledger.updateStatus(state.reference, { status: 'failed', phase: 'failed' });
+  }
 }
 
 /* ── Toolkit script + render ─────────────────────────────── */
@@ -325,10 +370,11 @@ function bindToolkitEvents() {
   listenersBound = true;
   window.addEventListener('onLoading', e => logEvent('onLoading', `loading: ${e.detail?.loading}`, 'tk'));
   window.addEventListener('onCheckoutPaymentPending', e => {
-    if (e.detail?.id) setWatchPaymentId(e.detail.id);
+    if (e.detail?.id) { setWatchPaymentId(e.detail.id); ledger.setPaymentId(state.reference, e.detail.id); }
     document.getElementById('tk-own-pay')?.remove(); // payment sent for authorisation
     logEvent('onCheckoutPaymentPending', `${e.detail?.status || ''} ${e.detail?.next_action || ''}`.trim(), 'tk', 'action');
     setStatus('Pending · 3DS', 'action');
+    ledger.updateStatus(state.reference, { phase: 'pending_3ds' });
     // Redirect scenario: the merchant page handles the 3DS challenge itself.
     const redirect = e.detail?.redirect_url;
     if (tdsFlow === 'redirect' && redirect) {
@@ -337,11 +383,12 @@ function bindToolkitEvents() {
     }
   });
   window.addEventListener('onCheckoutPaymentSuccess', e => {
-    if (e.detail?.id) setWatchPaymentId(e.detail.id);
+    if (e.detail?.id) { setWatchPaymentId(e.detail.id); ledger.setPaymentId(state.reference, e.detail.id); }
     document.getElementById('tk-own-pay')?.remove(); // payment sent for authorisation
     logEvent('onCheckoutPaymentSuccess', `${e.detail?.status || ''} · paid:${e.detail?.paid}`, 'tk', 'ok');
     setStatus('Confirming…', 'processing');
     renderProcessing('Payment received', 'Confirming via webhook…');
+    ledger.updateStatus(state.reference, { phase: 'awaiting_confirmation' });
   });
   window.addEventListener('onCheckoutPaymentFailure', e => {
     logEvent('onCheckoutPaymentFailure', (e.detail?.error && (e.detail.error.message || e.detail.error)) || 'failure', 'tk', 'err');
@@ -387,9 +434,13 @@ async function launch() {
   {
     const v = VERTICALS[state.vertical];
     const p = activeProduct();
-    // snapshot for the success screen's bank-statement view (fx reserved
-    // for when FX fields are configured in the demo; last4 arrives via webhook)
-    state.lastPayment = { descriptor: v.descriptor, amount: p.amount, currency: p.currency, last4: null, fx: null };
+    // snapshot for the success screen's bank-statement view (last4 arrives via webhook)
+    const fxSnapshot = fx && requestedCurrency ? { currency: requestedCurrency, amount: p.amount } : null;
+    state.lastPayment = { descriptor: v.descriptor, amount: p.amount, currency: p.currency, last4: null, fx: fxSnapshot };
+    ledger.recordPayment(state.reference, {
+      model: 'toolkit', vertical: state.vertical, amount: p.amount, currency: p.currency,
+      requested_currency: fx ? requestedCurrency : null, fixed_side: fx ? fixedSide : null,
+    });
   }
   renderRequest();
   setActiveTab('request');
@@ -442,6 +493,7 @@ async function launch() {
     setStatus('Error', 'error');
     logEvent('POST /v1/checkout', err.message, 'api', 'err');
     renderError({ status: 'ERR', message: err.message });
+    ledger.updateStatus(state.reference, { status: 'failed', phase: 'error' });
   }
 }
 
@@ -449,6 +501,7 @@ async function launch() {
 export function mount() {
   const panel = $('#tk-config');
   if (!panel) return;
+  if (!fxCurrencyOptions().includes(requestedCurrency)) requestedCurrency = fxCurrencyOptions()[0];
   renderRequest();
   events = [];
   lastHeartbeat = null;
@@ -464,6 +517,7 @@ export function mount() {
       if (row.dataset.opt === 'mode') mode = btn.dataset.val;
       if (row.dataset.opt === 'tdsFlow') tdsFlow = btn.dataset.val;
       if (row.dataset.opt === 'payBtn') payBtn = btn.dataset.val;
+      if (row.dataset.opt === 'fixedSide') fixedSide = btn.dataset.val;
       row.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
       syncControlVisibility();
       renderRequest();
@@ -475,6 +529,12 @@ export function mount() {
     syncControlVisibility();
     renderRequest();
   });
+  $('#tk-fx').addEventListener('change', e => {
+    fx = e.target.checked;
+    syncControlVisibility();
+    renderRequest();
+  });
+  $('#tk-fx-currency').addEventListener('change', e => { requestedCurrency = e.target.value; renderRequest(); });
   // Each wallet is its own on/off switch, independent of the other
   const wireWallet = (id, key) => $(`#${id}`).addEventListener('change', e => {
     wallets[key] = e.target.checked;
