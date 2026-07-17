@@ -27,19 +27,6 @@ let tds = false;
 let focusedId = null;
 let sent = false;
 
-// FX: engaged only when `fx` is on — requested_currency + fixed_side must be
-// absent entirely on a no-FX call (sending them errors it). `expiration` is
-// computed silently, never exposed as a control.
-const FX_CURRENCIES = ['USD', 'EUR', 'GBP', 'SGD'];
-let fx = false;
-let requestedCurrency = null;
-let fixedSide = 'sell'; // 'sell' (merchant bears FX risk) | 'buy' (customer bears it)
-
-function fxCurrencyOptions() {
-  const p = activeProduct();
-  return FX_CURRENCIES.filter(c => c !== p.currency);
-}
-
 /* ── Request bodies ──────────────────────────────────────── */
 function displayBody() {
   const v = VERTICALS[state.vertical];
@@ -68,10 +55,12 @@ function displayBody() {
   };
   if (tds) body.payment_method_options = { '3d_required': true };
   // No-FX flows must omit all three fields entirely — sending any of them
-  // without the others errors the call.
-  if (fx && requestedCurrency) {
-    body.requested_currency = requestedCurrency;
-    body.fixed_side = fixedSide;
+  // without the others errors the call. FX config lives on state.fx —
+  // edited via the popover beside app.js's price tile, not on this page.
+  const fx = state.fx;
+  if (fx.enabled && fx.requestedCurrency) {
+    body.requested_currency = fx.requestedCurrency;
+    body.fixed_side = fx.fixedSide;
     body.expiration = Math.floor(Date.now() / 1000) + 24 * 3600; // silent — not an SE-facing control
   }
   return body;
@@ -113,20 +102,7 @@ export function renderPaymentHTML() {
       <input type="checkbox" id="f-tds" ${tds ? 'checked' : ''} />
       <span>Require 3-D Secure</span>
     </label>
-    <label class="co-tds">
-      <input type="checkbox" id="f-fx" ${fx ? 'checked' : ''} />
-      <span>Enable FX</span>
-    </label>
-    <div class="co-fx-controls" id="fx-controls" ${fx ? '' : 'hidden'}>
-      <select class="co-fx-select" id="f-fx-currency">
-        ${fxCurrencyOptions().map(c => `<option value="${c}" ${c === requestedCurrency ? 'selected' : ''}>${c}</option>`).join('')}
-      </select>
-      <div class="co-fx-seg" id="f-fx-side">
-        <button type="button" data-val="sell" class="${fixedSide === 'sell' ? 'active' : ''}">Sell · merchant risk</button>
-        <button type="button" data-val="buy" class="${fixedSide === 'buy' ? 'active' : ''}">Buy · customer risk</button>
-      </div>
-    </div>
-    <button class="co-cta" id="pay-btn">${v.cta} ${p.symbol}${p.amount}</button>`;
+    <button class="co-cta" id="pay-btn">${v.cta} ${p.amount} ${p.currency}</button>`;
 }
 
 /* ── Request panel ───────────────────────────────────────── */
@@ -208,11 +184,12 @@ async function pay() {
     const digits = card.number.replace(/\D/g, '');
     const brand = detectBrand(card.number).brand; // 'VISA' | 'MASTERCARD' | ''
     const network = brand ? brand[0] + brand.slice(1).toLowerCase() : null;
-    const fxSnapshot = fx && requestedCurrency ? { currency: requestedCurrency, amount: p.amount } : null;
+    const fx = state.fx;
+    const fxSnapshot = fx.enabled && fx.requestedCurrency ? { currency: fx.requestedCurrency, amount: p.amount } : null;
     state.lastPayment = { descriptor: v.descriptor, amount: p.amount, currency: p.currency, last4: digits.slice(-4), network, fx: fxSnapshot };
     ledger.recordPayment(state.reference, {
       model: 'own-fields', vertical: state.vertical, amount: p.amount, currency: p.currency,
-      requested_currency: fx ? requestedCurrency : null, fixed_side: fx ? fixedSide : null,
+      requested_currency: fx.enabled ? fx.requestedCurrency : null, fixed_side: fx.enabled ? fx.fixedSide : null,
     });
   }
   sent = true;
@@ -277,7 +254,6 @@ export function mount() {
   els.name.value = card.name;
   updateBrand();
   sent = false;
-  if (!fxCurrencyOptions().includes(requestedCurrency)) requestedCurrency = fxCurrencyOptions()[0];
   renderRequest();
 
   const wire = (key, el, formatter) => {
@@ -288,8 +264,6 @@ export function mount() {
       setStatus('Drafting request', 'drafting');
       renderRequest();
     });
-    el.addEventListener('focus', () => { focusedId = el.id; applyHighlight(); });
-    el.addEventListener('blur', () => { focusedId = null; applyHighlight(); });
   };
   wire('number', els.number, formatNumber);
   wire('expiry', els.expiry, formatExpiry);
@@ -297,22 +271,27 @@ export function mount() {
   wire('name', els.name, null);
 
   $('#f-tds').addEventListener('change', e => { tds = e.target.checked; renderRequest(); });
-  $('#f-fx').addEventListener('change', e => {
-    fx = e.target.checked;
-    $('#fx-controls').toggleAttribute('hidden', !fx);
-    renderRequest();
-  });
-  $('#f-fx-currency').addEventListener('change', e => { requestedCurrency = e.target.value; renderRequest(); });
-  $('#f-fx-side').addEventListener('click', e => {
-    const btn = e.target.closest('button[data-val]');
-    if (!btn) return;
-    fixedSide = btn.dataset.val;
-    $('#f-fx-side').querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
-    renderRequest();
-  });
   $('#pay-btn').addEventListener('click', pay);
   $('#use-test')?.addEventListener('click', fillTestCard);
 }
+
+// Highlight sync — delegated on `document` via focusin/focusout (which,
+// unlike focus/blur, bubble) so it's wired exactly ONCE at module load and
+// keeps working regardless of how often the underlying element gets
+// recreated: card fields on every own-fields mount(), the price tile on
+// every vertical/model/env reset, the FX popover's fields on every popover
+// re-render (app.js rebuilds #fx-popover's innerHTML far more often than
+// mount() runs — a per-element listener there would silently go stale).
+document.addEventListener('focusin', e => {
+  if (!(e.target.id in FIELD_MAP)) return;
+  focusedId = e.target.id;
+  applyHighlight();
+});
+document.addEventListener('focusout', e => {
+  if (!(e.target.id in FIELD_MAP)) return;
+  focusedId = null;
+  applyHighlight();
+});
 
 /* ── Toast ───────────────────────────────────────────────── */
 function toast(msg, type = 'ok') {

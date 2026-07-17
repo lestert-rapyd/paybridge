@@ -77,8 +77,16 @@ export const VERTICALS = {
 export const VERTICAL_ORDER = ['ecommerce', 'crypto', 'gaming'];
 
 /* The active vertical's product for the current environment.
-   Live charges a real card — every price collapses to one penny. */
+   An SE-edited amount/currency (own-fields' price tile) overrides the
+   vertical's default when it was captured for this same vertical — it's
+   never explicitly cleared, this guard is what makes it fall away cleanly
+   when the vertical changes. Live still charges a real card — every price
+   collapses to one penny regardless of any edited amount. */
 export function activeProduct(verticalId = state.vertical) {
-  const p = VERTICALS[verticalId].product;
+  let p = VERTICALS[verticalId].product;
+  const override = state.productOverride;
+  if (override && override.vertical === verticalId) {
+    p = { ...p, amount: override.amount, currency: override.currency };
+  }
   return state.env === 'live' ? { ...p, amount: '0.01' } : p;
 }

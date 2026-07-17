@@ -17,6 +17,13 @@ export const state = {
   response:   null,         // last API response
   webhooks:   [],           // received webhook events
   ledger:     [],           // session payment ledger (owned/mutated by ledger.js)
+
+  // Own-fields checkout tile + FX popover — mutated directly (not via
+  // setState) by app.js/own-fields.js, deliberately outside the reactive
+  // pipeline so a keystroke never triggers a full flow reset. Read by
+  // verticals.js's activeProduct() and own-fields.js's displayBody().
+  productOverride: null,    // { vertical, amount, currency } | null
+  fx: { enabled: false, requestedCurrency: null, fixedSide: 'sell' },
 };
 
 export function setState(patch) {

@@ -6,6 +6,7 @@ import { VERTICALS, VERTICAL_ORDER, activeProduct } from './verticals.js';
 import { state, setState, subscribe } from './state.js';
 import { setActiveTab, setStatus } from './ui.js';
 import { stopWebhookWatch } from './webhooks.js';
+import { formatAmount } from './sync.js';
 import * as ownFields from './flows/own-fields.js';
 import * as toolkit from './flows/toolkit.js';
 import * as backOffice from './flows/back-office.js';
@@ -28,6 +29,96 @@ const MODEL_DESC = {
 
 const THUMB_GLYPH = { ecommerce: '🪑', crypto: '₿', gaming: '🎲' };
 
+// Own-fields' editable price tile + the FX popover it opens beside — shared
+// curated list for both the tile's charge currency and the popover's
+// requested_currency (they mutually exclude each other's current value).
+const CURRENCIES = ['USD', 'EUR', 'GBP', 'SGD'];
+
+/* ── Own-fields price tile + FX popover ──────────────────────
+   The tile is the single editable source of truth for amount/currency
+   (state.productOverride); the popover beside it configures settlement FX
+   (state.fx). Both are plain data mutated directly — see state.js. */
+function currencyOptionsHTML(values, current) {
+  return values.map(c => `<option value="${c}" ${c === current ? 'selected' : ''}>${c}</option>`).join('');
+}
+function totalsHTML(p, feeLabel, feeValue) {
+  return `
+    <div class="co-line"><span>Subtotal</span><span>${p.amount} ${p.currency}</span></div>
+    <div class="co-line"><span>${feeLabel}</span><span class="${feeValue === 'Free' ? 'free' : ''}">${feeValue}</span></div>
+    <div class="co-line total"><span>Total</span><span class="co-total-amt">${p.amount} ${p.currency}</span></div>`;
+}
+function ensureFxCurrencyValid() {
+  const options = CURRENCIES.filter(c => c !== activeProduct().currency);
+  if (!options.includes(state.fx.requestedCurrency)) state.fx.requestedCurrency = options[0];
+}
+function fxPopoverHTML() {
+  const fx = state.fx;
+  const options = CURRENCIES.filter(c => c !== activeProduct().currency);
+  return `
+    <div class="fx-popover-head">Settlement FX</div>
+    <label class="co-tds">
+      <input type="checkbox" id="fx-enable" ${fx.enabled ? 'checked' : ''} />
+      <span>Enable FX</span>
+    </label>
+    <div class="fx-popover-body" id="fx-popover-body" ${fx.enabled ? '' : 'hidden'}>
+      <div>
+        <div class="fx-popover-label">Requested currency · <code>requested_currency</code></div>
+        <select class="co-fx-select" id="fx-currency">${currencyOptionsHTML(options, fx.requestedCurrency)}</select>
+      </div>
+      <div>
+        <div class="fx-popover-label">Fixed side · <code>fixed_side</code></div>
+        <div class="co-fx-seg" id="fx-side">
+          <button type="button" data-val="sell" class="${fx.fixedSide === 'sell' ? 'active' : ''}">Sell · merchant risk</button>
+          <button type="button" data-val="buy" class="${fx.fixedSide === 'buy' ? 'active' : ''}">Buy · customer risk</button>
+        </div>
+      </div>
+    </div>`;
+}
+function renderFxPopover() {
+  ensureFxCurrencyValid();
+  $('#fx-popover').innerHTML = fxPopoverHTML();
+}
+function openFxPopover() {
+  const trigger = $('#fx-trigger');
+  const popover = $('#fx-popover');
+  if (!trigger || !popover) return;
+  renderFxPopover();
+  popover.hidden = false;
+  trigger.classList.add('active');
+  const rect = trigger.getBoundingClientRect();
+  const top = Math.min(rect.top, window.innerHeight - popover.offsetHeight - 12);
+  popover.style.top = `${Math.max(12, top)}px`;
+  popover.style.left = `${rect.right + 10}px`;
+}
+function closeFxPopover() {
+  $('#fx-popover').hidden = true;
+  $('#fx-trigger')?.classList.remove('active');
+}
+// Re-syncs everything that reads activeProduct()/state.fx after a tile or
+// popover edit — never touches the tile's own input/select DOM (that would
+// disrupt an actively-typing cursor) or the card fields.
+function refreshAfterEdit() {
+  const p = activeProduct();
+  const feeLabel = p.delivery ? 'Delivery' : 'Fees';
+  const feeValue = p.delivery ? p.delivery : 'Free';
+  const totalsEl = $('#order-totals');
+  if (totalsEl) totalsEl.innerHTML = totalsHTML(p, feeLabel, feeValue);
+  const payBtn = $('#pay-btn');
+  if (payBtn) payBtn.textContent = `${VERTICALS[state.vertical].cta} ${p.amount} ${p.currency}`;
+  const popover = $('#fx-popover');
+  if (popover && !popover.hidden) renderFxPopover();
+  FLOWS[state.model].refreshRightPanel?.();
+}
+function commitTileEdit() {
+  const amountEl = $('#tile-amount');
+  const currencyEl = $('#tile-currency');
+  if (!amountEl || !currencyEl) return;
+  const filtered = formatAmount(amountEl.value);
+  if (filtered !== amountEl.value) amountEl.value = filtered;
+  state.productOverride = { vertical: state.vertical, amount: filtered, currency: currencyEl.value };
+  refreshAfterEdit();
+}
+
 /* ── Left: checkout ──────────────────────────────────────── */
 function renderCheckout() {
   const v = VERTICALS[state.vertical];
@@ -35,6 +126,8 @@ function renderCheckout() {
   const flow = FLOWS[state.model];
   const host = $('#checkout');
   const [c1, c2] = p.thumb;
+
+  closeFxPopover(); // never lingers open across a vertical/model/env reset
 
   const feeLabel = p.delivery ? 'Delivery' : 'Fees';
   const feeValue = p.delivery ? p.delivery : 'Free';
@@ -58,14 +151,14 @@ function renderCheckout() {
           <div class="co-order-name">${p.name}</div>
           <div class="co-order-desc">${p.desc}</div>
         </div>
-        <div class="co-order-price">${p.symbol}${p.amount}</div>
+        <div class="co-order-price">
+          <input type="text" inputmode="decimal" class="tile-field tile-amount" id="tile-amount" value="${p.amount}" title="Click to edit the charged amount" />
+          <select class="tile-field tile-currency" id="tile-currency" title="Click to edit the charge currency">${currencyOptionsHTML(CURRENCIES, p.currency)}</select>
+        </div>
+        <button type="button" class="fx-trigger" id="fx-trigger" title="Configure settlement FX">FX</button>
       </div>
 
-      <div class="co-totals">
-        <div class="co-line"><span>Subtotal</span><span>${p.symbol}${p.amount}</span></div>
-        <div class="co-line"><span>${feeLabel}</span><span class="${feeValue === 'Free' ? 'free' : ''}">${feeValue}</span></div>
-        <div class="co-line total"><span>Total</span><span class="co-total-amt">${p.symbol}${p.amount}</span></div>
-      </div>
+      <div class="co-totals" id="order-totals">${totalsHTML(p, feeLabel, feeValue)}</div>
 
       ${payLabel}
       ${flow.renderPaymentHTML()}`;
@@ -160,6 +253,33 @@ function wire() {
     const btn = e.target.closest('.left-tab');
     if (btn && btn.dataset.view !== state.leftView) setState({ leftView: btn.dataset.view });
   });
+
+  // Price tile + FX popover — delegated on stable containers (#checkout and
+  // #fx-popover never get destroyed, only their innerHTML gets rebuilt), so
+  // this is wired exactly once regardless of how many times the flow remounts.
+  $('#checkout').addEventListener('input', e => { if (e.target.id === 'tile-amount') commitTileEdit(); });
+  $('#checkout').addEventListener('change', e => { if (e.target.id === 'tile-currency') commitTileEdit(); });
+  $('#checkout').addEventListener('click', e => {
+    if (!e.target.closest('#fx-trigger')) return;
+    $('#fx-popover').hidden ? openFxPopover() : closeFxPopover();
+  });
+  $('#fx-popover').addEventListener('change', e => {
+    if (e.target.id === 'fx-enable') { state.fx.enabled = e.target.checked; renderFxPopover(); refreshAfterEdit(); }
+    if (e.target.id === 'fx-currency') { state.fx.requestedCurrency = e.target.value; refreshAfterEdit(); }
+  });
+  $('#fx-popover').addEventListener('click', e => {
+    const btn = e.target.closest('#fx-side button[data-val]');
+    if (!btn) return;
+    state.fx.fixedSide = btn.dataset.val;
+    renderFxPopover();
+    refreshAfterEdit();
+  });
+  document.addEventListener('click', e => {
+    const popover = $('#fx-popover');
+    if (popover.hidden || popover.contains(e.target) || e.target.closest('#fx-trigger')) return;
+    closeFxPopover();
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFxPopover(); });
 }
 
 /* ── Render orchestration ────────────────────────────────── */

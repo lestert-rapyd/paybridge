@@ -9,6 +9,10 @@ export const FIELD_MAP = {
   'f-expiry': ['payment_method.fields.expiration_month', 'payment_method.fields.expiration_year'],
   'f-cvv':    ['payment_method.fields.cvv'],
   'f-name':   ['payment_method.fields.name'],
+  'tile-amount':   ['amount'],
+  'tile-currency': ['currency'],
+  'fx-currency':   ['requested_currency'],
+  'fx-side':       ['fixed_side'],
 };
 
 /** Detect scheme from PAN → Rapyd payment_method type (GB methods are enabled on the account). */
@@ -36,4 +40,12 @@ export function formatExpiry(value) {
 export function parseExpiry(value) {
   const d = (value || '').replace(/\D/g, '');
   return { month: d.slice(0, 2), year: d.slice(2, 4) };
+}
+
+/** Digits + a single decimal point — for the tile's editable amount field. */
+export function formatAmount(value) {
+  let v = (value || '').replace(/[^\d.]/g, '');
+  const dot = v.indexOf('.');
+  if (dot !== -1) v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, '');
+  return v;
 }

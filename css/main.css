@@ -104,18 +104,20 @@ code { font-family: var(--font-mono); }
 
 /* ── Left-pane tabs (Client Site / Client Back Office) ──────
    Switching tabs never re-renders the client flow — it only toggles
-   which of .browser / #backoffice is visible (see app.js renderAll). */
+   which of .browser / #backoffice is visible (see app.js renderAll).
+   Style mirrors the right pane's .rtabs/.rtab exactly (flat text,
+   bottom-border active indicator) — light-theme vars, same shape. */
 .left-tabs {
-  display: flex; gap: 4px; margin: 0 auto 14px; width: 100%; max-width: 470px;
-  background: var(--surface-2); border-radius: 999px; padding: 4px; flex: none;
+  display: flex; align-items: center; gap: 2px; margin: 0 auto 14px;
+  width: 100%; max-width: 470px; border-bottom: 1px solid var(--line); flex: none;
 }
 .left-tab {
-  flex: 1; border: 0; background: transparent; color: var(--ink-3);
-  padding: 8px 14px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
-  transition: all .15s ease;
+  border: 0; background: transparent; color: var(--ink-3);
+  padding: 11px 14px 9px; font-size: 13px; font-weight: 600;
+  border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color .15s ease;
 }
 .left-tab:hover { color: var(--ink); }
-.left-tab.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,.08)); }
+.left-tab.active { color: var(--ink); border-bottom-color: var(--accent); }
 .backoffice { width: 100%; max-width: 640px; margin: 0 auto; }
 
 /* ── Back office ─────────────────────────────────────────── */
@@ -217,7 +219,26 @@ code { font-family: var(--font-mono); }
 .co-order-info { flex: 1; min-width: 0; }
 .co-order-name { font-size: 14.5px; font-weight: 700; }
 .co-order-desc { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
-.co-order-price { font-family: var(--font-display); font-size: 20px; letter-spacing: .01em; }
+
+/* Editable price — an <input>+<select> styled to blend in as plain text
+   until hovered/focused, so there's never a static-text/edit-mode swap
+   under an actively-typing cursor (see app.js). */
+.co-order-price { display: flex; align-items: center; gap: 3px; flex: none; font-family: var(--font-display); font-size: 20px; letter-spacing: .01em; }
+.tile-field {
+  border: 1px solid transparent; background: transparent; border-radius: 6px;
+  font: inherit; color: inherit; letter-spacing: inherit; padding: 2px 5px;
+  transition: background .12s ease, border-color .12s ease; cursor: text;
+}
+.tile-field:hover, .tile-field:focus { background: var(--surface); border-color: var(--line); outline: 0; }
+.tile-amount { width: 62px; text-align: right; }
+.tile-currency { appearance: none; -webkit-appearance: none; cursor: pointer; }
+
+.fx-trigger {
+  flex: none; border: 1px dashed var(--line-2); background: transparent; color: var(--ink-3);
+  font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  padding: 5px 9px; border-radius: 999px; transition: all .12s ease;
+}
+.fx-trigger:hover, .fx-trigger.active { color: var(--accent); border-color: var(--accent); border-style: solid; background: var(--accent-soft); }
 
 .co-totals { border-top: 1px solid var(--line); padding-top: 10px; margin-bottom: 14px; }
 .co-line { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-2); margin-bottom: 5px; }
@@ -250,7 +271,6 @@ code { font-family: var(--font-mono); }
 .co-tds em { font-style: normal; color: var(--ink-4); }
 .co-tds code { font-size: 11px; color: var(--accent); }
 
-.co-fx-controls { display: flex; gap: 8px; margin: -2px 0 12px 25px; }
 .co-fx-select {
   flex: none; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px;
   background: var(--surface); font-family: inherit; font-size: 12.5px; color: var(--ink); cursor: pointer;
@@ -258,6 +278,21 @@ code { font-family: var(--font-mono); }
 .co-fx-seg { display: flex; gap: 2px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 2px; flex: 1; }
 .co-fx-seg button { flex: 1; border: 0; background: transparent; color: var(--ink-3); padding: 6px 8px; border-radius: 6px; font-size: 11.5px; font-weight: 600; }
 .co-fx-seg button.active { background: var(--surface); color: var(--ink); }
+
+/* ── FX popover — floats beside the price tile, portalled to #fx-popover
+   (a body-level sibling of .app) so .browser's overflow:hidden can't clip
+   it. Position (top/left) is computed in app.js from the trigger's rect. */
+.fx-popover {
+  position: fixed; z-index: 50; width: 230px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md);
+  box-shadow: var(--shadow-md); padding: 14px 16px;
+}
+.fx-popover-head { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 10px; }
+.fx-popover .co-tds { margin: 0 0 10px; }
+.fx-popover-body { display: flex; flex-direction: column; gap: 8px; }
+.fx-popover-body[hidden] { display: none; }
+.fx-popover-label { font-size: 10.5px; font-weight: 600; color: var(--ink-3); margin-bottom: 3px; }
+.fx-popover .co-fx-select { width: 100%; }
 
 .co-cta {
   width: 100%; height: 48px; border: 0; border-radius: var(--r-md);
@@ -715,7 +750,6 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .co-input:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
 .co-input input { font-family: var(--font-mono); font-size: 15px; color: #211e19; }
 .co-input input#f-name { font-family: inherit; }
-.co-fx-controls { margin: 10px 0 0 31px; }
 .co-tds { gap: 11px; margin: 20px 0 0; font-size: 14px; color: #4a463f; }
 .co-tds input {
   appearance: none; -webkit-appearance: none; width: 20px; height: 20px; margin: 0;
