@@ -49,6 +49,11 @@
 
       <!-- LEFT: client site / back office + demo controls -->
       <section class="pane pane-left">
+        <div class="panel-eyebrow">
+          <span class="eyebrow-dot dot-fe"></span>
+          <span class="eyebrow-label">Frontend · Client</span>
+          <span class="eyebrow-desc">what the shopper sees</span>
+        </div>
         <div class="left-tabs" id="left-tabs">
           <button class="left-tab active" data-view="client">Client Site</button>
           <button class="left-tab" data-view="backoffice">Client Back Office</button>
@@ -72,6 +77,11 @@
 
       <!-- RIGHT: engine room -->
       <section class="pane pane-right">
+        <div class="panel-eyebrow eyebrow-dark">
+          <span class="eyebrow-dot dot-be"></span>
+          <span class="eyebrow-label">Backend · Engine Room</span>
+          <span class="eyebrow-desc">what the API does</span>
+        </div>
         <div class="rtabs">
           <button class="rtab active" data-tab="request">Request</button>
           <button class="rtab" data-tab="response">Response</button>
@@ -95,6 +105,10 @@
   <!-- Portal: escapes .browser's overflow:hidden, same reasoning as #offstage
        but for a floating popover rather than an out-of-window annotation. -->
   <div class="fx-popover" id="fx-popover" hidden></div>
+  <!-- Portal: self-designed currency picker, shared by the tile's currency
+       button and the FX popover's requested_currency button — a native
+       <select>'s dropdown is OS-rendered and can't be themed. -->
+  <div class="cur-dropdown" id="cur-dropdown" hidden></div>
 
   <script type="module" src="js/app.js"></script>
 </body>

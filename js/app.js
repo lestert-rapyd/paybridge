@@ -38,9 +38,6 @@ const CURRENCIES = ['USD', 'EUR', 'GBP', 'SGD'];
    The tile is the single editable source of truth for amount/currency
    (state.productOverride); the popover beside it configures settlement FX
    (state.fx). Both are plain data mutated directly — see state.js. */
-function currencyOptionsHTML(values, current) {
-  return values.map(c => `<option value="${c}" ${c === current ? 'selected' : ''}>${c}</option>`).join('');
-}
 function totalsHTML(p, feeLabel, feeValue) {
   return `
     <div class="co-line"><span>Subtotal</span><span>${p.amount} ${p.currency}</span></div>
@@ -53,9 +50,11 @@ function ensureFxCurrencyValid() {
 }
 function fxPopoverHTML() {
   const fx = state.fx;
-  const options = CURRENCIES.filter(c => c !== activeProduct().currency);
   return `
-    <div class="fx-popover-head">Settlement FX</div>
+    <div class="fx-popover-head">
+      <span>Settlement FX</span>
+      <button type="button" class="fx-popover-x" id="fx-popover-close" aria-label="Close">×</button>
+    </div>
     <label class="co-tds">
       <input type="checkbox" id="fx-enable" ${fx.enabled ? 'checked' : ''} />
       <span>Enable FX</span>
@@ -63,7 +62,7 @@ function fxPopoverHTML() {
     <div class="fx-popover-body" id="fx-popover-body" ${fx.enabled ? '' : 'hidden'}>
       <div>
         <div class="fx-popover-label">Requested currency · <code>requested_currency</code></div>
-        <select class="co-fx-select" id="fx-currency">${currencyOptionsHTML(options, fx.requestedCurrency)}</select>
+        <button type="button" class="cur-trigger" id="fx-currency">${fx.requestedCurrency || ''}<span class="cur-caret">▾</span></button>
       </div>
       <div>
         <div class="fx-popover-label">Fixed side · <code>fixed_side</code></div>
@@ -76,6 +75,10 @@ function fxPopoverHTML() {
 }
 function renderFxPopover() {
   ensureFxCurrencyValid();
+  // The requested_currency trigger button is about to be torn down and
+  // rebuilt — drop any open currency dropdown pointed at it first, or it'd
+  // be left floating with a stale/detached trigger reference.
+  if (curDropdownTarget === 'fx') closeCurDropdown();
   $('#fx-popover').innerHTML = fxPopoverHTML();
 }
 function openFxPopover() {
@@ -93,6 +96,64 @@ function openFxPopover() {
 function closeFxPopover() {
   $('#fx-popover').hidden = true;
   $('#fx-trigger')?.classList.remove('active');
+  if (curDropdownTarget === 'fx') closeCurDropdown();
+}
+
+/* ── Self-designed currency picker (portal) ──────────────────
+   Replaces native <select> for both the tile's currency and the FX
+   popover's requested_currency — a native select's open dropdown list is
+   OS-rendered and can't be themed to match the demo's design language.
+   One portal element is shared by both triggers; curDropdownTarget tracks
+   which one currently owns it. */
+let curDropdownTarget = null;   // 'tile' | 'fx' | null
+let curDropdownTriggerEl = null;
+
+function curDropdownOptions() {
+  return curDropdownTarget === 'tile'
+    ? CURRENCIES
+    : CURRENCIES.filter(c => c !== activeProduct().currency);
+}
+function curDropdownCurrent() {
+  return curDropdownTarget === 'tile' ? activeProduct().currency : state.fx.requestedCurrency;
+}
+function renderCurDropdown() {
+  const current = curDropdownCurrent();
+  $('#cur-dropdown').innerHTML = curDropdownOptions()
+    .map(c => `<button type="button" class="cur-opt ${c === current ? 'active' : ''}" data-val="${c}">${c}</button>`)
+    .join('');
+}
+function positionCurDropdown(trigger) {
+  const el = $('#cur-dropdown');
+  const rect = trigger.getBoundingClientRect();
+  const top = Math.min(rect.bottom + 6, window.innerHeight - el.offsetHeight - 12);
+  el.style.top = `${Math.max(12, top)}px`;
+  el.style.left = `${Math.min(rect.left, window.innerWidth - el.offsetWidth - 12)}px`;
+}
+function toggleCurDropdown(target, trigger) {
+  const el = $('#cur-dropdown');
+  if (!el.hidden && curDropdownTriggerEl === trigger) { closeCurDropdown(); return; }
+  closeCurDropdown();
+  curDropdownTarget = target;
+  curDropdownTriggerEl = trigger;
+  renderCurDropdown();
+  el.hidden = false;
+  trigger.classList.add('active');
+  positionCurDropdown(trigger);
+}
+function closeCurDropdown() {
+  $('#cur-dropdown').hidden = true;
+  curDropdownTriggerEl?.classList.remove('active');
+  curDropdownTarget = null;
+  curDropdownTriggerEl = null;
+}
+function selectCurrency(val) {
+  if (curDropdownTarget === 'tile') {
+    commitTileEdit(val);
+  } else if (curDropdownTarget === 'fx') {
+    state.fx.requestedCurrency = val;
+    refreshAfterEdit();
+  }
+  closeCurDropdown();
 }
 // Re-syncs everything that reads activeProduct()/state.fx after a tile or
 // popover edit — never touches the tile's own input/select DOM (that would
@@ -109,13 +170,20 @@ function refreshAfterEdit() {
   if (popover && !popover.hidden) renderFxPopover();
   FLOWS[state.model].refreshRightPanel?.();
 }
-function commitTileEdit() {
+function commitTileEdit(currencyOverride) {
   const amountEl = $('#tile-amount');
-  const currencyEl = $('#tile-currency');
-  if (!amountEl || !currencyEl) return;
+  const currencyBtn = $('#tile-currency');
+  if (!amountEl || !currencyBtn) return;
   const filtered = formatAmount(amountEl.value);
   if (filtered !== amountEl.value) amountEl.value = filtered;
-  state.productOverride = { vertical: state.vertical, amount: filtered, currency: currencyEl.value };
+  // The button's clean currency code lives in data-currency, not textContent
+  // (textContent also includes the caret glyph — see the button's markup).
+  const currency = currencyOverride || currencyBtn.dataset.currency;
+  if (currencyOverride) {
+    currencyBtn.dataset.currency = currencyOverride;
+    currencyBtn.innerHTML = `${currencyOverride}<span class="cur-caret">▾</span>`;
+  }
+  state.productOverride = { vertical: state.vertical, amount: filtered, currency };
   refreshAfterEdit();
 }
 
@@ -128,6 +196,7 @@ function renderCheckout() {
   const [c1, c2] = p.thumb;
 
   closeFxPopover(); // never lingers open across a vertical/model/env reset
+  closeCurDropdown();
 
   const feeLabel = p.delivery ? 'Delivery' : 'Fees';
   const feeValue = p.delivery ? p.delivery : 'Free';
@@ -153,7 +222,7 @@ function renderCheckout() {
         </div>
         <div class="co-order-price">
           <input type="text" inputmode="decimal" class="tile-field tile-amount" id="tile-amount" value="${p.amount}" title="Click to edit the charged amount" />
-          <select class="tile-field tile-currency" id="tile-currency" title="Click to edit the charge currency">${currencyOptionsHTML(CURRENCIES, p.currency)}</select>
+          <button type="button" class="tile-field tile-currency cur-trigger" id="tile-currency" data-currency="${p.currency}" title="Click to edit the charge currency">${p.currency}<span class="cur-caret">▾</span></button>
         </div>
         <button type="button" class="fx-trigger" id="fx-trigger" title="Configure settlement FX">FX</button>
       </div>
@@ -254,32 +323,62 @@ function wire() {
     if (btn && btn.dataset.view !== state.leftView) setState({ leftView: btn.dataset.view });
   });
 
-  // Price tile + FX popover — delegated on stable containers (#checkout and
-  // #fx-popover never get destroyed, only their innerHTML gets rebuilt), so
-  // this is wired exactly once regardless of how many times the flow remounts.
+  // Price tile + FX popover — delegated on stable containers (#checkout,
+  // #fx-popover and #cur-dropdown never get destroyed, only their innerHTML
+  // gets rebuilt), so this is wired exactly once regardless of how many
+  // times the flow remounts.
   $('#checkout').addEventListener('input', e => { if (e.target.id === 'tile-amount') commitTileEdit(); });
-  $('#checkout').addEventListener('change', e => { if (e.target.id === 'tile-currency') commitTileEdit(); });
   $('#checkout').addEventListener('click', e => {
-    if (!e.target.closest('#fx-trigger')) return;
-    $('#fx-popover').hidden ? openFxPopover() : closeFxPopover();
+    const curBtn = e.target.closest('#tile-currency');
+    if (curBtn) { toggleCurDropdown('tile', curBtn); return; }
+    if (e.target.closest('#fx-trigger')) {
+      $('#fx-popover').hidden ? openFxPopover() : closeFxPopover();
+    }
   });
   $('#fx-popover').addEventListener('change', e => {
     if (e.target.id === 'fx-enable') { state.fx.enabled = e.target.checked; renderFxPopover(); refreshAfterEdit(); }
-    if (e.target.id === 'fx-currency') { state.fx.requestedCurrency = e.target.value; refreshAfterEdit(); }
   });
   $('#fx-popover').addEventListener('click', e => {
-    const btn = e.target.closest('#fx-side button[data-val]');
-    if (!btn) return;
-    state.fx.fixedSide = btn.dataset.val;
-    renderFxPopover();
-    refreshAfterEdit();
+    if (e.target.closest('#fx-popover-close')) { closeFxPopover(); return; }
+    const curBtn = e.target.closest('#fx-currency');
+    if (curBtn) { toggleCurDropdown('fx', curBtn); return; }
+    const seg = e.target.closest('#fx-side button[data-val]');
+    if (seg) {
+      state.fx.fixedSide = seg.dataset.val;
+      renderFxPopover();
+      refreshAfterEdit();
+    }
   });
+  $('#cur-dropdown').addEventListener('click', e => {
+    const opt = e.target.closest('.cur-opt');
+    if (opt) selectCurrency(opt.dataset.val);
+  });
+  // Outside-click close, for both the FX popover and the currency dropdown.
+  // Uses composedPath() (frozen at dispatch time) rather than .contains() —
+  // a click on a control that re-renders its own container (e.g. the
+  // fixed_side toggle calling renderFxPopover()) detaches e.target from the
+  // DOM mid-dispatch, which made a later .contains(e.target) check wrongly
+  // read false and close the popover right after every interaction.
   document.addEventListener('click', e => {
+    const path = e.composedPath();
+    const dropdown = $('#cur-dropdown');
+    if (!dropdown.hidden && !path.includes(dropdown) && !path.includes($('#tile-currency')) && !path.includes($('#fx-currency'))) {
+      closeCurDropdown();
+    }
     const popover = $('#fx-popover');
-    if (popover.hidden || popover.contains(e.target) || e.target.closest('#fx-trigger')) return;
+    // #cur-dropdown is portalled as a sibling of #fx-popover, not nested
+    // inside it — a click on one of its options is otherwise indistinguishable
+    // from a genuine outside click, which closed the popover on every
+    // requested_currency selection.
+    if (!popover.hidden && !path.includes(popover) && !path.includes($('#fx-trigger')) && !path.includes(dropdown)) {
+      closeFxPopover();
+    }
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    closeCurDropdown();
     closeFxPopover();
   });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFxPopover(); });
 }
 
 /* ── Render orchestration ────────────────────────────────── */
