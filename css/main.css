@@ -108,7 +108,7 @@ code { font-family: var(--font-mono); }
    description of what that half of the screen represents. */
 .panel-eyebrow {
   display: flex; align-items: baseline; gap: 8px; flex: none;
-  width: 100%; max-width: 470px; margin: 0 auto 10px;
+  margin: 0 0 10px;
   font-size: 10.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3);
 }
 .eyebrow-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; align-self: center; }
@@ -132,8 +132,8 @@ code { font-family: var(--font-mono); }
    padding/size/weight, bottom-border active indicator) — light-theme vars,
    same shape, a true yin/yang pair rather than two independent designs. */
 .left-tabs {
-  display: flex; align-items: center; gap: 2px; margin: 0 auto 14px;
-  width: 100%; max-width: 470px; border-bottom: 1px solid var(--line); flex: none;
+  display: flex; align-items: center; gap: 2px; margin: 0 0 14px;
+  border-bottom: 1px solid var(--line); flex: none;
 }
 .left-tab {
   border: 0; background: transparent; color: var(--ink-3);
