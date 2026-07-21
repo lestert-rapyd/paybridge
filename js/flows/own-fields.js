@@ -190,6 +190,7 @@ async function pay() {
     ledger.recordPayment(state.reference, {
       model: 'own-fields', vertical: state.vertical, amount: p.amount, currency: p.currency,
       requested_currency: fx.enabled ? fx.requestedCurrency : null, fixed_side: fx.enabled ? fx.fixedSide : null,
+      last4: digits.slice(-4), brand: network,
     });
   }
   sent = true;

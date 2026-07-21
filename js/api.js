@@ -41,6 +41,16 @@ export async function createRefund(body) {
   return { ok: res.ok, httpStatus: res.status, data };
 }
 
+/** GET /api/retrieve-payment?id=payment_xxx&env=… → Rapyd GET /v1/payments/{id}.
+    Used by the back office to pull the live payment (settled FX legs +
+    refunded_amount) when the SE clicks through to a payment's detail view. */
+export async function retrievePayment(id, env) {
+  const res = await fetch(`${BACKEND_URL}/api/retrieve-payment?id=${encodeURIComponent(id)}&env=${env}`);
+  let data = null;
+  try { data = await res.json(); } catch { /* non-JSON */ }
+  return { ok: res.ok, httpStatus: res.status, data };
+}
+
 /** GET /api/webhooks?refs=ref1,ref2,... → batched status for the back-office ledger poller */
 export async function fetchWebhooksBatch(refs) {
   const qs = encodeURIComponent(refs.join(','));
