@@ -142,7 +142,9 @@ code { font-family: var(--font-mono); }
 }
 .left-tab:hover { color: var(--ink); }
 .left-tab.active { color: var(--ink); border-bottom-color: var(--accent); }
-.backoffice { width: 100%; max-width: 560px; margin: 0; }
+/* Centered like the Client Site card, so switching tabs doesn't shift the
+   content sideways (the full-width header/tab bar above stays put). */
+.backoffice { width: 100%; max-width: 560px; margin: 0 auto; }
 
 /* ── Back office ──────────────────────────────────────────────
    Merchant-ops surface — base structure here; the design-refresh layer
@@ -153,14 +155,13 @@ code { font-family: var(--font-mono); }
   padding: 2px 7px; border-radius: 4px; background: var(--surface-2); color: var(--ink-3); flex: none;
 }
 
-/* Wallet anchor */
+/* Wallet anchor — a plain ledger: label, balance(s), payment count.
+   Balance uses the theme sans (not the Anton display face) so it reads as
+   part of the same UI as the tiles below it. */
 .bo-wallet-card { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); padding: 16px 18px; margin-bottom: 18px; }
-.bo-wallet-head { display: flex; align-items: center; gap: 9px; }
-.bo-wallet-name { font-size: 14px; font-weight: 700; color: var(--ink); }
-.bo-wallet-balbox { margin-left: auto; text-align: right; }
 .bo-wallet-ballabel { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
-.bo-wallet-balmain { font-family: var(--font-display); font-size: 26px; color: var(--ink); line-height: 1.1; }
-.bo-wallet-balsub { font-size: 13px; color: var(--ink-3); margin-top: 2px; }
+.bo-wallet-balmain { font-size: 27px; font-weight: 800; letter-spacing: -.01em; color: var(--ink); line-height: 1.15; margin-top: 4px; }
+.bo-wallet-balsub { font-size: 14px; font-weight: 600; color: var(--ink-3); margin-top: 2px; }
 .bo-wallet-meta { font-size: 11.5px; color: var(--ink-3); margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 
 /* Section + tiles */
@@ -1048,7 +1049,6 @@ details[open] .wh-chev { transform: rotate(90deg); }
   border: 1px solid #efece5; border-radius: 16px; background: #fff;
   box-shadow: 0 1px 2px rgba(30,20,10,.04), 0 12px 30px -22px rgba(30,20,10,.22);
 }
-.bo-wallet-name { color: #191714; }
 .bo-wallet-ballabel { color: #a8a297; }
 .bo-wallet-balmain { color: #191714; }
 .bo-wallet-balsub, .bo-wallet-meta { color: #94908a; }

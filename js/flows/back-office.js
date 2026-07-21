@@ -77,36 +77,31 @@ function isFx(entry) {
   return s.merchant_requested_amount != null && !!s.merchant_requested_currency;
 }
 
-/* ── Left panel: wallet anchor (both views, reactive) ─────── */
+/* ── Left panel: wallet anchor (both views, reactive) ─────────
+   A plain ledger: the balance (one figure per currency held) and how many
+   payments were captured this session. No model tag / name / settlement
+   line — the tile is an anchor, not a header. */
 function renderWallet() {
   const el = $('#bo-wallet');
   if (!el) return;
   const bal = walletBalances();
   const curs = Object.keys(bal);
-  const completed = getLedger().filter((e) => e.status === 'completed');
-  const count = completed.length;
+  const count = getLedger().filter((e) => e.status === 'completed').length;
 
   // primary = settlement currency of the most recent completed payment
   let primaryCur = curs[0] || null;
-  for (const e of completed) {
+  for (const e of getLedger().filter((x) => x.status === 'completed')) {
     const c = e.settled?.merchant_requested_currency || e.settled?.currency || e.currency;
     if (c && bal[c] != null) { primaryCur = c; break; }
   }
-  const model = completed[0]?.model === 'toolkit' ? 'Toolkit' : 'Own fields';
   const others = curs.filter((c) => c !== primaryCur);
 
   el.innerHTML = `
     <div class="bo-wallet-card">
-      <div class="bo-wallet-head">
-        <span class="bo-model-tag">${model}</span>
-        <span class="bo-wallet-name">Retail merchant wallet</span>
-        <div class="bo-wallet-balbox">
-          <div class="bo-wallet-ballabel">Wallet balance</div>
-          <div class="bo-wallet-balmain">${primaryCur ? money(bal[primaryCur], primaryCur) : '0.00'}</div>
-          ${others.map((c) => `<div class="bo-wallet-balsub">${money(bal[c], c)}</div>`).join('')}
-        </div>
-      </div>
-      <div class="bo-wallet-meta">Settlement currency ${primaryCur || '—'} · ${count} payment${count === 1 ? '' : 's'} captured this session</div>
+      <div class="bo-wallet-ballabel">Wallet balance</div>
+      <div class="bo-wallet-balmain">${primaryCur ? money(bal[primaryCur], primaryCur) : '0.00'}</div>
+      ${others.map((c) => `<div class="bo-wallet-balsub">${money(bal[c], c)}</div>`).join('')}
+      <div class="bo-wallet-meta">${count} payment${count === 1 ? '' : 's'} this session</div>
     </div>`;
 }
 
@@ -373,9 +368,15 @@ function currentRefundBody(entry) {
 }
 
 /* ── Actions ──────────────────────────────────────────────── */
+// Monotonic token: any newer right-panel action (another tile's GET, a refund
+// fire) supersedes a still-in-flight GET, so a slow response can't clobber the
+// panel after the SE has moved on.
+let actionSeq = 0;
+
 async function retrieveAndOpen(reference) {
   const entry = getEntry(reference);
   if (!entry || !entry.payment_id) return;
+  const mySeq = ++actionSeq;
   view = 'detail';
   detailRef = reference;
   refundOpen = false;
@@ -385,10 +386,12 @@ async function retrieveAndOpen(reference) {
   paintResponse(null, true, 'RETRIEVING…');
   try {
     const { httpStatus, data } = await retrievePayment(entry.payment_id, state.env);
-    const ok = httpStatus < 400 && !data?.error;
-    paintResponse(data, ok, ok ? 'PAYMENT RETRIEVED' : 'ERROR');
-    if (ok && data?.data) applyPaymentObject(reference, data.data); // refreshes settled + refunded_amount → re-renders detail
+    const okResp = httpStatus < 400 && !data?.error;
+    if (okResp && data?.data) applyPaymentObject(reference, data.data); // ledger is always safe to update, even if the panel paint is superseded
+    if (mySeq !== actionSeq) return; // superseded by a newer action — leave the panel alone
+    paintResponse(data, okResp, okResp ? 'PAYMENT RETRIEVED' : 'ERROR');
   } catch (err) {
+    if (mySeq !== actionSeq) return;
     paintResponse({ error: 'network_error', message: err.message }, false, 'ERROR');
   }
 }
@@ -452,6 +455,7 @@ async function fireRefund() {
   const refundRef = `${entry.reference}_refund_${Date.now()}`;
   const body = buildBody(entry, refundRef, legs);
 
+  ++actionSeq; // supersede any still-in-flight GET so it can't clobber this
   firing = true;
   pendingRefundRef = refundRef;
   recordRefund(entry.reference, {
@@ -467,20 +471,51 @@ async function fireRefund() {
   try {
     const { httpStatus, data } = await createRefund({ ...body, env: state.env });
     const ok = httpStatus < 400 && !data?.error;
-    paintResponse(data, ok, ok ? 'REFUND CREATED' : 'ERROR');
+    paintResponse(data, ok, ok ? 'REFUND CREATED' : (data?.raw?.error_code || data?.error || 'ERROR'));
     setActiveTab('response');
-    const d = data?.data;
-    if (d?.id) updateRefund(entry.reference, refundRef, { refund_id: d.id, amount: d.amount ?? legs.body.amount, currency: d.currency ?? legs.body.currency });
-    if (!ok) updateRefund(entry.reference, refundRef, { status: 'failed' });
-    else watchRefundWebhook(refundRef); // await REFUND_COMPLETED for the webhook card + confirmation
+    if (ok) {
+      const d = data?.data;
+      if (d?.id) updateRefund(entry.reference, refundRef, { refund_id: d.id, amount: d.amount ?? legs.body.amount, currency: d.currency ?? legs.body.currency });
+      watchRefundWebhook(refundRef); // real REFUND_COMPLETED / PAYMENT_REFUND_FAILED
+    } else {
+      // Rapyd rejected the refund synchronously (e.g. amount exceeds
+      // refundable) — mark it failed and surface a PAYMENT_REFUND_FAILED
+      // event on the webhook tab, grounded in the real API error.
+      updateRefund(entry.reference, refundRef, { status: 'failed' });
+      paintWebhookCard([refundFailedEvent(refundRef, body, data)]);
+    }
   } catch (err) {
-    paintResponse({ error: 'network_error', message: err.message }, false, 'ERROR');
+    // A genuine transport failure (no API response to render) — not a Rapyd
+    // business error. Shown as-is; no webhook, since no refund was created.
+    paintResponse({ error: 'network_error', message: err.message }, false, 'NETWORK ERROR');
     setActiveTab('response');
     updateRefund(entry.reference, refundRef, { status: 'failed' });
   } finally {
     firing = false;
     renderBody();
   }
+}
+
+/* A PAYMENT_REFUND_FAILED webhook shape, built from the synchronous Rapyd
+   rejection so the webhook tab reflects the failure end-to-end. */
+function refundFailedEvent(refundRef, body, data) {
+  const rapyd = data?.raw || {};
+  return {
+    type: 'PAYMENT_REFUND_FAILED',
+    status: rapyd.status || 'ERROR',
+    raw: {
+      type: 'PAYMENT_REFUND_FAILED',
+      data: {
+        merchant_reference_id: refundRef,
+        payment: body.payment,
+        amount: body.amount,
+        currency: body.currency,
+        status: 'ERROR',
+        failure_code: rapyd.error_code || data?.error || 'REFUND_ERROR',
+        failure_message: rapyd.message || data?.message || 'The refund could not be processed.',
+      },
+    },
+  };
 }
 
 /* ── Refund webhook watcher (card + confirmation beat) ────── */
