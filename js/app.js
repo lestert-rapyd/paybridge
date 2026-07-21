@@ -384,7 +384,10 @@ function wire() {
 /* ── Render orchestration ────────────────────────────────── */
 function renderAll(_state, patch) {
   const isInitial = !patch;
-  const touchesClientFlow = isInitial || Object.keys(patch).some(k => RESET_KEYS.includes(k));
+  // An explicit empty patch — setState({}) — is the "reset the client flow"
+  // signal (e.g. "Run another payment" on the success screen); treat it like
+  // an initial render. Otherwise only vertical/model/env resets the flow.
+  const touchesClientFlow = isInitial || Object.keys(patch).length === 0 || Object.keys(patch).some(k => RESET_KEYS.includes(k));
 
   if (!touchesClientFlow) {
     // e.g. a leftView toggle — re-sync only what that actually affects.

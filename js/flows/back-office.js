@@ -145,16 +145,51 @@ function listHTML() {
 }
 
 /* ── Left panel: DETAIL view of one payment ───────────────── */
+function fmtWhen(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  return `${d.getDate()} ${d.toLocaleString('en-GB', { month: 'short' })} · ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+function shortId(id) {
+  if (!id) return '—';
+  return id.length > 22 ? `${id.slice(0, 12)}…${id.slice(-6)}` : id;
+}
+
+/* Refunded X / Y as a progress bar — doubles as the visual completion state
+   (accent while partial, green once fully refunded). */
+function eligibilityBarHTML(t) {
+  const pct = t.total > 0 ? Math.min(100, Math.round((t.refunded / t.total) * 100)) : 0;
+  const full = t.remaining <= 0 && t.refunded > 0;
+  return `
+    <div class="bo-eligible ${full ? 'full' : ''}">
+      <div class="bo-eligible-top">
+        <span class="bo-eligible-amt">Refunded ${fmt(t.refunded)} / ${fmt(t.total)} ${t.currency}</span>
+        <span class="bo-eligible-state">${full ? 'Fully refunded' : `${fmt(t.remaining)} ${t.currency} eligible`}</span>
+      </div>
+      <div class="bo-eligible-track"><div class="bo-eligible-fill" style="width:${pct}%"></div></div>
+    </div>`;
+}
+
 function refundHistoryHTML(entry) {
   if (!entry.refunds.length) return '';
+  // newest first, so the most recent action reads at the top
+  const rows = [...entry.refunds].sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
   return `
-    <div class="bo-detail-refunds">
-      ${entry.refunds.map((r) => `
-        <div class="bo-refund-line">
-          ${pill(r.status, statusKind(r.status))}
-          <span class="bo-refund-amt">${r.amount != null ? money(r.amount, r.currency) : '—'}</span>
-          ${r.reason ? `<span class="bo-refund-reason-txt">${esc(r.reason)}</span>` : ''}
-        </div>`).join('')}
+    <div class="bo-refund-tablewrap">
+      <div class="bo-refund-tablehead">Refund history</div>
+      <table class="bo-refund-table">
+        <thead><tr><th>Status</th><th>Amount</th><th>Reason</th><th>When</th><th>Refund ID</th></tr></thead>
+        <tbody>
+          ${rows.map((r) => `
+            <tr>
+              <td>${pill(r.status, statusKind(r.status))}</td>
+              <td class="bo-rt-amt">${r.amount != null ? money(r.amount, r.currency) : '—'}</td>
+              <td class="bo-rt-reason" title="${esc(r.reason || '')}">${r.reason ? esc(r.reason) : '—'}</td>
+              <td class="bo-rt-when">${fmtWhen(r.created_at)}</td>
+              <td class="bo-rt-id"><code>${shortId(r.refund_id)}</code></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
     </div>`;
 }
 
@@ -251,7 +286,7 @@ function detailHTML(entry) {
         ${fx ? `<div class="bo-detail-row"><span>Merchant settled</span><b class="bo-detail-settled">${money(s.merchant_requested_amount, s.merchant_requested_currency)}</b></div>` : ''}
       </div>
 
-      ${t.refunded > 0 ? `<div class="bo-detail-eligible">Refunded ${fmt(t.refunded)} / ${fmt(t.total)} ${t.currency}${t.remaining > 0 ? ` · ${fmt(t.remaining)} ${t.currency} still eligible` : ' · fully refunded'}</div>` : ''}
+      ${t.refunded > 0 ? eligibilityBarHTML(t) : ''}
       ${refundHistoryHTML(entry)}
 
       ${refundOpen ? refundFormHTML(entry)

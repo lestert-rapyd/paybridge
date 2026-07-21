@@ -198,13 +198,28 @@ code { font-family: var(--font-mono); }
 .bo-detail-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--ink-3); }
 .bo-detail-row b { color: var(--ink); font-weight: 700; }
 .bo-detail-settled { color: #159149 !important; }
-.bo-detail-eligible { font-size: 12px; color: var(--ink-3); margin-top: 14px; padding: 9px 12px; background: var(--surface-2); border-radius: 8px; }
 
-/* Refund history */
-.bo-detail-refunds { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
-.bo-refund-line { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-3); }
-.bo-refund-amt { font-weight: 600; color: var(--ink-2); }
-.bo-refund-reason-txt { color: var(--ink-4); font-style: italic; }
+/* Eligibility progress bar — refunded / total, doubling as completion state */
+.bo-eligible { margin-top: 16px; }
+.bo-eligible-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 7px; }
+.bo-eligible-amt { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.bo-eligible-state { font-size: 11.5px; font-weight: 600; color: var(--ink-3); }
+.bo-eligible.full .bo-eligible-state { color: #159149; }
+.bo-eligible-track { height: 7px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.bo-eligible-fill { height: 100%; border-radius: 999px; background: var(--accent); transition: width .35s ease; }
+.bo-eligible.full .bo-eligible-fill { background: #22a55a; }
+
+/* Refund history — compact table */
+.bo-refund-tablewrap { margin-top: 18px; }
+.bo-refund-tablehead { font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 8px; }
+.bo-refund-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.bo-refund-table th { text-align: left; font-size: 9.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-4); padding: 0 8px 6px 0; border-bottom: 1px solid var(--line); }
+.bo-refund-table td { padding: 8px 8px 8px 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.bo-refund-table tr:last-child td { border-bottom: 0; }
+.bo-rt-amt { font-weight: 700; color: var(--ink); white-space: nowrap; }
+.bo-rt-reason { color: var(--ink-3); max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bo-rt-when { color: var(--ink-3); white-space: nowrap; }
+.bo-rt-id code { font-family: var(--font-mono); font-size: 10px; color: var(--ink-4); }
 
 /* Refund form */
 .bo-refund-form { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
@@ -1063,9 +1078,14 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .bo-list-note, .bo-detail-card2 { color: #a29d93; }
 .bo-back:hover, .bo-detail-vertical { color: #3f3b34; }
 .bo-detail-rows, .bo-refund-form { border-top-color: #f0eee9; }
-.bo-detail-row, .bo-route-note, .bo-route-leg, .bo-route-anchor, .bo-refund-line { color: #5b564d; }
-.bo-detail-eligible { background: #faf8f4; color: #5b564d; }
-.bo-refund-reason-txt { color: #a29d93; }
+.bo-detail-row, .bo-route-note, .bo-route-leg, .bo-route-anchor { color: #5b564d; }
+.bo-eligible-track { background: #f0ece3; }
+.bo-eligible-amt { color: #3f3b34; }
+.bo-refund-table th { border-bottom-color: #efece5; color: #a8a297; }
+.bo-refund-table td { border-bottom-color: #f2efe9; }
+.bo-rt-amt { color: #191714; }
+.bo-rt-reason, .bo-rt-when { color: #94908a; }
+.bo-rt-id code { color: #a29d93; }
 .bo-route { border-color: #e6e2da; }
 .bo-route:hover { border-color: #cfcabf; }
 .bo-route.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, #fff); }
