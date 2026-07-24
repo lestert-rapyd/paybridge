@@ -1044,6 +1044,19 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .fx-popover .cur-trigger:hover { border-color: #cfcabf; }
 .cur-caret { color: #a29d93; }
 
+/* Live "customer pays / you receive" preview under the FX controls. The fixed
+   side reads as an exact figure; the varying side is muted and prefixed "≈". */
+.fx-preview { margin-top: 2px; padding-top: 11px; border-top: 1px solid #f0eee9; display: flex; flex-direction: column; gap: 6px; }
+.fx-preview:empty { display: none; }
+.fx-preview-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 12.5px; color: #8a857b; }
+.fx-preview-row span:last-child { font-weight: 700; font-size: 13px; }
+.fx-preview-row .fixed { color: #211e19; }
+.fx-preview-row .vary { color: #a29d93; font-weight: 600; }
+.fx-preview-rate { font-size: 10.5px; color: #b0aaa0; }
+.fx-preview-rate .guar { color: var(--accent); }
+.fx-preview-note { font-size: 11.5px; color: #a29d93; }
+.fx-preview-note.err { color: #c0392b; }
+
 .cur-dropdown {
   min-width: 130px; padding: 6px;
   background: #fff; border: 1px solid #eeebe4; border-radius: 12px;
@@ -1056,6 +1069,11 @@ details[open] .wh-chev { transform: rotate(90deg); }
 /* editable price tile + FX trigger chip, same palette */
 .tile-field:hover, .tile-field:focus { background: #f4f2ee; border-color: #e6e2da; }
 .fx-trigger { border-color: #e6e2da; background: #fff; color: #a29d93; box-shadow: 0 1px 3px rgba(30,20,10,.14); }
+/* Resting "FX configured" state — a subtle accent tint that lingers after the
+   popover closes so the badge reads as switched-on at a glance. Declared
+   before :hover/.active so the interaction states still win while hovering or
+   open. */
+.fx-trigger.configured { background: color-mix(in srgb, var(--accent) 12%, #fff); border-color: color-mix(in srgb, var(--accent) 50%, #e6e2da); color: var(--accent); }
 .fx-trigger:hover, .fx-trigger.active { background: color-mix(in srgb, var(--accent) 10%, transparent); border-color: var(--accent); color: var(--accent); }
 
 /* ── Back office — warm-paper skin (matches the checkout card) ──── */

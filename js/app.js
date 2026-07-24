@@ -7,6 +7,7 @@ import { state, setState, subscribe } from './state.js';
 import { setActiveTab, setStatus } from './ui.js';
 import { stopWebhookWatch } from './webhooks.js';
 import { formatAmount } from './sync.js';
+import { getFxRate } from './api.js';
 import * as ownFields from './flows/own-fields.js';
 import * as toolkit from './flows/toolkit.js';
 import * as backOffice from './flows/back-office.js';
@@ -52,7 +53,7 @@ function fxPopoverHTML() {
   const fx = state.fx;
   return `
     <div class="fx-popover-head">
-      <span>Settlement FX</span>
+      <span>Currency conversion</span>
       <button type="button" class="fx-popover-x" id="fx-popover-close" aria-label="Close">×</button>
     </div>
     <label class="co-tds">
@@ -61,16 +62,17 @@ function fxPopoverHTML() {
     </label>
     <div class="fx-popover-body" id="fx-popover-body" ${fx.enabled ? '' : 'hidden'}>
       <div>
-        <div class="fx-popover-label">Requested currency · <code>requested_currency</code></div>
+        <div class="fx-popover-label">Currency you receive</div>
         <button type="button" class="cur-trigger" id="fx-currency">${fx.requestedCurrency || ''}<span class="cur-caret">▾</span></button>
       </div>
       <div>
-        <div class="fx-popover-label">Fixed side · <code>fixed_side</code></div>
+        <div class="fx-popover-label">Who bears the FX</div>
         <div class="co-fx-seg" id="fx-side">
-          <button type="button" data-val="sell" class="${fx.fixedSide === 'sell' ? 'active' : ''}">Sell · merchant risk</button>
-          <button type="button" data-val="buy" class="${fx.fixedSide === 'buy' ? 'active' : ''}">Buy · customer risk</button>
+          <button type="button" data-val="sell" class="${fx.fixedSide === 'sell' ? 'active' : ''}">You</button>
+          <button type="button" data-val="buy" class="${fx.fixedSide === 'buy' ? 'active' : ''}">Customer</button>
         </div>
       </div>
+      <div class="fx-preview" id="fx-preview" aria-live="polite"></div>
     </div>`;
 }
 function renderFxPopover() {
@@ -80,6 +82,75 @@ function renderFxPopover() {
   // be left floating with a stale/detached trigger reference.
   if (curDropdownTarget === 'fx') closeCurDropdown();
   $('#fx-popover').innerHTML = fxPopoverHTML();
+  updateFxPreview();
+}
+
+/* ── Live FX preview ─────────────────────────────────────────
+   A "customer pays / you receive" line under the FX controls, computed off a
+   real Rapyd GET /v1/fx_rates quote so the SE sees the actual trade-off before
+   going live. Maps the checkout's fields to the rate call exactly the way a
+   payment would: the tile's amount/currency is ALWAYS the fixed side (Rapyd's
+   `amount` is in units of `currency`), requested_currency is the varying side,
+   and fixed_side picks who's fixed — 'sell' fixes the customer's charge
+   (merchant bears FX), 'buy' fixes the merchant's payout (customer bears FX).
+   Rapyd's buy_ side is the merchant's funds, sell_ side the customer's. */
+let fxPreviewCache = { key: null, html: '' };
+let fxPreviewSeq = 0;
+let fxPreviewTimer = null;
+
+function fxPreviewParams() {
+  const p = activeProduct();
+  const cur = p.currency;                  // fixed-side currency (matches payment `currency`)
+  const req = state.fx.requestedCurrency;  // varying side
+  const side = state.fx.fixedSide;         // 'sell' | 'buy'
+  return {
+    buyCurrency:  side === 'buy'  ? cur : req,  // merchant receives
+    sellCurrency: side === 'sell' ? cur : req,  // customer pays
+    amount: p.amount,                            // always in `currency` = fixed side
+    fixedSide: side,
+    env: state.env,
+    _key: `${side}|${cur}|${req}|${p.amount}|${state.env}`,
+  };
+}
+const fmtMoney = v => Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function fxPreviewHTML(fx, params) {
+  const customerFixed = params.fixedSide === 'sell'; // customer's charge is the fixed side
+  const pay  = `${fmtMoney(fx.sell_amount)} ${fx.sell_currency}`;
+  const recv = `${fmtMoney(fx.buy_amount)} ${fx.buy_currency}`;
+  const row = (label, val, fixed) =>
+    `<div class="fx-preview-row"><span>${label}</span><span class="${fixed ? 'fixed' : 'vary'}">${fixed ? '' : '≈ '}${val}</span></div>`;
+  return `
+    ${row('Customer pays', pay, customerFixed)}
+    ${row('You receive', recv, !customerFixed)}
+    <div class="fx-preview-rate">Rate ${Number(fx.rate).toFixed(4)} · <span class="guar">${customerFixed ? 'customer amount guaranteed' : 'your payout guaranteed'}</span></div>`;
+}
+function updateFxPreview() {
+  const el = $('#fx-preview');
+  if (!el) return;
+  if (!state.fx.enabled || !state.fx.requestedCurrency) { el.innerHTML = ''; return; }
+  const params = fxPreviewParams();
+  if (params.buyCurrency === params.sellCurrency || !(Number(params.amount) > 0)) { el.innerHTML = ''; return; }
+  // Cache hit → paint instantly, no refetch (flipping sell/buy back and forth
+  // is common while an SE explains the trade-off).
+  if (fxPreviewCache.key === params._key) { el.innerHTML = fxPreviewCache.html; return; }
+  el.innerHTML = `<div class="fx-preview-note">Fetching live rate…</div>`;
+  const seq = ++fxPreviewSeq;
+  clearTimeout(fxPreviewTimer);
+  fxPreviewTimer = setTimeout(async () => {
+    let resp = null;
+    try { resp = await getFxRate(params); } catch { /* network */ }
+    if (seq !== fxPreviewSeq) return; // a newer edit superseded this fetch
+    const target = $('#fx-preview');
+    if (!target) return;
+    const fx = resp?.data?.data;
+    if (!resp?.ok || !fx || fx.buy_amount == null || fx.sell_amount == null) {
+      target.innerHTML = `<div class="fx-preview-note err">Live rate unavailable right now.</div>`;
+      return;
+    }
+    const html = fxPreviewHTML(fx, params);
+    fxPreviewCache = { key: params._key, html };
+    target.innerHTML = html;
+  }, 250);
 }
 function openFxPopover() {
   const trigger = $('#fx-trigger');
@@ -168,7 +239,15 @@ function refreshAfterEdit() {
   if (payBtn) payBtn.textContent = `${VERTICALS[state.vertical].cta} ${p.amount} ${p.currency}`;
   const popover = $('#fx-popover');
   if (popover && !popover.hidden) renderFxPopover();
+  syncFxTrigger();
   FLOWS[state.model].refreshRightPanel?.();
+}
+// The FX corner badge carries a persistent "configured" tint whenever FX is
+// enabled, so it reads as switched-on at a glance even after the popover
+// closes. Shared by both flows — the badge lives on whichever price tile the
+// active flow rendered into #checkout.
+function syncFxTrigger() {
+  $('#fx-trigger')?.classList.toggle('configured', !!state.fx.enabled);
 }
 function commitTileEdit(currencyOverride) {
   const amountEl = $('#tile-amount');
@@ -224,7 +303,7 @@ function renderCheckout() {
           <input type="text" inputmode="decimal" class="tile-field tile-amount" id="tile-amount" value="${p.amount}" title="Click to edit the charged amount" />
           <button type="button" class="tile-field tile-currency cur-trigger" id="tile-currency" data-currency="${p.currency}" title="Click to edit the charge currency">${p.currency}<span class="cur-caret">▾</span></button>
         </div>
-        <button type="button" class="fx-trigger" id="fx-trigger" title="Configure settlement FX">FX</button>
+        <button type="button" class="fx-trigger${state.fx.enabled ? ' configured' : ''}" id="fx-trigger" title="Configure currency conversion">FX</button>
       </div>
 
       <div class="co-totals" id="order-totals">${totalsHTML(p, feeLabel, feeValue)}</div>

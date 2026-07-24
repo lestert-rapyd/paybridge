@@ -51,6 +51,24 @@ export async function retrievePayment(id, env) {
   return { ok: res.ok, httpStatus: res.status, data };
 }
 
+/** GET /api/get-fx-rate?... → Rapyd GET /v1/fx_rates (action_type=payment).
+    Powers the FX popover's live "customer pays / you receive" preview. buy_ is
+    the side the merchant receives, sell_ the side the customer is charged;
+    amount is in the fixed_side currency (see app.js's fxPreviewParams). */
+export async function getFxRate({ buyCurrency, sellCurrency, amount, fixedSide, env }) {
+  const qs = new URLSearchParams({
+    buy_currency: buyCurrency,
+    sell_currency: sellCurrency,
+    amount: String(amount),
+    fixed_side: fixedSide,
+    env,
+  });
+  const res = await fetch(`${BACKEND_URL}/api/get-fx-rate?${qs.toString()}`);
+  let data = null;
+  try { data = await res.json(); } catch { /* non-JSON */ }
+  return { ok: res.ok, httpStatus: res.status, data };
+}
+
 /** GET /api/webhooks?refs=ref1,ref2,... → batched status for the back-office ledger poller */
 export async function fetchWebhooksBatch(refs) {
   const qs = encodeURIComponent(refs.join(','));

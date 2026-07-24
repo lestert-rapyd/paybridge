@@ -35,18 +35,11 @@ let tds = true;               // payment_method_options.3d_required
 let tdsFlow = 'iframe';       // iframe | redirect  (wait_on_payment_redirect)
 let payBtn = 'rapyd';         // rapyd | custom     (hide_submit_button)
 
-// FX: engaged only when `fx` is on — requested_currency + fixed_side must be
-// absent entirely on a no-FX call (sending them errors it). `expiration` is
-// computed silently, never exposed as a control.
-const FX_CURRENCIES = ['USD', 'EUR', 'GBP', 'SGD'];
-let fx = false;
-let requestedCurrency = null;
-let fixedSide = 'sell'; // 'sell' (merchant bears FX risk) | 'buy' (customer bears it)
-
-function fxCurrencyOptions() {
-  const p = activeProduct();
-  return FX_CURRENCIES.filter(c => c !== p.currency);
-}
+// FX config is shared with the direct flow: it lives on state.fx, edited via
+// the popover behind the price tile's FX corner badge (see app.js), not on a
+// control in this page. requested_currency + fixed_side must be absent
+// entirely on a no-FX call (sending them errors it); `expiration` is computed
+// silently, never exposed as a control.
 const custom = {
   btnText: 'Pay Now',         // pay_button_text (max 16 chars) — Rapyd's button
   btnColor: null,             // pay_button_color — null = vertical accent
@@ -89,9 +82,9 @@ function displayBody() {
     payment_method_options: { '3d_required': tds },
     // No-FX flows must omit all three fields entirely — sending any of them
     // without the others errors the call.
-    ...(fx && requestedCurrency ? {
-      requested_currency: requestedCurrency,
-      fixed_side: fixedSide,
+    ...(state.fx.enabled && state.fx.requestedCurrency ? {
+      requested_currency: state.fx.requestedCurrency,
+      fixed_side: state.fx.fixedSide,
       expiration: Math.floor(Date.now() / 1000) + 24 * 3600, // silent — not an SE-facing control
     } : {}),
   };
@@ -143,6 +136,7 @@ function summaryHTML() {
           <div class="co-order-name">${p.name}</div>
           <div class="co-order-desc">${p.desc}</div>
         </div>
+        <button type="button" class="fx-trigger${state.fx.enabled ? ' configured' : ''}" id="fx-trigger" title="Configure currency conversion">FX</button>
       </div>
       <div class="co-totals">
         <div class="co-line"><span>Subtotal</span><span>${p.symbol}${p.amount}</span></div>
@@ -211,16 +205,6 @@ function configPanelHTML() {
         ${row('Challenge', 'wait_on_payment_redirect', seg('tdsFlow', [['iframe', 'In iframe'], ['redirect', 'Redirect']], tdsFlow), `id="tkc-row-challenge" ${tds ? '' : 'hidden'}`)}
       </div>
 
-      <div class="tkc-sec" id="tkc-fx">
-        <div class="tkc-sec-label">FX</div>
-        ${row('Enable FX', 'requested_currency', `<label class="tkc-switch-wrap"><input type="checkbox" class="tkc-switch" id="tk-fx" ${fx ? 'checked' : ''} /></label>`)}
-        <div class="tkc-row" id="tkc-row-fx-currency" ${fx ? '' : 'hidden'}>
-          <div class="tkc-lab">Requested currency<code>requested_currency</code></div>
-          ${selectEl('tk-fx-currency', fxCurrencyOptions(), requestedCurrency)}
-        </div>
-        ${row('Fixed side', 'fixed_side', seg('fixedSide', [['sell', 'Sell · merchant risk'], ['buy', 'Buy · customer risk']], fixedSide), `id="tkc-row-fx-side" ${fx ? '' : 'hidden'}`)}
-      </div>
-
       <div class="tkc-sec" id="tkc-wallets">
         <div class="tkc-sec-label">Digital wallets<span class="tkc-sec-hint">digital_wallets_include_methods</span></div>
 
@@ -270,8 +254,6 @@ function syncControlVisibility() {
   // Customization rows only for wallets that are actually included
   $('#tkc-cust-ap')?.toggleAttribute('hidden', !wallets.apple_pay);
   $('#tkc-cust-gp')?.toggleAttribute('hidden', !wallets.google_pay);
-  $('#tkc-row-fx-currency')?.toggleAttribute('hidden', !fx);
-  $('#tkc-row-fx-side')?.toggleAttribute('hidden', !fx);
   const launch = $('#tk-launch');
   if (launch) launch.textContent = hosted ? 'Create session →' : 'Render toolkit →';
 }
@@ -435,11 +417,12 @@ async function launch() {
     const v = VERTICALS[state.vertical];
     const p = activeProduct();
     // snapshot for the success screen's bank-statement view (last4 arrives via webhook)
-    const fxSnapshot = fx && requestedCurrency ? { currency: requestedCurrency, amount: p.amount } : null;
+    const fxOn = state.fx.enabled && state.fx.requestedCurrency;
+    const fxSnapshot = fxOn ? { currency: state.fx.requestedCurrency, amount: p.amount } : null;
     state.lastPayment = { descriptor: v.descriptor, amount: p.amount, currency: p.currency, last4: null, fx: fxSnapshot };
     ledger.recordPayment(state.reference, {
       model: 'toolkit', vertical: state.vertical, amount: p.amount, currency: p.currency,
-      requested_currency: fx ? requestedCurrency : null, fixed_side: fx ? fixedSide : null,
+      requested_currency: fxOn ? state.fx.requestedCurrency : null, fixed_side: fxOn ? state.fx.fixedSide : null,
     });
   }
   renderRequest();
@@ -501,7 +484,6 @@ async function launch() {
 export function mount() {
   const panel = $('#tk-config');
   if (!panel) return;
-  if (!fxCurrencyOptions().includes(requestedCurrency)) requestedCurrency = fxCurrencyOptions()[0];
   renderRequest();
   events = [];
   lastHeartbeat = null;
@@ -517,7 +499,6 @@ export function mount() {
       if (row.dataset.opt === 'mode') mode = btn.dataset.val;
       if (row.dataset.opt === 'tdsFlow') tdsFlow = btn.dataset.val;
       if (row.dataset.opt === 'payBtn') payBtn = btn.dataset.val;
-      if (row.dataset.opt === 'fixedSide') fixedSide = btn.dataset.val;
       row.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
       syncControlVisibility();
       renderRequest();
@@ -529,12 +510,6 @@ export function mount() {
     syncControlVisibility();
     renderRequest();
   });
-  $('#tk-fx').addEventListener('change', e => {
-    fx = e.target.checked;
-    syncControlVisibility();
-    renderRequest();
-  });
-  $('#tk-fx-currency').addEventListener('change', e => { requestedCurrency = e.target.value; renderRequest(); });
   // Each wallet is its own on/off switch, independent of the other
   const wireWallet = (id, key) => $(`#${id}`).addEventListener('change', e => {
     wallets[key] = e.target.checked;
