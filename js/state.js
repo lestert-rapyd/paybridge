@@ -23,7 +23,10 @@ export const state = {
   // pipeline so a keystroke never triggers a full flow reset. Read by
   // verticals.js's activeProduct() and own-fields.js's displayBody().
   productOverride: null,    // { vertical, amount, currency } | null
-  fx: { enabled: false, requestedCurrency: null, fixedSide: 'sell' },
+  // `quote` caches the latest live Rapyd fx_rates result so every customer-facing
+  // surface (checkout totals, pay button, success screen, bank statement) shows
+  // the SAME converted figure — see verticals.js customerCharge()/merchantReceive().
+  fx: { enabled: false, requestedCurrency: null, fixedSide: 'sell', quote: null },
 };
 
 export function setState(patch) {

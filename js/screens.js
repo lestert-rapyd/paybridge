@@ -50,12 +50,22 @@ function bankViewHTML(event) {
   const descriptor = pay.statement_descriptor || lp.descriptor;
   if (!descriptor) return '';
 
-  const currency = pay.currency_code || lp.currency || '';
-  const amount = fmtAmount(pay.amount ?? lp.amount);
-  const fxRate = Number(pay.fx_rate);
-  const origCurrency = pay.original_currency || pay.merchant_requested_currency || lp.fx?.currency;
-  const origAmount = pay.original_amount ?? pay.merchant_requested_amount ?? lp.fx?.amount;
-  const isFx = !!(origCurrency && origCurrency !== currency && (fxRate ? fxRate !== 1 : true) && origAmount != null);
+  // When FX was configured, drive the figures off the checkout snapshot so the
+  // statement matches exactly what the customer saw: `charged` is what hit the
+  // card (main line); `base` is the merchant's price (the small original line,
+  // shown only when the customer paid in a different currency, i.e. 'buy').
+  const fx = lp.fx;
+  let currency, amount, isFx = false, origCurrency, origAmount;
+  if (fx) {
+    currency = fx.charged.currency;
+    amount = fmtAmount(fx.charged.amount);
+    isFx = fx.charged.currency !== fx.base.currency;
+    origCurrency = fx.base.currency;
+    origAmount = fx.base.amount;
+  } else {
+    currency = pay.currency_code || lp.currency || '';
+    amount = fmtAmount(pay.amount ?? lp.amount);
+  }
 
   const main = `− ${amount} ${currency}`;
   const d = new Date();
@@ -80,6 +90,14 @@ function bankViewHTML(event) {
 function fmtAmount(a) {
   const n = Number(a);
   return Number.isFinite(n) ? n.toFixed(2) : (a ?? '—');
+}
+/* What the customer paid — the lastPayment snapshot already holds the converted
+   figure (under 'buy'), so success/decline screens match the checkout total. */
+function paidLabel() {
+  const lp = state.lastPayment;
+  if (lp && lp.amount != null) return `${fmtAmount(lp.amount)} ${lp.currency || ''}`.trim();
+  const p = activeProduct();
+  return `${p.amount} ${p.currency}`;
 }
 
 export function renderProcessing(title = 'Confirming payment…', sub = 'Waiting for Rapyd to confirm via webhook…') {
@@ -148,7 +166,6 @@ export function renderSuccess(event = {}) {
   set3DSWidth(false);
   resetWide();
   const v = VERTICALS[state.vertical];
-  const p = activeProduct();
   const pay = event.raw?.data || {};
   const lp = state.lastPayment || {};
   const reference = pay.merchant_reference_id || state.reference || '—';
@@ -156,7 +173,7 @@ export function renderSuccess(event = {}) {
     <div class="screen success">
       ${badgeHTML('ok')}
       <div class="screen-title rise-1">${successVerb(v)} confirmed</div>
-      <div class="screen-sub rise-2">${v.merchant} · <strong>${p.amount} ${p.currency}</strong></div>
+      <div class="screen-sub rise-2">${v.merchant} · <strong>${paidLabel()}</strong></div>
       ${v.successNote ? `<div class="screen-next rise-3">${v.successNote}</div>` : ''}
       ${factsHTML([
         ['Payment', event.payment_id || '—'],
@@ -177,7 +194,6 @@ export function renderError(event = {}) {
   resetWide();
   setOffstage(null);
   const v = VERTICALS[state.vertical];
-  const p = activeProduct();
   const pay = event.raw?.data || {};
   const lp = state.lastPayment || {};
   const declineCode = pay.failure_code || event.code || null;
@@ -188,7 +204,7 @@ export function renderError(event = {}) {
     <div class="screen error">
       ${badgeHTML('err')}
       <div class="screen-title rise-1">Payment declined</div>
-      <div class="screen-sub rise-2">${v.merchant} · <strong>${p.amount} ${p.currency}</strong></div>
+      <div class="screen-sub rise-2">${v.merchant} · <strong>${paidLabel()}</strong></div>
       <div class="screen-next err rise-3">${note}</div>
       ${factsHTML([
         ['Payment', event.payment_id || '—'],

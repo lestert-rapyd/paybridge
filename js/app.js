@@ -2,7 +2,7 @@
    PayBridge Demo Suite — bootstrap (on-brand redesign)
    ───────────────────────────────────────────────────────────── */
 
-import { VERTICALS, VERTICAL_ORDER, activeProduct } from './verticals.js';
+import { VERTICALS, VERTICAL_ORDER, activeProduct, customerCharge, fxQuoteKey, chargeText } from './verticals.js';
 import { state, setState, subscribe } from './state.js';
 import { setActiveTab, setStatus } from './ui.js';
 import { stopWebhookWatch } from './webhooks.js';
@@ -39,11 +39,15 @@ const CURRENCIES = ['USD', 'EUR', 'GBP', 'SGD'];
    The tile is the single editable source of truth for amount/currency
    (state.productOverride); the popover beside it configures settlement FX
    (state.fx). Both are plain data mutated directly — see state.js. */
-function totalsHTML(p, feeLabel, feeValue) {
+// `c` is a customerCharge() object — the amount the customer actually pays,
+// which is the base price under 'sell' but the converted requested-currency
+// figure under 'buy'. Subtotal and Total both reflect it (Option 2).
+function totalsHTML(c, feeLabel, feeValue) {
+  const amt = chargeText(c);
   return `
-    <div class="co-line"><span>Subtotal</span><span>${p.amount} ${p.currency}</span></div>
+    <div class="co-line"><span>Subtotal</span><span>${amt}</span></div>
     <div class="co-line"><span>${feeLabel}</span><span class="${feeValue === 'Free' ? 'free' : ''}">${feeValue}</span></div>
-    <div class="co-line total"><span>Total</span><span class="co-total-amt">${p.amount} ${p.currency}</span></div>`;
+    <div class="co-line total"><span>Total</span><span class="co-total-amt">${amt}</span></div>`;
 }
 function ensureFxCurrencyValid() {
   const options = CURRENCIES.filter(c => c !== activeProduct().currency);
@@ -82,75 +86,99 @@ function renderFxPopover() {
   // be left floating with a stale/detached trigger reference.
   if (curDropdownTarget === 'fx') closeCurDropdown();
   $('#fx-popover').innerHTML = fxPopoverHTML();
-  updateFxPreview();
+  syncFx();
 }
 
-/* ── Live FX preview ─────────────────────────────────────────
-   A "customer pays / you receive" line under the FX controls, computed off a
-   real Rapyd GET /v1/fx_rates quote so the SE sees the actual trade-off before
-   going live. Maps the checkout's fields to the rate call exactly the way a
-   payment would: the tile's amount/currency is ALWAYS the fixed side (Rapyd's
-   `amount` is in units of `currency`), requested_currency is the varying side,
-   and fixed_side picks who's fixed — 'sell' fixes the customer's charge
-   (merchant bears FX), 'buy' fixes the merchant's payout (customer bears FX).
-   Rapyd's buy_ side is the merchant's funds, sell_ side the customer's. */
-let fxPreviewCache = { key: null, html: '' };
-let fxPreviewSeq = 0;
-let fxPreviewTimer = null;
+/* ── Live FX + customer-charge sync ──────────────────────────
+   FX drives more than the popover: the whole customer-facing checkout (totals
+   + pay button, and the toolkit summary) must show what the customer ACTUALLY
+   pays, never the stale base. One live Rapyd fx_rates quote — cached on
+   state.fx.quote, read by verticals.js customerCharge()/merchantReceive() —
+   feeds every surface. The tile's amount/currency is always the base (Rapyd's
+   `amount` is in units of `currency`); requested_currency is the other side;
+   fixed_side picks who's fixed ('sell' fixes the customer's charge, 'buy' the
+   merchant's payout). Rapyd's buy_ side = merchant funds, sell_ = customer.
+   syncFx() repaints from the current quote and fetches when it's missing/stale
+   — it runs on every edit AND on render, so a pre-enabled (cross-flow) FX
+   config resolves even if the popover is never opened. */
+let fxSeq = 0;
+let fxTimer = null;
 
-function fxPreviewParams() {
+function fxRequestParams() {
   const p = activeProduct();
-  const cur = p.currency;                  // fixed-side currency (matches payment `currency`)
-  const req = state.fx.requestedCurrency;  // varying side
-  const side = state.fx.fixedSide;         // 'sell' | 'buy'
+  const cur = p.currency, req = state.fx.requestedCurrency, side = state.fx.fixedSide;
   return {
-    buyCurrency:  side === 'buy'  ? cur : req,  // merchant receives
-    sellCurrency: side === 'sell' ? cur : req,  // customer pays
+    buyCurrency:  side === 'buy'  ? cur : req,  // Rapyd buy side = merchant funds
+    sellCurrency: side === 'sell' ? cur : req,  // sell side = customer funds
     amount: p.amount,                            // always in `currency` = fixed side
     fixedSide: side,
     env: state.env,
-    _key: `${side}|${cur}|${req}|${p.amount}|${state.env}`,
   };
 }
-const fmtMoney = v => Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-function fxPreviewHTML(fx, params) {
-  const customerFixed = params.fixedSide === 'sell'; // customer's charge is the fixed side
-  const pay  = `${fmtMoney(fx.sell_amount)} ${fx.sell_currency}`;
-  const recv = `${fmtMoney(fx.buy_amount)} ${fx.buy_currency}`;
-  const row = (label, val, fixed) =>
-    `<div class="fx-preview-row"><span>${label}</span><span class="${fixed ? 'fixed' : 'vary'}">${fixed ? '' : '≈ '}${val}</span></div>`;
+function fxPreviewHTML(q) {
+  const customerFixed = state.fx.fixedSide === 'sell'; // customer's charge is the fixed side
+  const row = (label, c, fixed) =>
+    `<div class="fx-preview-row"><span>${label}</span><span class="${fixed ? 'fixed' : 'vary'}">${chargeText({ ...c, approx: !fixed })}</span></div>`;
   return `
-    ${row('Customer pays', pay, customerFixed)}
-    ${row('You receive', recv, !customerFixed)}
-    <div class="fx-preview-rate">Rate ${Number(fx.rate).toFixed(4)} · <span class="guar">${customerFixed ? 'customer amount guaranteed' : 'your payout guaranteed'}</span></div>`;
+    ${row('Customer pays', { amount: q.sellAmount, currency: q.sellCurrency }, customerFixed)}
+    ${row('You receive', { amount: q.buyAmount, currency: q.buyCurrency }, !customerFixed)}
+    <div class="fx-preview-rate">Rate ${Number(q.rate).toFixed(4)} · <span class="guar">${customerFixed ? 'customer amount guaranteed' : 'your payout guaranteed'}</span></div>`;
 }
-function updateFxPreview() {
+function renderFxPreview() {
   const el = $('#fx-preview');
   if (!el) return;
   if (!state.fx.enabled || !state.fx.requestedCurrency) { el.innerHTML = ''; return; }
-  const params = fxPreviewParams();
-  if (params.buyCurrency === params.sellCurrency || !(Number(params.amount) > 0)) { el.innerHTML = ''; return; }
-  // Cache hit → paint instantly, no refetch (flipping sell/buy back and forth
-  // is common while an SE explains the trade-off).
-  if (fxPreviewCache.key === params._key) { el.innerHTML = fxPreviewCache.html; return; }
-  el.innerHTML = `<div class="fx-preview-note">Fetching live rate…</div>`;
-  const seq = ++fxPreviewSeq;
-  clearTimeout(fxPreviewTimer);
-  fxPreviewTimer = setTimeout(async () => {
+  const q = state.fx.quote;
+  if (q && q.key === fxQuoteKey()) {
+    el.innerHTML = q.error
+      ? `<div class="fx-preview-note err">Live rate unavailable right now.</div>`
+      : fxPreviewHTML(q);
+  } else {
+    el.innerHTML = `<div class="fx-preview-note">Fetching live rate…</div>`;
+  }
+}
+function maybeFetchFxQuote() {
+  if (!state.fx.enabled || !state.fx.requestedCurrency) return;
+  const key = fxQuoteKey();
+  if (state.fx.quote && state.fx.quote.key === key) return; // already fresh
+  const p = activeProduct();
+  if (!(Number(p.amount) > 0) || p.currency === state.fx.requestedCurrency) return;
+  const params = fxRequestParams();
+  const seq = ++fxSeq;
+  clearTimeout(fxTimer);
+  fxTimer = setTimeout(async () => {
     let resp = null;
     try { resp = await getFxRate(params); } catch { /* network */ }
-    if (seq !== fxPreviewSeq) return; // a newer edit superseded this fetch
-    const target = $('#fx-preview');
-    if (!target) return;
-    const fx = resp?.data?.data;
-    if (!resp?.ok || !fx || fx.buy_amount == null || fx.sell_amount == null) {
-      target.innerHTML = `<div class="fx-preview-note err">Live rate unavailable right now.</div>`;
-      return;
-    }
-    const html = fxPreviewHTML(fx, params);
-    fxPreviewCache = { key: params._key, html };
-    target.innerHTML = html;
+    if (seq !== fxSeq) return; // superseded by a newer edit
+    const d = resp?.data?.data;
+    state.fx.quote = (resp?.ok && d && d.buy_amount != null && d.sell_amount != null)
+      ? { key, sellAmount: d.sell_amount, sellCurrency: d.sell_currency, buyAmount: d.buy_amount, buyCurrency: d.buy_currency, rate: d.rate }
+      : { key, error: true };
+    renderFxPreview();
+    refreshCharge();
   }, 250);
+}
+// Single entry point: repaint the popover preview + the checkout charge from
+// the current quote, then fetch if the quote is missing/stale for this config.
+function syncFx() {
+  // Keep requested_currency != base even when the popover is closed (a vertical
+  // switch can leave them equal), so the charge never gets stuck "pending".
+  ensureFxCurrencyValid();
+  renderFxPreview();
+  refreshCharge();
+  maybeFetchFxQuote();
+}
+// Repaint every customer-facing "what you pay" figure from customerCharge().
+// own-fields' totals/pay button live in the shared shell (#order-totals /
+// #pay-btn); the toolkit flow owns its summary, repainted via refreshSummary().
+function refreshCharge() {
+  const c = customerCharge();
+  const p = activeProduct();
+  const totalsEl = $('#order-totals');
+  if (totalsEl) totalsEl.innerHTML = totalsHTML(c, p.delivery ? 'Delivery' : 'Fees', p.delivery || 'Free');
+  const payBtn = $('#pay-btn');
+  if (payBtn) payBtn.textContent = `${VERTICALS[state.vertical].cta} ${chargeText(c)}`;
+  FLOWS[state.model].refreshSummary?.();
 }
 function openFxPopover() {
   const trigger = $('#fx-trigger');
@@ -230,15 +258,12 @@ function selectCurrency(val) {
 // popover edit — never touches the tile's own input/select DOM (that would
 // disrupt an actively-typing cursor) or the card fields.
 function refreshAfterEdit() {
-  const p = activeProduct();
-  const feeLabel = p.delivery ? 'Delivery' : 'Fees';
-  const feeValue = p.delivery ? p.delivery : 'Free';
-  const totalsEl = $('#order-totals');
-  if (totalsEl) totalsEl.innerHTML = totalsHTML(p, feeLabel, feeValue);
-  const payBtn = $('#pay-btn');
-  if (payBtn) payBtn.textContent = `${VERTICALS[state.vertical].cta} ${p.amount} ${p.currency}`;
   const popover = $('#fx-popover');
+  // renderFxPopover() rebuilds the popover controls AND calls syncFx(); when
+  // it's closed we still need syncFx() to repaint the charge + (re)fetch a
+  // quote (e.g. the tile amount/currency changed, invalidating the old one).
   if (popover && !popover.hidden) renderFxPopover();
+  else syncFx();
   syncFxTrigger();
   FLOWS[state.model].refreshRightPanel?.();
 }
@@ -306,7 +331,7 @@ function renderCheckout() {
         <button type="button" class="fx-trigger${state.fx.enabled ? ' configured' : ''}" id="fx-trigger" title="Configure currency conversion">FX</button>
       </div>
 
-      <div class="co-totals" id="order-totals">${totalsHTML(p, feeLabel, feeValue)}</div>
+      <div class="co-totals" id="order-totals">${totalsHTML(customerCharge(), feeLabel, feeValue)}</div>
 
       ${payLabel}
       ${flow.renderPaymentHTML()}`;
@@ -329,6 +354,9 @@ function renderCheckout() {
   browser.classList.remove('wide-3ds');
 
   flow.mount();
+  // Resolve the customer charge now (fetches a quote if FX is already on from a
+  // prior flow/session) so the freshly-rendered totals aren't left stale.
+  syncFx();
 }
 
 /* ── Right: response + webhooks empties (flows fill Request) ── */

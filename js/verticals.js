@@ -90,3 +90,60 @@ export function activeProduct(verticalId = state.vertical) {
   }
   return state.env === 'live' ? { ...p, amount: '0.01' } : p;
 }
+
+/* ── FX-aware customer/merchant amounts ──────────────────────
+   The tile's amount/currency is ALWAYS the base (Rapyd `currency`/`amount`);
+   requested_currency is the other side. Rapyd's buy side = merchant funds,
+   sell side = customer funds. A live fx_rates quote (cached on state.fx.quote,
+   keyed by fxQuoteKey) turns that base into what the customer actually pays and
+   what the merchant actually receives, so every surface shows one figure.
+   `approx` = this side floats with the rate; `pending` = quote not in yet. */
+export function fxQuoteKey(verticalId = state.vertical) {
+  const p = activeProduct(verticalId);
+  return `${state.fx.fixedSide}|${p.currency}|${state.fx.requestedCurrency}|${p.amount}|${state.env}`;
+}
+function freshQuote(verticalId) {
+  const q = state.fx.quote;
+  return q && !q.error && q.key === fxQuoteKey(verticalId) ? q : null;
+}
+export function customerCharge(verticalId = state.vertical) {
+  const p = activeProduct(verticalId);
+  if (!state.fx.enabled || !state.fx.requestedCurrency) return { amount: p.amount, currency: p.currency, approx: false, pending: false };
+  const q = freshQuote(verticalId);
+  if (q) return { amount: q.sellAmount, currency: q.sellCurrency, approx: state.fx.fixedSide === 'buy', pending: false };
+  // 'sell' fixes the customer's charge at the base, so it's known without a quote.
+  if (state.fx.fixedSide === 'sell') return { amount: p.amount, currency: p.currency, approx: false, pending: false };
+  return { amount: null, currency: state.fx.requestedCurrency, approx: true, pending: true };
+}
+export function merchantReceive(verticalId = state.vertical) {
+  const p = activeProduct(verticalId);
+  if (!state.fx.enabled || !state.fx.requestedCurrency) return { amount: p.amount, currency: p.currency, approx: false, pending: false };
+  const q = freshQuote(verticalId);
+  if (q) return { amount: q.buyAmount, currency: q.buyCurrency, approx: state.fx.fixedSide === 'sell', pending: false };
+  // 'buy' fixes the merchant's payout at the base.
+  if (state.fx.fixedSide === 'buy') return { amount: p.amount, currency: p.currency, approx: false, pending: false };
+  return { amount: null, currency: state.fx.requestedCurrency, approx: true, pending: true };
+}
+/* Snapshot of the FX legs for state.lastPayment, so the success screen and the
+   bank-statement mockup show exactly what the checkout showed. null when FX is
+   off. `charged` = what the customer paid (statement main); `base` = the
+   merchant's price/what they receive (the small "original" line). */
+export function fxSnapshot(verticalId = state.vertical) {
+  if (!state.fx.enabled || !state.fx.requestedCurrency) return null;
+  const p = activeProduct(verticalId);
+  const charge = customerCharge(verticalId);
+  const receive = merchantReceive(verticalId);
+  return {
+    charged: { amount: charge.amount ?? p.amount, currency: charge.currency },
+    receive: { amount: receive.amount ?? p.amount, currency: receive.currency },
+    base: { amount: p.amount, currency: p.currency },
+  };
+}
+/* ISO-code money string (no symbols — locked demo convention). Varying side is
+   prefixed "≈"; a not-yet-fetched amount shows an ellipsis. */
+export function chargeText(c) {
+  if (c.pending || c.amount == null) return `${c.currency} …`;
+  const n = Number(c.amount);
+  const money = Number.isFinite(n) ? n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : c.amount;
+  return `${c.approx ? '≈ ' : ''}${money} ${c.currency}`;
+}

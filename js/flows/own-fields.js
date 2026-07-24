@@ -7,7 +7,7 @@
    ───────────────────────────────────────────────────────────── */
 
 import { state } from '../state.js';
-import { VERTICALS, activeProduct } from '../verticals.js';
+import { VERTICALS, activeProduct, customerCharge, fxSnapshot } from '../verticals.js';
 import { createDirectPayment } from '../api.js';
 import { renderJSONView, highlightPaths } from '../json-view.js';
 import { setActiveTab, setStatus } from '../ui.js';
@@ -185,8 +185,10 @@ async function pay() {
     const brand = detectBrand(card.number).brand; // 'VISA' | 'MASTERCARD' | ''
     const network = brand ? brand[0] + brand.slice(1).toLowerCase() : null;
     const fx = state.fx;
-    const fxSnapshot = fx.enabled && fx.requestedCurrency ? { currency: fx.requestedCurrency, amount: p.amount } : null;
-    state.lastPayment = { descriptor: v.descriptor, amount: p.amount, currency: p.currency, last4: digits.slice(-4), network, fx: fxSnapshot };
+    // amount/currency = what the CUSTOMER paid (converted under 'buy'), so the
+    // success screen + bank statement match the checkout; fx carries the legs.
+    const charge = customerCharge();
+    state.lastPayment = { descriptor: v.descriptor, amount: charge.amount ?? p.amount, currency: charge.currency, last4: digits.slice(-4), network, fx: fxSnapshot() };
     ledger.recordPayment(state.reference, {
       model: 'own-fields', vertical: state.vertical, amount: p.amount, currency: p.currency,
       requested_currency: fx.enabled ? fx.requestedCurrency : null, fixed_side: fx.enabled ? fx.fixedSide : null,

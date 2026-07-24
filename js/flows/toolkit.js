@@ -19,7 +19,7 @@
    ───────────────────────────────────────────────────────────── */
 
 import { state } from '../state.js';
-import { VERTICALS, activeProduct } from '../verticals.js';
+import { VERTICALS, activeProduct, customerCharge, chargeText, fxSnapshot } from '../verticals.js';
 import { createCheckoutSession } from '../api.js';
 import { renderJSONView } from '../json-view.js';
 import { setActiveTab, setStatus } from '../ui.js';
@@ -116,13 +116,26 @@ function toolkitConfig(checkoutId) {
 }
 
 /* ── Client page: stable two-panel stage ─────────────────── */
+// Customer-facing order totals — reflects what the customer actually pays
+// (the converted requested-currency figure under 'buy'), ISO codes only to
+// match the rest of the demo. Kept in its own fn so refreshSummary() can
+// repaint just this block when the FX quote lands.
+function tkTotalsHTML() {
+  const p = activeProduct();
+  const c = customerCharge();
+  const feeLabel = p.delivery ? 'Delivery' : 'Fees';
+  const feeValue = p.delivery || 'Free';
+  const amt = chargeText(c);
+  return `
+    <div class="co-line"><span>Subtotal</span><span>${amt}</span></div>
+    <div class="co-line"><span>${feeLabel}</span><span class="${feeValue === 'Free' ? 'free' : ''}">${feeValue}</span></div>
+    <div class="co-line total"><span>Total</span><span class="co-total-amt">${amt}</span></div>`;
+}
 function summaryHTML() {
   const v = VERTICALS[state.vertical];
   const p = activeProduct();
   const [c1, c2] = p.thumb;
   const glyph = { ecommerce: '🪑', crypto: '₿', gaming: '🎲' }[state.vertical] || '◆';
-  const feeLabel = p.delivery ? 'Delivery' : 'Fees';
-  const feeValue = p.delivery || 'Free';
   return `
     <aside class="tk-summary">
       <div class="tk-brand">
@@ -138,17 +151,20 @@ function summaryHTML() {
         </div>
         <button type="button" class="fx-trigger${state.fx.enabled ? ' configured' : ''}" id="fx-trigger" title="Configure currency conversion">FX</button>
       </div>
-      <div class="co-totals">
-        <div class="co-line"><span>Subtotal</span><span>${p.symbol}${p.amount}</span></div>
-        <div class="co-line"><span>${feeLabel}</span><span class="${feeValue === 'Free' ? 'free' : ''}">${feeValue}</span></div>
-        <div class="co-line total"><span>Total</span><span class="co-total-amt">${p.symbol}${p.amount}</span></div>
-      </div>
+      <div class="co-totals" id="tk-order-totals">${tkTotalsHTML()}</div>
       <div class="tk-secure">
         <div class="tk-secure-head">🔒 Secure checkout</div>
         <p>Payments are encrypted end-to-end and processed by Rapyd. Card details never touch ${v.merchant}'s servers.</p>
         <div class="tk-badges"><span class="b-visa">VISA</span><span class="b-mc">MC</span></div>
       </div>
     </aside>`;
+}
+/** Repaint the order totals when the FX quote arrives/changes (called by
+    app.js refreshCharge via FLOWS[model].refreshSummary). No-op once the
+    summary has been swapped for the live iframe. */
+export function refreshSummary() {
+  const el = $('#tk-order-totals');
+  if (el) el.innerHTML = tkTotalsHTML();
 }
 
 /* ── toolkit.config panel (pre-render, dark / code-styled) ── */
@@ -416,10 +432,12 @@ async function launch() {
   {
     const v = VERTICALS[state.vertical];
     const p = activeProduct();
-    // snapshot for the success screen's bank-statement view (last4 arrives via webhook)
+    // snapshot for the success screen's bank-statement view (last4 arrives via
+    // webhook). amount/currency = what the CUSTOMER paid, so the statement
+    // matches the checkout; fx carries the legs (charged / base / receive).
     const fxOn = state.fx.enabled && state.fx.requestedCurrency;
-    const fxSnapshot = fxOn ? { currency: state.fx.requestedCurrency, amount: p.amount } : null;
-    state.lastPayment = { descriptor: v.descriptor, amount: p.amount, currency: p.currency, last4: null, fx: fxSnapshot };
+    const charge = customerCharge();
+    state.lastPayment = { descriptor: v.descriptor, amount: charge.amount ?? p.amount, currency: charge.currency, last4: null, fx: fxSnapshot() };
     ledger.recordPayment(state.reference, {
       model: 'toolkit', vertical: state.vertical, amount: p.amount, currency: p.currency,
       requested_currency: fxOn ? state.fx.requestedCurrency : null, fixed_side: fxOn ? state.fx.fixedSide : null,
