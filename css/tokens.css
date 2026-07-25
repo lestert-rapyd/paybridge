@@ -1,16 +1,58 @@
 /* ─────────────────────────────────────────────────────────────
-   PayBridge Demo Suite — Design Tokens (on-brand redesign)
-   Left = warm light "client site". Right = dark "engine room".
-   Accent + engine tint shift per vertical via [data-vertical].
-   Type: Anton (display) · Epilogue (UI) · JetBrains Mono (code).
+   PayBridge Demo Suite — Design Tokens (single source of truth)
+   Every colour, type family, shadow and radius the UI paints
+   originates here. main.css / cof.css reference these tokens; they
+   MUST NOT hardcode a hex that duplicates one of these values.
+
+   Three visual layers share the stage (see DESIGN-SYSTEM.md):
+     A · Client surface  (--c-*)      warm light  · Hanken Grotesk
+     B · Engine room     (--eng-*)    dark, tinted · JetBrains Mono
+     C · SE config panel (--se-*)     near-black violet · dev-code feel
+   plus the app chrome (--chrome-*, the top/sub bars) and the
+   per-vertical accent, which swaps via [data-vertical].
+
+   Consolidates the former tokens.css + tokens.v2.css and the hardcoded
+   "design-refresh layer" of main.css. Legacy aliases (--paper/--ink/…)
+   are retained at their original values so nothing shifts; new surfaces
+   should prefer the --c-* / --se- / --chrome- names.
    ───────────────────────────────────────────────────────────── */
 
 :root {
-  --font-display: 'Anton', 'Arial Narrow', sans-serif;
-  --font-sans:    'Epilogue', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  /* ── Type ──────────────────────────────────────────────────
+     Anton = the brand wordmark ONLY. Hanken = all client-surface UI.
+     Epilogue = the app-chrome shell. JetBrains Mono = all code/data. */
+  --font-brand:   'Anton', 'Arial Narrow', sans-serif;
+  --font-client:  'Hanken Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-chrome:  'Epilogue', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  /* legacy aliases (older rules still read these) */
+  --font-display: var(--font-brand);
+  --font-sans:    var(--font-chrome);
 
-  /* ── Left / client site (warm light, shared) ── */
+  /* ── A · Client surface (warm paper) ───────────────────────
+     The canonical client ramp. Card titles/amounts ride the darker
+     ink steps; body/labels the mid steps; eyebrows the lightest. */
+  --c-bg:      #e9e6df;   /* left-pane background */
+  --c-card:    #ffffff;   /* browser card / tiles */
+  --c-soft:    #faf8f4;   /* order tile, callouts, hover fills */
+  --c-soft-2:  #f4f2ee;   /* urlbar, seg tracks, icon wells */
+  --c-fact:    #fdfcfa;   /* facts rows */
+  --c-line:    #efece5;   /* hairlines on soft */
+  --c-line-2:  #eeebe4;   /* totals rules, facts borders */
+  --c-line-3:  #e6e2da;   /* input borders, chips */
+  --c-line-4:  #cfcabf;   /* strong / hover border */
+  --c-ink:     #191714;   /* headings, totals */
+  --c-ink-2:   #211e19;   /* card titles, amounts */
+  --c-ink-3:   #3f3b34;   /* labels, checkbox copy */
+  --c-ink-4:   #5b564d;   /* body copy, co-lines */
+  --c-ink-5:   #94908a;   /* subtitles */
+  --c-ink-6:   #a29d93;   /* descriptions, dates */
+  --c-ink-7:   #a8a297;   /* eyebrows, section labels */
+  --c-ink-8:   #8a857b;   /* chrome tag, dim chips */
+
+  /* legacy left-pane aliases — original values, retained so the
+     base layer (left tabs, panel eyebrow, back-office structure)
+     renders unchanged. New client surfaces should use --c-* above. */
   --paper:    #f2efe9;
   --surface:  #ffffff;
   --surface-2:#fbfaf7;
@@ -21,30 +63,78 @@
   --ink-3:    #8b8578;
   --ink-4:    #a7a196;
 
-  /* ── Semantic ── */
-  --ok:   #12b76a;
-  --warn: #f59e0b;
-  --err:  #ef4444;
-  --info: #3b82f6;
+  /* ── App chrome — the top bar + sub bar shell ──────────────
+     A near-black warm brown, invariant across verticals (unlike the
+     engine room, which tints). */
+  --chrome-bg:          #100b0a;   /* top bar, model-switch track */
+  --chrome-bar:         #1a1512;   /* sub bar */
+  --chrome-inset:       #1c1613;   /* pill / env-switch tracks */
+  --chrome-active:      #2c2622;   /* model-btn active, brand divider */
+  --chrome-pill-active: #302722;   /* vertical-pill active */
+  --chrome-tag-bg:      #3a322c;   /* model tag chip */
+  --chrome-text:        #f7f3ec;   /* bright chrome text */
+  --chrome-text-2:      #b3aca1;   /* pill text */
+  --chrome-text-3:      #cfc8bd;   /* sub-bar text */
+  --chrome-muted:       #9b948a;   /* dim chrome text */
+  --chrome-edge:        #000000;   /* pane seams */
 
-  /* ── Code syntax (dark engine) ── */
+  /* ── C · SE config panel (dev-code surface, sanctioned on the left) ── */
+  --se-bg:        #100f16;
+  --se-surface:   #1a1824;
+  --se-surface-2: #2c2942;
+  --se-line:      #2a2740;
+  --se-line-2:    #211f2c;
+  --se-text:      #ffffff;
+  --se-title:     #c7c2e0;
+  --se-muted:     #8681a0;
+  --se-faint:     #6f6a86;
+  --se-faint-2:   #5a5670;
+
+  /* ── Semantic ──────────────────────────────────────────────
+     -ui / -deep are the client-surface (on-light) greens; plain --ok
+     is the engine-room green. Never use --ok on light ground. */
+  --ok:      #12b76a;
+  --ok-ui:   #22a55a;
+  --ok-deep: #159149;
+  --warn:    #f59e0b;
+  --err:     #ef4444;
+  --err-deep:#b91c1c;
+  --info:    #3b82f6;
+
+  /* ── B · Engine room — bright status colours (on dark) ─────
+     The brightened semantic set the dark pane paints for pills,
+     the status heartbeat, console tags and response codes. */
+  --eng-ok:   #4fd08a;
+  --eng-err:  #ff8a8a;
+  --eng-warn: #f0b45c;
+  --eng-info: #6fa8ff;
+
+  /* ── Code syntax (Layer B) ─────────────────────────────────── */
   --syn-key:  #8ab4ff;
   --syn-str:  #86e1a0;
   --syn-num:  #f6c177;
   --syn-bool: #c39bff;
   --syn-punc: #6b7391;
-
   --sync-hl:   rgba(246,193,119,.14);
   --sync-edge: #f6c177;
 
-  --shadow-sm: 0 1px 2px rgba(23,20,15,.05);
-  --shadow-md: 0 8px 30px rgba(23,20,15,.08);
-  --shadow-lg: 0 24px 60px rgba(23,20,15,.14);
+  /* ── Shadows ───────────────────────────────────────────────
+     -card/-tile/-pop are the warm-tinted client elevations; -sm/-md/-lg
+     are the original set kept for the base layer + cof.css. */
+  --shadow-sm:   0 1px 2px rgba(23,20,15,.05);
+  --shadow-md:   0 8px 30px rgba(23,20,15,.08);
+  --shadow-lg:   0 24px 60px rgba(23,20,15,.14);
+  --shadow-card: 0 1px 2px rgba(30,20,10,.05), 0 24px 60px -20px rgba(30,20,10,.22);
+  --shadow-tile: 0 1px 2px rgba(30,20,10,.04), 0 12px 30px -22px rgba(30,20,10,.22);
+  --shadow-pop:  0 1px 2px rgba(30,20,10,.05), 0 24px 48px -18px rgba(30,20,10,.28);
 
-  --r-sm: 8px;
-  --r-md: 12px;
-  --r-lg: 16px;
-  --r-xl: 20px;
+  /* ── Radii — one scale; snap to the nearest step ───────────── */
+  --r-xs: 6px;    /* inline chips, tile-field */
+  --r-sm: 8px;    /* engine panels, method pills */
+  --r-md: 12px;   /* inputs, bank card */
+  --r-lg: 16px;   /* popovers, wallet/detail cards */
+  --r-xl: 20px;   /* config panel */
+  --r-card: 24px; /* the browser card */
 
   /* Defaults (Retail) — overridden per vertical below */
   --accent:     #5600ef;
@@ -52,6 +142,7 @@
   --on-accent:  #ffffff;
   --accent-soft:#efe8ff;
 
+  /* ── B · Engine room (tinted per vertical) ── */
   --eng-bg:     #0f0a17;
   --eng-surface:#170f22;
   --eng-surface-2:#1c1230;
@@ -61,7 +152,12 @@
   --eng-faint:  #6b5b80;
 }
 
-/* Retail — purple */
+/* ── Verticals ─────────────────────────────────────────────
+   To add a vertical: copy a block, set the 4 accent tokens + 7 engine
+   tints (engine hue follows the accent, value stays near-black), and add
+   the entry to js/verticals.js. Accent must pass 4.5:1 on white for text
+   use, or use accent-soft fills with accent text. Only accent + engine
+   tint change per vertical; layout and the ramps above never fork. */
 :root[data-vertical="ecommerce"] {
   --accent: #5600ef; --accent-2: #a855f7; --on-accent: #ffffff; --accent-soft: #efe8ff;
   --eng-bg: #0f0a17; --eng-surface: #170f22; --eng-surface-2: #1c1230;
