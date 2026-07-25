@@ -26,7 +26,7 @@ code { font-family: var(--font-mono); }
 }
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand-mark {
-  width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center;
+  width: 24px; height: 24px; border-radius: var(--r-xs); display: grid; place-items: center;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: var(--on-accent); font-size: 13px; transition: background .3s ease;
 }
@@ -81,7 +81,7 @@ code { font-family: var(--font-mono); }
 .model-switch { display: flex; background: var(--chrome-bg); border-radius: var(--r-sm); padding: 3px; }
 .model-btn {
   border: 0; background: transparent; color: var(--chrome-muted);
-  padding: 7px 13px; border-radius: 6px; font-size: 12.5px; font-weight: 600;
+  padding: 7px 13px; border-radius: var(--r-xs); font-size: 12.5px; font-weight: 600;
   display: flex; align-items: center; gap: 8px; transition: all .15s ease;
 }
 .model-btn:hover { color: var(--chrome-text); }
@@ -314,7 +314,7 @@ code { font-family: var(--font-mono); }
    under an actively-typing cursor (see app.js). */
 .co-order-price { display: flex; align-items: center; gap: 3px; flex: none; font-family: var(--font-display); font-size: 20px; letter-spacing: .01em; }
 .tile-field {
-  border: 1px solid transparent; background: transparent; border-radius: 6px;
+  border: 1px solid transparent; background: transparent; border-radius: var(--r-xs);
   font: inherit; color: inherit; letter-spacing: inherit; padding: 2px 5px;
   transition: background .12s ease, border-color .12s ease; cursor: text;
 }
@@ -380,8 +380,8 @@ code { font-family: var(--font-mono); }
 .co-tds em { font-style: normal; color: var(--ink-4); }
 .co-tds code { font-size: 11px; color: var(--accent); }
 
-.co-fx-seg { display: flex; gap: 2px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 2px; flex: 1; }
-.co-fx-seg button { flex: 1; border: 0; background: transparent; color: var(--ink-3); padding: 6px 8px; border-radius: 6px; font-size: 11.5px; font-weight: 600; }
+.co-fx-seg { display: flex; gap: 2px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 2px; flex: 1; }
+.co-fx-seg button { flex: 1; border: 0; background: transparent; color: var(--ink-3); padding: 6px 8px; border-radius: var(--r-xs); font-size: 11.5px; font-weight: 600; }
 .co-fx-seg button.active { background: var(--surface); color: var(--ink); }
 
 /* ── FX popover — floats beside the price tile, portalled to #fx-popover
@@ -396,7 +396,7 @@ code { font-family: var(--font-mono); }
   box-shadow: var(--shadow-md); padding: 14px 16px;
 }
 .fx-popover-head { display: flex; align-items: center; justify-content: space-between; font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 10px; }
-.fx-popover-x { border: 0; background: transparent; color: var(--ink-3); font-size: 16px; line-height: 1; padding: 2px 4px; border-radius: 6px; }
+.fx-popover-x { border: 0; background: transparent; color: var(--ink-3); font-size: 16px; line-height: 1; padding: 2px 4px; border-radius: var(--r-xs); }
 .fx-popover-x:hover { color: var(--ink); background: var(--surface-2); }
 .fx-popover .co-tds { margin: 0 0 10px; }
 .fx-popover-body { display: flex; flex-direction: column; gap: 8px; }
@@ -467,7 +467,7 @@ code { font-family: var(--font-mono); }
 /* ── Request panel ───────────────────────────────────────── */
 /* method + endpoint on one line, with room to breathe before HEADERS */
 .req-headline { display: flex; align-items: center; gap: 11px; margin-bottom: 22px; }
-.method-pill { font-family: var(--font-mono); font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 6px; letter-spacing: .06em; }
+.method-pill { font-family: var(--font-mono); font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: var(--r-xs); letter-spacing: .06em; }
 /* colours mirror docs.rapyd.net: POST green · GET blue · DELETE red */
 .method-pill.post   { background: rgba(18,183,106,.14);  color: var(--eng-ok); }
 .method-pill.get    { background: rgba(59,130,246,.16);  color: var(--eng-info); }
@@ -574,11 +574,11 @@ code { font-family: var(--font-mono); }
 /* long unbreakable params (digital_wallets_buttons_customization.apple_pay)
    must wrap, or the label's min-content width pushes the controls out of the panel */
 .tkc-lab code { display: block; font-family: var(--font-mono); font-size: 9.5px; font-weight: 400; color: var(--eng-faint); margin-top: 2px; overflow-wrap: anywhere; }
-.tkc-seg { display: flex; gap: 2px; background: var(--eng-surface); border: 1px solid var(--eng-line); border-radius: 8px; padding: 2px; flex: none; }
+.tkc-seg { display: flex; gap: 2px; background: var(--eng-surface); border: 1px solid var(--eng-line); border-radius: var(--r-sm); padding: 2px; flex: none; }
 .tkc-sec > .tkc-seg { width: 100%; margin-bottom: 11px; }
 .tkc-seg button {
   flex: 1; border: 0; background: transparent; color: var(--eng-muted);
-  padding: 6px 12px; border-radius: 6px; font-size: 11.5px; font-weight: 600;
+  padding: 6px 12px; border-radius: var(--r-xs); font-size: 11.5px; font-weight: 600;
   white-space: nowrap; transition: all .12s ease;
 }
 .tkc-seg button:hover { color: var(--eng-text); }
@@ -715,7 +715,7 @@ code { font-family: var(--font-mono); }
 
 /* pill row — response + webhook parity */
 .eng-pillrow { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-.wh-pill { font-family: var(--font-mono); font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 6px; letter-spacing: .03em; background: var(--eng-surface-2); color: var(--eng-muted); }
+.wh-pill { font-family: var(--font-mono); font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: var(--r-xs); letter-spacing: .03em; background: var(--eng-surface-2); color: var(--eng-muted); }
 .wh-pill.evt { color: var(--eng-text); }
 .wh-pill.success { background: rgba(18,183,106,.16); color: var(--eng-ok); }
 .wh-pill.failure { background: rgba(239,68,68,.16); color: var(--eng-err); }
@@ -769,12 +769,12 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .browser.wide-tk ~ .offstage { max-width: 980px; }
 
 /* customer's bank-app view (standalone, outside the window) */
-.bank-view { width: 100%; background: var(--surface-2); border: 1px solid var(--line); border-radius: 16px; padding: 10px; text-align: left; }
+.bank-view { width: 100%; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 10px; text-align: left; }
 .bank-view-label { font-size: 9.5px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; color: var(--ink-3); margin: 1px 2px 8px; }
 .bank-view-label code { font-family: var(--font-mono); font-size: 9.5px; color: var(--accent); text-transform: none; letter-spacing: 0; }
 .bank-card {
   display: flex; align-items: center; gap: 12px;
-  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md);
   padding: 12px 14px; box-shadow: 0 1px 3px rgba(23,20,15,.06);
 }
 .bank-ico {
@@ -830,7 +830,7 @@ details[open] .wh-chev { transform: rotate(90deg); }
    content via overflow:hidden instead of letting the pane scroll. */
 .pane-left > * { flex-shrink: 0; }
 .pane-left .browser {
-  border: 0; border-radius: 24px;
+  border: 0; border-radius: var(--r-card);
   box-shadow: var(--shadow-card);
 }
 
@@ -844,7 +844,7 @@ details[open] .wh-chev { transform: rotate(90deg); }
 }
 .chrome-tag {
   font-size: 11px; font-weight: 600; letter-spacing: .06em; color: var(--c-ink-8);
-  background: transparent; border: 1px solid var(--c-line-3); border-radius: 8px; padding: 7px 11px;
+  background: transparent; border: 1px solid var(--c-line-3); border-radius: var(--r-sm); padding: 7px 11px;
 }
 .browser-body { padding: 26px 30px 28px; }
 .browser.wide-tk .browser-body { padding: 0; }
@@ -860,7 +860,7 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .co-merchant { font-family: inherit; font-size: 27px; font-weight: 800; letter-spacing: -.01em; color: var(--c-ink); }
 .co-tagline { display: flex; align-items: center; gap: 6px; font-size: 11px; letter-spacing: .11em; color: var(--c-ink-7); margin-top: 6px; }
 .co-order { gap: 14px; margin: 22px 0 0; padding: 14px 16px; background: var(--c-soft); border: 1px solid var(--c-line); border-radius: 14px; }
-.co-thumb { width: 48px; height: 48px; border-radius: 12px; font-size: 22px; }
+.co-thumb { width: 48px; height: 48px; border-radius: var(--r-md); font-size: 22px; }
 .co-order-name { font-size: 15.5px; font-weight: 700; color: var(--c-ink-2); }
 .co-order-desc { font-size: 12.5px; color: var(--c-ink-6); }
 .co-order-price { font-family: inherit; font-size: 18px; font-weight: 800; letter-spacing: -.01em; color: var(--c-ink-2); }
@@ -877,14 +877,14 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .co-row { gap: 14px; }
 /* flex min-width:auto would let the inputs' intrinsic width overflow the card */
 .co-row .co-field { min-width: 0; }
-.co-input { height: 52px; padding: 0 16px; border: 1.5px solid var(--c-line-3); border-radius: 12px; }
+.co-input { height: 52px; padding: 0 16px; border: 1.5px solid var(--c-line-3); border-radius: var(--r-md); }
 .co-input:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
 .co-input input { font-family: var(--font-mono); font-size: 15px; color: var(--c-ink-2); }
 .co-input input#f-name { font-family: inherit; }
 .co-tds { gap: 11px; margin: 20px 0 0; font-size: 14px; color: var(--ink-2); }
 .co-tds input {
   appearance: none; -webkit-appearance: none; width: 20px; height: 20px; margin: 0;
-  border-radius: 6px; border: 1.5px solid var(--c-line-4); background: #fff;
+  border-radius: var(--r-xs); border: 1.5px solid var(--c-line-4); background: #fff;
   position: relative; cursor: pointer; transition: all .15s;
 }
 .co-tds input:checked { background: var(--accent); border-color: var(--accent); }
@@ -951,7 +951,7 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .bank-view-label { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; letter-spacing: .09em; color: var(--c-ink-6); margin: 0 0 12px; }
 .bank-view-label code { font-size: 11px; letter-spacing: 0; }
 .bank-card { gap: 14px; border: 1px solid var(--c-line-2); border-radius: 13px; padding: 14px 16px; box-shadow: none; background: #fff; }
-.bank-ico { width: 42px; height: 42px; border-radius: 12px; background: #f1ecff; color: var(--accent); }
+.bank-ico { width: 42px; height: 42px; border-radius: var(--r-md); background: #f1ecff; color: var(--accent); }
 .bank-desc { font-size: 15px; font-weight: 700; color: var(--c-ink-2); }
 .bank-date { font-size: 12.5px; color: var(--c-ink-6); }
 .bank-amt-main { font-size: 16px; font-weight: 800; letter-spacing: -.01em; color: var(--c-ink-2); }
@@ -982,7 +982,7 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .tk-paycol { padding: 20px; }
 
 /* config panel — dark var(--se-bg) recolor */
-.tk-config { background: var(--se-bg); border: 0; border-radius: 20px; padding: 24px 26px 26px; font-family: inherit; }
+.tk-config { background: var(--se-bg); border: 0; border-radius: var(--r-xl); padding: 24px 26px 26px; font-family: inherit; }
 .tkc-head { border-bottom: 0; padding-bottom: 0; }
 .tkc-title { font-family: var(--font-mono); font-size: 12px; font-weight: 600; letter-spacing: .12em; color: var(--se-title); }
 .tkc-hint { font-size: 12px; color: var(--se-faint); }
@@ -995,7 +995,7 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .tkc-lab code { font-size: 12px; color: var(--se-faint); }
 .tkc-seg { background: var(--se-surface); border: 0; border-radius: 9px; padding: 4px; gap: 5px; }
 .tkc-sec > .tkc-seg { border-radius: 11px; gap: 6px; }
-.tkc-seg button { font-size: 14px; font-weight: 600; color: var(--se-muted); padding: 10px 14px; border-radius: 8px; }
+.tkc-seg button { font-size: 14px; font-weight: 600; color: var(--se-muted); padding: 10px 14px; border-radius: var(--r-sm); }
 .tkc-seg button:hover { color: #fff; }
 .tkc-seg button.active { background: var(--se-surface-2); color: #fff; }
 .tkc-seg[data-opt="mode"] button { border: 1.5px solid transparent; }
@@ -1011,7 +1011,7 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .tkc-select { height: 38px; background: var(--se-surface); border: 1px solid var(--se-line); border-radius: 9px; color: #fff; font-family: inherit; font-size: 13px; padding: 0 10px; cursor: pointer; }
 .tkc-color { width: 40px; height: 40px; background: var(--se-surface); border: 1px solid var(--se-line); border-radius: 9px; }
 .tkc-wallet { font-size: 15px; color: #fff; gap: 11px; }
-.dw-logo { width: 30px; height: 30px; border-radius: 8px; background: #fff; }
+.dw-logo { width: 30px; height: 30px; border-radius: var(--r-sm); background: #fff; }
 .dw-logo.apple { background: #fff; border: 0; }
 .tkc-cta { margin-top: 26px; height: 60px; font-size: 17px; }
 
@@ -1024,7 +1024,7 @@ details[open] .wh-chev { transform: rotate(90deg); }
 }
 .fx-popover {
   width: 250px; padding: 16px 18px;
-  background: #fff; border: 1px solid var(--c-line-2); border-radius: 16px;
+  background: #fff; border: 1px solid var(--c-line-2); border-radius: var(--r-lg);
   box-shadow: var(--shadow-pop);
 }
 .fx-popover-head { color: var(--c-ink-7); margin-bottom: 12px; }
@@ -1059,10 +1059,10 @@ details[open] .wh-chev { transform: rotate(90deg); }
 
 .cur-dropdown {
   min-width: 130px; padding: 6px;
-  background: #fff; border: 1px solid var(--c-line-2); border-radius: 12px;
+  background: #fff; border: 1px solid var(--c-line-2); border-radius: var(--r-md);
   box-shadow: 0 1px 2px rgba(30,20,10,.05), 0 20px 40px -14px rgba(30,20,10,.3);
 }
-.cur-opt { color: var(--c-ink-3); font-size: 13px; padding: 8px 10px; border-radius: 8px; }
+.cur-opt { color: var(--c-ink-3); font-size: 13px; padding: 8px 10px; border-radius: var(--r-sm); }
 .cur-opt:hover { background: var(--c-soft-2); }
 .cur-opt.active { color: var(--accent); }
 
@@ -1079,7 +1079,7 @@ details[open] .wh-chev { transform: rotate(90deg); }
 /* ── Back office — warm-paper skin (matches the checkout card) ──── */
 .bo-model-tag { background: var(--c-line); color: var(--c-ink-8); }
 .bo-wallet-card, .bo-tile, .bo-detail-card {
-  border: 1px solid var(--c-line); border-radius: 16px; background: #fff;
+  border: 1px solid var(--c-line); border-radius: var(--r-lg); background: #fff;
   box-shadow: var(--shadow-tile);
 }
 .bo-wallet-ballabel { color: var(--c-ink-7); }
@@ -1107,9 +1107,9 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .bo-route { border-color: var(--c-line-3); }
 .bo-route:hover { border-color: var(--c-line-4); }
 .bo-route.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, #fff); }
-.bo-refund-input { border: 1.5px solid var(--c-line-3); border-radius: 12px; height: 44px; }
+.bo-refund-input { border: 1.5px solid var(--c-line-3); border-radius: var(--r-md); height: 44px; }
 .bo-refund-currency { color: var(--c-ink-3); }
-.bo-refund-btn { border: 1.5px solid var(--c-line-3); background: #fff; color: var(--c-ink-4); border-radius: 12px; }
+.bo-refund-btn { border: 1.5px solid var(--c-line-3); background: #fff; color: var(--c-ink-4); border-radius: var(--r-md); }
 .bo-refund-btn.cancel:hover { background: var(--c-soft); }
 
 /* light-tuned status pills (engine-room .wh-pill is dark-themed) */
