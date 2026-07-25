@@ -137,8 +137,10 @@ uppercase body copy.
 
 **Radii** (`--r-*`): `xs 6px · sm 8px · md 12px · lg 16px · xl 20px · card 24px`. The browser card is
 `--r-card`; inputs/bank card `--r-md`; popovers & wallet/detail cards `--r-lg`; config panel `--r-xl`;
-engine chrome `--r-sm`; chips `--r-xs`. A few legacy in-between radii (11/13/14px) remain in
-`main.css` — snap toward these steps when you touch them.
+engine chrome `--r-sm`; chips `--r-xs`. Any radius that lands on a step references its token. A set of
+**in-between radii** (4/5/7/9/10/11/13/14/18px — ~38 uses, incl. the deliberate 14px checkout-card
+corners) are kept as literals on purpose; snap them to the nearest step only as an intentional visual
+change, not silently.
 
 **Shadows** (`--shadow-*`): warm-tinted `--shadow-card` (the browser card), `--shadow-tile`
 (back-office cards), `--shadow-pop` (portals); plus `--shadow-sm/-md/-lg` for the base layer/cof.
