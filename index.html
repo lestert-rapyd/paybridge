@@ -112,6 +112,9 @@
   <!-- Portal: escapes .browser's overflow:hidden, same reasoning as #offstage
        but for a floating popover rather than an out-of-window annotation. -->
   <div class="fx-popover" id="fx-popover" hidden></div>
+  <!-- Portal: stored-credential strategy — same escape-the-overflow reasoning
+       as #fx-popover; opened from the "Save card" row (own-fields.js). -->
+  <div class="sc-popover" id="sc-popover" hidden></div>
   <!-- Portal: self-designed currency picker, shared by the tile's currency
        button and the FX popover's requested_currency button — a native
        <select>'s dropdown is OS-rendered and can't be themed. -->

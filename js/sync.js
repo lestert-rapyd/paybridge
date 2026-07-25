@@ -44,6 +44,31 @@ export function parseExpiry(value) {
   return { month: d.slice(0, 2), year: d.slice(2, 4) };
 }
 
+/** Luhn (mod-10) check on a PAN's digits — the same gate a real gateway runs. */
+export function luhn(value) {
+  const s = String(value || '').replace(/\D/g, '');
+  if (s.length < 12) return false;
+  let sum = 0, alt = false;
+  for (let i = s.length - 1; i >= 0; i--) {
+    let d = +s[i];
+    if (alt) { d *= 2; if (d > 9) d -= 9; }
+    sum += d;
+    alt = !alt;
+  }
+  return sum % 10 === 0;
+}
+
+/** MM + 2-digit YY (as produced by parseExpiry) → a real, non-past expiry. */
+export function expiryValid(month, year) {
+  const m = parseInt(month, 10);
+  if (!(m >= 1 && m <= 12)) return false;
+  if (String(year).length !== 2) return false;
+  const full = 2000 + parseInt(year, 10);
+  const now = new Date();
+  const curY = now.getFullYear(), curM = now.getMonth() + 1;
+  return full > curY || (full === curY && m >= curM);
+}
+
 /** Digits + a single decimal point — for the tile's editable amount field. */
 export function formatAmount(value) {
   let v = (value || '').replace(/[^\d.]/g, '');

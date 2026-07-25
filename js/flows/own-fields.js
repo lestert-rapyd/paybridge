@@ -36,6 +36,7 @@ import { renderProcessing, render3DS, renderSuccess, renderError } from '../scre
 import {
   FIELD_MAP, detectBrand,
   formatNumber, formatExpiry, parseExpiry,
+  luhn, expiryValid,
 } from '../sync.js';
 import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
 import * as ledger from '../ledger.js';
@@ -229,6 +230,7 @@ function returningHTML() {
         <button type="button" class="cof-link" id="cof-different">Use a different card</button>
       </div>
       <div class="cof-chips">${creds.map(c => chipHTML(c, c.ref === cred?.ref)).join('')}</div>
+      <div class="cof-strategy"><button type="button" class="sc-trigger" id="sc-trigger" title="Reuse strategy">Strategy ▸</button></div>
       ${mode === 'cvv' ? `
         <div class="co-row cof-cvvrow">
           <div class="co-field cof-cvv">
@@ -277,10 +279,13 @@ export function renderPaymentHTML() {
       <div class="co-input"><input id="f-name" autocomplete="cc-name" placeholder="Jordan Taylor" /></div>
     </div>
     ${p.aft && !isSubscription() ? directPurchaseHTML() : ''}
-    <label class="co-tds">
-      <input type="checkbox" id="f-save" ${effectiveSave() ? 'checked' : ''} ${isSubscription() ? 'disabled' : ''} />
-      <span>${isSubscription() ? 'Card saved for your subscription' : 'Save card for future purchases'}</span>
-    </label>
+    <div class="co-save-row">
+      <label class="co-tds">
+        <input type="checkbox" id="f-save" ${effectiveSave() ? 'checked' : ''} ${isSubscription() ? 'disabled' : ''} />
+        <span>${isSubscription() ? 'Card saved for your subscription' : 'Save card for future purchases'}</span>
+      </label>
+      ${effectiveSave() ? `<button type="button" class="sc-trigger" id="sc-trigger" title="Stored-credential strategy">Strategy ▸</button>` : ''}
+    </div>
     <label class="co-tds">
       <input type="checkbox" id="f-tds" ${tds ? 'checked' : ''} />
       <span>Require 3-D Secure</span>
@@ -288,26 +293,25 @@ export function renderPaymentHTML() {
     <button class="co-cta" id="pay-btn">${productCta()} ${p.amount} ${p.currency}</button>`;
 }
 
-/* ── SE strategy deck (#demo-controls, outside the fake site) ──
-   Real API keys on the labels; repainted in place as save/returning
-   context changes. Never part of the customer-facing page. */
-export function renderControlsHTML() {
-  return `<div class="se-deck" id="of-deck"></div>`;
-}
-
+/* ── Stored-credential strategy — SE popover (portal #sc-popover) ──
+   Ported from the old #demo-controls deck into an FX-style popover, opened
+   from the "Save card" row (first payment) or beside the saved-card chips
+   (returning). Never part of the customer-facing page. deckHTML() builds the
+   body; scPopoverHTML() wraps it with the head. */
 function deckHTML() {
   const returning = isReturning();
   if (!returning) {
     if (!effectiveSave()) {
-      return `<div class="se-deck-empty">Tick <b>“save card”</b> on the checkout to configure the stored-credential strategy${customers.hasCredentials() ? '' : ' — the returning-customer view unlocks after the first saved payment'}.</div>`;
+      return `<div class="se-deck-empty">Tick <b>“save card”</b> to configure how this card is stored for reuse.</div>`;
     }
-    const sc3 = !nridAvailable();
+    const nridOk = nridAvailable();
+    const needsCustomer = storage !== 'vault'; // token / both → a Rapyd customer holds the card_***
+    const id = customers.getIdentity();
     return `
-      <div class="se-deck-head">Stored-credential strategy<span class="se-deck-hint">SE controls · not part of the client site</span></div>
       <div class="se-row">
         <div class="se-lab">Storage<code>save_payment_method</code></div>
         <div class="se-seg" data-opt="storage">
-          <button type="button" data-val="vault" class="${storage === 'vault' ? 'active' : ''}">Merchant vault (PCI)</button>
+          <button type="button" data-val="vault" class="${storage === 'vault' ? 'active' : ''}" ${nridOk ? '' : 'disabled title="This credential returns no network_reference_id — customer-absent vault reuse isn’t possible"'}>Merchant vault (PCI)</button>
           <button type="button" data-val="token" class="${storage === 'token' ? 'active' : ''}">Rapyd token</button>
           <button type="button" data-val="both" class="${storage === 'both' ? 'active' : ''}">Both</button>
         </div>
@@ -318,36 +322,82 @@ function deckHTML() {
           ? 'subscription product → recurring · MIT charges run from the back office'
           : 'one-time product → unscheduled · customer-present reuse on this page'}</span></div>
       </div>
-      ${storage !== 'token' && sc3 ? `<div class="se-warn">${activeProfile().label} does not return <code>network_reference_id</code> — vault reuse will require CVV re-entry.</div>` : ''}`;
+      ${needsCustomer ? `
+      <div class="sc-cust">
+        <div class="sc-cust-head">Rapyd customer<span class="se-deck-hint">prerequisite · created first</span></div>
+        <div class="sc-cust-body">A <code>card_***</code> token is held by a customer, so beat 1 is <code>POST /v1/customers</code> → <code>cus_***</code>; the payment then saves the card under it. <b>Name on card</b> inherits this identity.</div>
+        <div class="sc-cust-id"><code>${id.name}</code><code>${id.email}</code></div>
+      </div>` : `
+      <div class="sc-cust vault">
+        <div class="sc-cust-body">No Rapyd customer — the merchant vaults the PAN itself; reuse re-sends the stored PAN.</div>
+      </div>`}
+      ${!nridOk ? `<div class="se-warn">${activeProfile().label} returns no <code>network_reference_id</code>, so PCI vault reuse isn’t available. Pick a credential that returns it — <b>SC2</b> or <b>SC3</b> via the Sandbox picker — or save a <b>Rapyd token</b>.</div>` : ''}`;
   }
   const cred = activeCredential();
   if (!cred) return '';
   if (cred.kind === 'token') {
     return `
-      <div class="se-deck-head">Charge with<span class="se-deck-hint">stored credential</span></div>
       <div class="se-row">
-        <div class="se-lab">Mode<code>payment_method</code></div>
+        <div class="se-lab">Charge with<code>payment_method</code></div>
         <div class="se-fixed"><code>${cred.card_id || 'card_***'}</code><span class="se-note">Rapyd token — no card data in the request</span></div>
       </div>`;
   }
   const nridOk = !!cred.network_reference_id && nridAvailable();
   const nridTitle = !nridAvailable()
-    ? `This profile (${activeProfile().label}) does not return network_reference_id`
+    ? `${activeProfile().label} returns no network_reference_id — pick SC2/SC3 or save a Rapyd token`
     : 'No network_reference_id captured yet for this card';
   const mode = currentMode();
   return `
-    <div class="se-deck-head">Charge with<span class="se-deck-hint">stored credential</span></div>
     <div class="se-row">
-      <div class="se-lab">Mode<code>payment_method.fields</code></div>
+      <div class="se-lab">Reuse mode<code>payment_method.fields</code></div>
       <div class="se-seg" data-opt="mode">
         <button type="button" data-val="cvv" class="${mode === 'cvv' ? 'active' : ''}">PAN + CVV</button>
         <button type="button" data-val="nrid" class="${mode === 'nrid' ? 'active' : ''}" ${nridOk ? '' : `disabled title="${nridTitle}"`}>PAN + network_reference_id</button>
       </div>
     </div>`;
 }
-function renderDeck() {
-  const el = $('#of-deck');
-  if (el) el.innerHTML = deckHTML();
+function scPopoverHTML() {
+  return `
+    <div class="fx-popover-head">
+      <span>Stored-credential strategy</span>
+      <button type="button" class="fx-popover-x" id="sc-popover-close" aria-label="Close">×</button>
+    </div>
+    <div class="fx-popover-body">${deckHTML()}</div>`;
+}
+/* Repaint only when open (like the FX popover); the trigger's own visibility
+   is owned by renderPaymentHTML via effectiveSave()/isReturning(). */
+function renderScPopover() {
+  const el = $('#sc-popover');
+  if (el && !el.hidden) el.innerHTML = scPopoverHTML();
+}
+function openScPopover() {
+  const trigger = $('#sc-trigger');
+  const pop = $('#sc-popover');
+  if (!trigger || !pop) return;
+  pop.innerHTML = scPopoverHTML();
+  pop.hidden = false;
+  trigger.classList.add('active');
+  const rect = trigger.getBoundingClientRect();
+  const top = Math.min(rect.top, window.innerHeight - pop.offsetHeight - 12);
+  pop.style.top = `${Math.max(12, top)}px`;
+  pop.style.left = `${rect.right + 10}px`;
+}
+function closeScPopover() {
+  const pop = $('#sc-popover');
+  if (pop) pop.hidden = true;
+  $('#sc-trigger')?.classList.remove('active');
+}
+/* The Name-on-card inherits the customer identity whenever the chosen route
+   creates a customer (token/both) and the field hasn't been typed into. */
+function syncNameInheritance() {
+  if (isReturning()) return;
+  const el = $('#f-name');
+  const needsCustomer = effectiveSave() && storage !== 'vault';
+  if (needsCustomer && !card.name) {
+    card.name = customers.getIdentity().name;
+    if (el) el.value = card.name;
+    renderRequest();
+  }
 }
 
 /* ── Request panel ───────────────────────────────────────── */
@@ -419,10 +469,13 @@ export function refreshRightPanel() {
 /** Profile switch (SC1/SC2/SC3): credentials re-key per MID, NRID gating and
     the body's ewallet change — repaint without resetting the flow. */
 export function refreshProfile() {
+  // A profile with no network_reference_id can't back a customer-absent vault
+  // reuse — never leave the strategy sitting on the now-disabled vault option.
+  if (storage === 'vault' && !nridAvailable()) storage = 'token';
   const region = $('#pay-region');
   if (region && state.model === 'own-fields') rerenderPayRegion();
   else renderRequest();
-  renderDeck();
+  renderScPopover();
 }
 
 /* ── Terminal (webhook or fallback) → left screen ────────── */
@@ -517,6 +570,16 @@ async function pay() {
   if (returning && mode === 'cvv' && !card.cvv) {
     $('#f-cvv')?.focus();
     toast('Enter the CVV to confirm it’s you', 'err');
+    return;
+  }
+
+  // Fresh-card completeness/validity gate — never fire the POST into a failure.
+  if (!returning && !cardValid()) {
+    refreshPayValidity();
+    const firstBad = !card.number ? 'f-number' : !card.expiry ? 'f-expiry' : !card.cvv ? 'f-cvv'
+      : !card.name.trim() ? 'f-name' : (document.querySelector('#pay-region .co-input.is-invalid input')?.id || 'f-number');
+    $(`#${firstBad}`)?.focus();
+    toast('Complete the card details first', 'err');
     return;
   }
 
@@ -634,6 +697,30 @@ function fillTestCard() {
   set('f-name', 'Jordan Taylor');
 }
 
+/* ── Validation ──────────────────────────────────────────── */
+function cardValid() {
+  const digits = card.number.replace(/\D/g, '');
+  const { month, year } = parseExpiry(card.expiry);
+  return digits.length >= 13 && digits.length <= 19 && luhn(digits)
+    && expiryValid(month, year)
+    && /^\d{3,4}$/.test(card.cvv)
+    && card.name.trim().length > 0;
+}
+/* Gate the pay button, and flag any field whose CONTENT is invalid (empty
+   fields stay unflagged — they just keep the button disabled). */
+function refreshPayValidity() {
+  const btn = $('#pay-btn');
+  if (!btn) return;
+  if (isReturning()) { btn.disabled = currentMode() === 'cvv' && !card.cvv; return; }
+  btn.disabled = !cardValid();
+  const flag = (id, bad) => $(`#${id}`)?.closest('.co-input')?.classList.toggle('is-invalid', bad);
+  const digits = card.number.replace(/\D/g, '');
+  const { month, year } = parseExpiry(card.expiry);
+  flag('f-number', digits.length > 0 && !(digits.length >= 13 && digits.length <= 19 && luhn(digits)));
+  flag('f-expiry', card.expiry.length > 0 && !expiryValid(month, year));
+  flag('f-cvv', card.cvv.length > 0 && !/^\d{3,4}$/.test(card.cvv));
+}
+
 /* Repaint ONLY the payment region (chips/CVV/form) — the shell (tile, totals,
    FX badge) stays put, so an SE narration isn't disturbed. */
 function rerenderPayRegion() {
@@ -642,10 +729,11 @@ function rerenderPayRegion() {
   if (isReturning()) card.cvv = ''; // CVV is fresh per payment
   region.innerHTML = renderPaymentHTML();
   wirePayRegion();
-  renderDeck();
+  renderScPopover();
   renderRequest();
   const payBtn = $('#pay-btn');
   if (payBtn) payBtn.textContent = `${productCta()} ${chargeText(customerCharge())}${isSubscription() ? ' /mo' : ''}`;
+  refreshPayValidity();
 }
 
 function wirePayRegion() {
@@ -672,9 +760,11 @@ function wirePayRegion() {
       card.cvv = cvv.value;
       setStatus('Drafting request', 'drafting');
       renderRequest();
+      refreshPayValidity();
     });
     $('#f-tds')?.addEventListener('change', e => { tds = e.target.checked; renderRequest(); });
     $('#pay-btn')?.addEventListener('click', pay);
+    refreshPayValidity();
     return;
   }
 
@@ -693,6 +783,7 @@ function wirePayRegion() {
       if (key === 'number') updateBrand();
       setStatus('Drafting request', 'drafting');
       renderRequest();
+      refreshPayValidity();
     });
   };
   wire('number', els.number, formatNumber);
@@ -700,7 +791,11 @@ function wirePayRegion() {
   wire('cvv', els.cvv, v => v.replace(/\D/g, '').slice(0, 4));
   wire('name', els.name, null);
 
-  $('#f-save')?.addEventListener('change', e => { save = e.target.checked; renderDeck(); renderRequest(); });
+  $('#f-save')?.addEventListener('change', e => {
+    save = e.target.checked;
+    if (!effectiveSave()) closeScPopover();
+    rerenderPayRegion(); // show/hide the Strategy trigger, re-inherit the name, re-validate
+  });
   $('#f-tds')?.addEventListener('change', e => { tds = e.target.checked; renderRequest(); });
   const dpSeg = $('#cof-dp');
   dpSeg?.addEventListener('click', e => {
@@ -712,13 +807,16 @@ function wirePayRegion() {
   });
   $('#pay-btn').addEventListener('click', pay);
   $('#use-test')?.addEventListener('click', fillTestCard);
+  syncNameInheritance();
+  refreshPayValidity();
 }
 
 export function mount() {
   sent = false;
   useDifferentCard = false; // returning view is the default whenever credentials exist
+  closeScPopover(); // never linger open across a vertical/model/env reset
   wirePayRegion();
-  renderDeck();
+  renderScPopover();
   renderRequest();
 }
 
@@ -740,21 +838,39 @@ document.addEventListener('focusout', e => {
   applyHighlight();
 });
 
-// SE deck interactions — same once-at-module-load delegation (the deck's
-// innerHTML is rebuilt far more often than mount() runs).
+// Strategy popover interactions — once-at-module-load delegation (the popover
+// body's innerHTML is rebuilt far more often than mount() runs).
 document.addEventListener('click', e => {
-  const btn = e.target.closest('#of-deck .se-seg button[data-val]');
+  const btn = e.target.closest('#sc-popover .se-seg button[data-val]');
   if (!btn || btn.disabled) return;
   const opt = btn.closest('.se-seg').dataset.opt;
-  if (opt === 'storage') { storage = btn.dataset.val; renderDeck(); renderRequest(); }
-  if (opt === 'mode') { chargeMode = btn.dataset.val; rerenderPayRegion(); }
+  if (opt === 'storage') { storage = btn.dataset.val; syncNameInheritance(); renderScPopover(); renderRequest(); }
+  if (opt === 'mode') { chargeMode = btn.dataset.val; rerenderPayRegion(); renderScPopover(); }
+});
+
+// Strategy popover open/close — FX-style: toggle from #sc-trigger, close on the
+// ×, an outside click (composedPath, since a re-rendering control detaches
+// e.target mid-dispatch), or Escape.
+document.addEventListener('click', e => {
+  if (e.target.closest('#sc-trigger')) {
+    $('#sc-popover').hidden ? openScPopover() : closeScPopover();
+    return;
+  }
+  if (e.target.closest('#sc-popover-close')) { closeScPopover(); return; }
+  const pop = $('#sc-popover');
+  if (pop && !pop.hidden && !e.composedPath().includes(pop) && !e.target.closest('#sc-trigger')) {
+    closeScPopover();
+  }
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !$('#sc-popover')?.hidden) closeScPopover();
 });
 
 // Credentials changing (webhook harvest, list backfill, profile re-key) —
-// refresh the deck and the chips if they're on screen.
+// refresh the popover and the chips if they're on screen.
 customers.subscribeCustomers(() => {
   if (state.model !== 'own-fields' || state.leftView !== 'client') return;
-  renderDeck();
+  renderScPopover();
   if ($('#cof-returning')) rerenderPayRegion(); // NRI badges / new tokens
 });
 

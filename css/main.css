@@ -426,6 +426,33 @@ code { font-family: var(--font-mono); }
 .fx-popover-label { font-size: 10.5px; font-weight: 600; color: var(--ink-3); margin-bottom: 3px; }
 .fx-popover .cur-trigger { width: 100%; justify-content: space-between; }
 
+/* ── Stored-credential strategy popover (portal #sc-popover) — reuses the
+   .fx-popover-head/-x/-body classes; box, trigger, and the customer-
+   prerequisite block are declared here (base look; refresh layer below). */
+.sc-popover {
+  position: fixed; z-index: 50; width: 300px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md);
+  box-shadow: var(--shadow-md); padding: 14px 16px;
+}
+.sc-popover .fx-popover-body { gap: 10px; }
+.sc-trigger {
+  flex: none; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink-2);
+  font-size: 11px; font-weight: 700; letter-spacing: .02em; padding: 4px 10px;
+  border-radius: 999px; cursor: pointer; transition: all .12s ease;
+}
+.sc-trigger:hover, .sc-trigger.active { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.co-save-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px 0 12px; }
+.co-save-row .co-tds { margin: 0; }
+.cof-strategy { display: flex; justify-content: flex-end; margin: -2px 0 10px; }
+.sc-cust { display: flex; flex-direction: column; gap: 5px; padding: 9px 11px; border: 1px dashed var(--line-2); border-radius: var(--r-sm); background: var(--surface-2); }
+.sc-cust.vault { border-style: solid; }
+.sc-cust-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-2); }
+.sc-cust-body { font-size: 11px; line-height: 1.5; color: var(--ink-2); }
+.sc-cust-body code { font-family: var(--font-mono); font-size: 10px; color: var(--accent); }
+.sc-cust-id { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.sc-cust-id code { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); }
+.co-input.is-invalid { border-color: var(--err); box-shadow: 0 0 0 3px color-mix(in srgb, var(--err) 15%, transparent); }
+
 /* ── Currency dropdown — portal shared by the tile's currency button and
    the FX popover's requested_currency button. Stands in for a native
    <select>'s dropdown list, which is OS-rendered and can't be themed. */
@@ -1065,6 +1092,16 @@ details[open] .wh-chev { transform: rotate(90deg); }
 }
 .fx-popover .cur-trigger:hover { border-color: var(--c-line-4); }
 .cur-caret { color: var(--c-ink-6); }
+
+/* Strategy popover — same warm-card treatment as .fx-popover (it reuses the
+   -head/-x/-body classes, already restyled above). */
+.sc-popover { font-family: var(--font-client); width: 300px; padding: 16px 18px; background: #fff; border: 1px solid var(--c-line-2); border-radius: var(--r-lg); box-shadow: var(--shadow-pop); }
+.sc-cust { background: var(--c-soft-2); border-color: var(--c-line-3); }
+.sc-cust-head { color: var(--c-ink-7); }
+.sc-cust-body { color: var(--c-ink-3); }
+.sc-cust-id code { color: var(--c-ink-6); }
+.sc-trigger { border-color: var(--c-line-3); background: #fff; color: var(--c-ink-6); }
+.sc-trigger:hover, .sc-trigger.active { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 
 /* Live "customer pays / you receive" preview under the FX controls. The fixed
    side reads as an exact figure; the varying side is muted and prefixed "≈". */
