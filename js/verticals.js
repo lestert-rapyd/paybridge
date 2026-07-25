@@ -2,6 +2,14 @@
    Vertical definitions.
    Brand stays "PayBridge" — client-side merchants are PayBridge
    sub-brands. Only context, product framing, colours and copy change.
+
+   Each vertical carries a small PRODUCT CATALOG: one-time products
+   and subscription products. The product's billing nature — not a
+   mechanical back-office switch — is what drives the stored-credential
+   intent (`recurrence_type`): one-time + save → unscheduled (card-on-
+   file, customer-present reuse); subscription → recurring (MIT charges
+   run from the back office). Crypto products additionally carry the
+   AFT indicators (aft / purpose_code / special_condition_indicator).
    ───────────────────────────────────────────────────────────── */
 
 import { state } from './state.js';
@@ -17,16 +25,26 @@ export const VERTICALS = {
     headline: 'Secure checkout',
     cta: 'Pay',
     successNote: 'Order confirmed — we’re packing it now. Dispatch and tracking details will land in your inbox shortly.',
-    product: {
-      thumb: ['#5600ef', '#a855f7'],
-      name: 'Oak Lounge Chair',
-      desc: 'Walnut finish · Qty 1',
-      amount: '149.00',
-      currency: 'GBP',
-      symbol: '£',
-      country: 'GB',
-      delivery: 'Free',
-    },
+    products: [
+      {
+        id: 'chair', pill: 'Lounge Chair', billing: 'one_time', glyph: '🪑',
+        thumb: ['#5600ef', '#a855f7'],
+        name: 'Oak Lounge Chair',
+        desc: 'Walnut finish · Qty 1',
+        amount: '149.00', currency: 'GBP', symbol: '£', country: 'GB',
+        delivery: 'Free',
+        successNote: 'Order confirmed — we’re packing it now. Dispatch and tracking details will land in your inbox shortly.',
+      },
+      {
+        id: 'coffee-sub', pill: 'Coffee Club', billing: 'subscription', interval: 'monthly', cta: 'Subscribe', glyph: '☕',
+        thumb: ['#7a3f12', '#c9803a'],
+        name: 'Coffee Bean Club',
+        desc: '250g single origin · monthly',
+        amount: '18.00', currency: 'GBP', symbol: '£', country: 'GB',
+        delivery: 'Free',
+        successNote: 'Subscription active — your first bag ships today. Future bags bill to this card automatically each month.',
+      },
+    ],
   },
 
   crypto: {
@@ -39,16 +57,39 @@ export const VERTICALS = {
     headline: 'Buy crypto instantly',
     cta: 'Buy',
     successNote: 'Top-up confirmed — ≈ 0.00075 BTC is on its way to your wallet address. Network confirmations usually take a few minutes.',
-    product: {
-      thumb: ['#00b36b', '#00ff89'],
-      name: 'Bitcoin',
-      desc: 'You receive ≈ 0.00075 BTC',
-      amount: '50.00',
-      currency: 'USD',
-      symbol: '$',
-      country: 'US',
-      delivery: null,
-    },
+    products: [
+      {
+        id: 'btc', pill: 'Buy BTC', billing: 'one_time', glyph: '₿',
+        aft: true, purpose_code: 'crypto_currency', special_condition_indicator: 'cryptocurrency',
+        thumb: ['#00b36b', '#00ff89'],
+        name: 'Bitcoin',
+        desc: 'You receive ≈ 0.00075 BTC',
+        amount: '50.00', currency: 'USD', symbol: '$', country: 'US',
+        delivery: null,
+        successNote: 'Purchase confirmed — ≈ 0.00075 BTC is on its way to your wallet address. Network confirmations usually take a few minutes.',
+        // is_direct_purchase: false → the AFT funds the fiat balance instead
+        fundedNote: 'Funds added — your fiat balance is topped up and held. Buy BTC whenever you’re ready, at your price.',
+      },
+      {
+        id: 'dca', pill: 'DCA Plan', billing: 'subscription', interval: 'monthly', cta: 'Start DCA', glyph: '🔁',
+        aft: true, purpose_code: 'crypto_currency', special_condition_indicator: 'cryptocurrency',
+        thumb: ['#0e7490', '#22d3ee'],
+        name: 'Bitcoin DCA Plan',
+        desc: 'Auto-buy BTC · monthly',
+        amount: '25.00', currency: 'USD', symbol: '$', country: 'US',
+        delivery: null,
+        successNote: 'DCA plan active — your first buy just executed. Future buys run automatically every month, no action needed.',
+      },
+      {
+        id: 'coinplus', pill: 'Coin+', billing: 'subscription', interval: 'monthly', cta: 'Subscribe', glyph: '⭐',
+        thumb: ['#4338ca', '#818cf8'],
+        name: 'Coin+ Platform Fee',
+        desc: 'Pro trading tier · monthly',
+        amount: '9.99', currency: 'USD', symbol: '$', country: 'US',
+        delivery: null,
+        successNote: 'Coin+ active — pro features unlocked. Your card bills automatically each month.',
+      },
+    ],
   },
 
   gaming: {
@@ -61,34 +102,69 @@ export const VERTICALS = {
     headline: 'Add funds to your wallet',
     cta: 'Deposit',
     successNote: 'Funds added — your new balance is available to play right away. Withdrawals return to this card.',
-    product: {
-      thumb: ['#c4005f', '#ff007a'],
-      name: 'Account Deposit',
-      desc: 'Funds available instantly',
-      amount: '50.00',
-      currency: 'EUR',
-      symbol: '€',
-      country: 'MT',
-      delivery: null,
-    },
+    products: [
+      {
+        id: 'spins', pill: '50 Spins', billing: 'one_time', cta: 'Buy', glyph: '🎲',
+        thumb: ['#c4005f', '#ff007a'],
+        name: '50 Spins Pack',
+        desc: 'Credited instantly',
+        amount: '50.00', currency: 'EUR', symbol: '€', country: 'MT',
+        delivery: null,
+        successNote: 'Spins credited — good luck! Winnings withdraw back to this card.',
+      },
+      {
+        id: 'adfree', pill: 'Ad-free', billing: 'subscription', interval: 'monthly', cta: 'Subscribe', glyph: '✨',
+        thumb: ['#7f1d1d', '#ef4444'],
+        name: 'Ad-free Play',
+        desc: 'No interruptions · monthly',
+        amount: '12.00', currency: 'EUR', symbol: '€', country: 'MT',
+        delivery: null,
+        successNote: 'Ad-free active — enjoy uninterrupted play. Bills to this card automatically each month.',
+      },
+    ],
   },
 };
 
 export const VERTICAL_ORDER = ['ecommerce', 'crypto', 'gaming'];
 
-/* The active vertical's product for the current environment.
-   An SE-edited amount/currency (own-fields' price tile) overrides the
-   vertical's default when it was captured for this same vertical — it's
-   never explicitly cleared, this guard is what makes it fall away cleanly
-   when the vertical changes. Live still charges a real card — every price
-   collapses to one penny regardless of any edited amount. */
+/* The active vertical's SELECTED product for the current environment.
+   state.selectedProduct picks from the vertical's catalog (falling back to
+   the first product — the classic one-time default — when unset or pointing
+   at another vertical). An SE-edited amount/currency (the price tile) then
+   overrides that product's numbers when it was captured for this same
+   vertical+product — never explicitly cleared, the guard makes it fall away
+   cleanly on any vertical/product change. Live still charges a real card —
+   every price collapses to one penny regardless of any edited amount. */
 export function activeProduct(verticalId = state.vertical) {
-  let p = VERTICALS[verticalId].product;
+  const v = VERTICALS[verticalId];
+  const sel = state.selectedProduct;
+  let p = (sel && sel.vertical === verticalId && v.products.find((x) => x.id === sel.productId)) || v.products[0];
   const override = state.productOverride;
-  if (override && override.vertical === verticalId) {
+  if (override && override.vertical === verticalId && override.productId === p.id) {
     p = { ...p, amount: override.amount, currency: override.currency };
   }
   return state.env === 'live' ? { ...p, amount: '0.01' } : p;
+}
+
+/** The pay-button verb for the active product ("Pay" / "Subscribe" / "Start DCA"…). */
+export function productCta(verticalId = state.vertical) {
+  return activeProduct(verticalId).cta || VERTICALS[verticalId].cta;
+}
+
+/** Customer-facing product chooser (a store's option row, NO API jargon) —
+    shared by the own-fields checkout shell and the toolkit summary column.
+    Rendered only when the vertical actually has a choice. */
+export function productSelectorHTML(verticalId = state.vertical) {
+  const v = VERTICALS[verticalId];
+  if (v.products.length < 2) return '';
+  const active = activeProduct(verticalId);
+  return `
+    <div class="prod-select" id="prod-select">
+      ${v.products.map((p) => `
+        <button type="button" data-product="${p.id}" class="${p.id === active.id ? 'active' : ''}">
+          ${p.pill || p.name}${p.billing === 'subscription' ? '<span class="ps-mo">/mo</span>' : ''}
+        </button>`).join('')}
+    </div>`;
 }
 
 /* ── FX-aware customer/merchant amounts ──────────────────────

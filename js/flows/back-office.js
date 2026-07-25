@@ -22,15 +22,17 @@
 
 import { state } from '../state.js';
 import { VERTICALS } from '../verticals.js';
-import { createRefund, retrievePayment, fetchWebhooksBatch } from '../api.js';
+import { createRefund, createDirectPayment, retrievePayment, fetchWebhooksBatch } from '../api.js';
+import { profileEwallet } from '../profiles.js';
 import { renderJSONView } from '../json-view.js';
 import { setActiveTab } from '../ui.js';
 import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
 import { classify } from '../classify.js';
 import {
-  getLedger, getEntry, subscribeLedger, recordRefund, updateRefund,
-  applyPaymentObject, walletBalances, refundedTotals,
+  getLedger, getEntry, subscribeLedger, recordPayment, recordRefund, updateRefund,
+  setPaymentId, updateStatus, applyPaymentObject, walletBalances, refundedTotals,
 } from '../ledger.js';
+import * as customers from '../customers.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -43,6 +45,12 @@ let pendingRefundRef = null; // refund ref we're waiting to confirm
 let lastHoverRef = null;  // avoids redundant GET-preview repaints on hover
 let form = { amount: '', reason: '', route: null }; // route: 'customer' | 'merchant' | null
 let refundWatchTimer = null;
+
+/* Customer-on-file / MIT charge state (mirrors the refund form's pattern) */
+let cofChargeRef = null;      // credential ref with the charge form open
+let chargeForm = { amount: '' };
+let chargeFiring = false;     // a MIT POST /v1/payments is in flight
+let pendingChargeRef = null;  // payment reference we're waiting to confirm
 
 const PHASE_LABEL = {
   created: 'Created', pending_3ds: 'Pending · 3DS', awaiting_confirmation: 'Awaiting confirmation',
@@ -121,11 +129,12 @@ function tileHTML(entry) {
   const custAmt = s.original_amount ?? entry.amount;
   const custCur = s.currency || entry.currency;
   const clickable = entry.status === 'completed';
+  const mit = entry.origin === 'backoffice';
   return `
     <div class="bo-tile ${clickable ? 'clickable' : 'inert'}" data-ref="${entry.reference}">
       <div class="bo-tile-main">
         <div class="bo-tile-ref">${esc(entry.reference)}</div>
-        <div class="bo-tile-sub">${brandLabel(entry)}${fx ? ` <span class="bo-fx-badge">FX → ${s.merchant_requested_currency} · ${entry.fixed_side || 'sell'}</span>` : ''}</div>
+        <div class="bo-tile-sub">${brandLabel(entry)}${fx ? ` <span class="bo-fx-badge">FX → ${s.merchant_requested_currency} · ${entry.fixed_side || 'sell'}</span>` : ''}${mit ? ` <span class="bo-mit-badge">MIT · ${entry.initiation_type || 'recurring'}</span>` : ''}${entry.aft ? ` <span class="bo-mit-badge aft">AFT</span>` : ''}</div>
       </div>
       <div class="bo-tile-amts">
         <div class="bo-tile-paid">${money(custAmt, custCur)}</div>
@@ -273,6 +282,7 @@ function detailHTML(entry) {
       <div class="bo-detail-head">
         <div>
           <span class="bo-model-tag">${entry.model === 'toolkit' ? 'Toolkit' : 'Own fields'}</span>
+          ${entry.origin === 'backoffice' ? `<span class="bo-model-tag mit">Back office · MIT</span>` : ''}
           <span class="bo-detail-vertical">${v?.label || entry.vertical}</span>
         </div>
         ${statusBadge}
@@ -311,13 +321,140 @@ export function render() {
   const el = $('#backoffice');
   if (!el) return;
   const entries = getLedger();
-  if (!entries.length) {
+  if (!entries.length && !customers.hasCredentials()) {
     el.innerHTML = `<div class="eng-empty"><div class="ee-ico">🗂️</div><div class="ee-text">Payments made this session will show up here, live, whichever flow made them.</div></div>`;
     return;
   }
-  el.innerHTML = `<div class="bo-wallet" id="bo-wallet"></div><div class="bo-body" id="bo-body"></div>`;
+  el.innerHTML = `<div class="bo-wallet" id="bo-wallet"></div><div class="bo-cof" id="bo-cof"></div><div class="bo-body" id="bo-body"></div>`;
   renderWallet();
+  renderCof();
   renderBody();
+}
+
+/* ── Left panel: Customer on file (stored credentials + MIT charges) ──
+   Lists every stored credential for the active env/profile with its kind
+   (merchant vault vs card_ token), scheme intent (recurrence) and NRI state.
+   `recurring` credentials carry the Charge action — the subsequent leg of the
+   recurring/DCA story: merchant-initiated, customer absent, no 3DS, no CVV.
+   `unscheduled` credentials are charged from the client site (CIT), not here. */
+function renderCof() {
+  const el = $('#bo-cof');
+  if (!el) return;
+  if (view !== 'list' || !customers.hasCredentials()) { el.innerHTML = ''; return; }
+  const cus = customers.getCustomerId();
+  const creds = customers.credentials();
+  el.innerHTML = `
+    <div class="bo-section-label">Customer on file</div>
+    <div class="bo-cof-card">
+      <div class="bo-cof-head">
+        <div>
+          <div class="bo-cof-name">${customers.getIdentity().name}</div>
+          <div class="bo-cof-id">${cus ? `<code>${cus}</code>` : 'merchant vault only — no Rapyd customer object'}</div>
+        </div>
+        ${cus ? `<button class="bo-cof-sync" id="bo-cof-sync" ${chargeFiring ? 'disabled' : ''}>↻ Sync from Rapyd</button>` : ''}
+      </div>
+      <div class="bo-cof-creds">${creds.map(credRowHTML).join('')}</div>
+    </div>`;
+}
+
+function credRowHTML(c) {
+  const mit = c.recurrence_type === 'recurring';
+  const chargeable = mit && (c.kind === 'token' ? !!c.card_id : !!c.network_reference_id);
+  const open = cofChargeRef === c.ref;
+  const exp = c.expiration_month && c.expiration_year ? `${c.expiration_month}/${c.expiration_year}` : '··/··';
+  const blockedHint = c.kind === 'token'
+    ? 'Token not captured yet — waiting on PAYMENT_COMPLETED'
+    : 'No network_reference_id captured — a vault card cannot be charged without the customer present';
+  return `
+    <div class="bo-cof-cred ${open ? 'open' : ''}" data-cred="${c.ref}">
+      <div class="bo-cof-credrow">
+        <span class="bo-cof-brand">${c.brand || 'Card'} ···${c.last4 || '····'}</span>
+        <span class="bo-cof-exp">${exp}</span>
+        ${pill(c.kind === 'token' ? 'card_ token' : 'merchant vault', 'field')}
+        ${pill(c.recurrence_type || 'unscheduled', mit ? 'pending' : 'field')}
+        ${c.aft ? pill('AFT', 'evt') : ''}
+        ${c.network_reference_id ? pill('NRI ✓', 'success') : ''}
+        ${mit
+          ? `<button class="bo-cof-charge" data-charge="${c.ref}" ${chargeable && !chargeFiring ? '' : `disabled title="${esc(blockedHint)}"`}>Charge</button>`
+          : `<span class="bo-cof-cit">reused from the client site</span>`}
+      </div>
+      ${open ? chargeFormHTML(c) : ''}
+    </div>`;
+}
+
+/** The subscription product this credential was saved for — drives the charge
+    amount/currency/descriptor. Falls back to the vertical's first subscription
+    product (sync-discovered credentials carry no origin). */
+function productForCred(c) {
+  const v = VERTICALS[c.origin_vertical] || VERTICALS[state.vertical];
+  return v.products.find((p) => p.id === c.origin_product)
+    || v.products.find((p) => p.billing === 'subscription' && !!p.aft === !!c.aft)
+    || v.products.find((p) => p.billing === 'subscription')
+    || v.products[0];
+}
+const chargeDefaultAmount = (c) => (state.env === 'live' ? '0.01' : productForCred(c).amount);
+
+function chargeFormHTML(c) {
+  const p = productForCred(c);
+  return `
+    <div class="bo-charge-form">
+      <div class="bo-refund-formhead">Scheduled charge — customer not present</div>
+      <div class="bo-charge-meta">
+        <span class="bo-charge-prod">${p.name}</span>
+        ${pill('initiation_type: recurring', 'evt')}
+        ${c.aft ? pill('AFT · is_direct_purchase', 'evt') : ''}
+      </div>
+      <div class="bo-charge-note">MIT — no 3DS, no CVV, no client_details; the ${c.kind === 'token' ? '<code>card_***</code> token' : 'stored <code>network_reference_id</code>'} authorises the reuse. In production this fires from your scheduler.</div>
+      <div class="bo-refund-field">
+        <label>Amount</label>
+        <div class="bo-refund-amtfield">
+          <input type="text" inputmode="decimal" class="bo-refund-input" id="bo-charge-amount" value="${esc(chargeForm.amount)}" />
+          <span class="bo-refund-currency">${p.currency}</span>
+        </div>
+      </div>
+      <div class="bo-refund-actions">
+        <button class="bo-refund-btn cancel" id="bo-charge-cancel">Cancel</button>
+        <button class="bo-refund-btn safe" id="bo-charge-fire" ${chargeFiring ? 'disabled' : ''}>${chargeFiring ? 'Processing…' : 'Run scheduled charge now'}</button>
+      </div>
+    </div>`;
+}
+
+/* MIT request body — PLAN §1.1/§1.6: initiation_type recurring, token or
+   NRID credential, AFT block for DCA, and deliberately NO 3d_required /
+   client_details / address (the customer is not present). */
+function mitBody(c, amountInput, ref) {
+  const p = productForCred(c);
+  const v = VERTICALS[c.origin_vertical] || VERTICALS[state.vertical];
+  const body = {
+    amount: round2(amountInput),
+    currency: p.currency,
+    capture: true,
+  };
+  const wallet = profileEwallet();
+  if (wallet) body.ewallet = wallet;
+  if (c.kind === 'token') body.customer = customers.getCustomerId();
+  body.merchant_reference_id = ref;
+  body.statement_descriptor = v.descriptor;
+  body.description = `${p.name} · scheduled charge`;
+  body.payment_method = c.kind === 'token'
+    ? c.card_id
+    : { type: c.type, fields: {
+        number: c.number,
+        expiration_month: c.expiration_month,
+        expiration_year: c.expiration_year,
+        name: c.name,
+        network_reference_id: c.network_reference_id, // replaces cvv — customer absent
+      } };
+  body.initiation_type = 'recurring';
+  if (c.aft) {
+    body.payment_method_options = {
+      aft: true,
+      is_direct_purchase: true, // each DCA cycle buys — that's the plan
+      purpose_code: p.purpose_code || 'crypto_currency',
+      special_condition_indicator: p.special_condition_indicator || 'cryptocurrency',
+    };
+  }
+  return body;
 }
 
 /* ── Right panel: prepared / fired requests ───────────────── */
@@ -354,11 +491,36 @@ function paintRefundRequest(body) {
     ${renderJSONView(body)}`;
   fillSignature(el, 'post', '/v1/refunds', st, body);
 }
-function paintWebhookCard(events) {
+function paintChargeRequest(body, sentNow) {
+  const el = $('#panel-request');
+  if (!el || state.leftView !== 'backoffice') return;
+  const st = newSaltTimestamp();
+  el.innerHTML = `
+    <div class="req-headline"><span class="method-pill post">POST</span><span class="req-path">/v1/payments</span></div>
+    ${headersHTML(st)}
+    <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${sentNow ? 'signed &amp; sent' : 'back office · MIT charge (updates as you edit)'}</span></div>
+    ${renderJSONView(body)}`;
+  fillSignature(el, 'post', '/v1/payments', st, body);
+}
+function paintListRequest(prepared) {
+  const el = $('#panel-request');
+  if (!el || state.leftView !== 'backoffice') return;
+  const cus = customers.getCustomerId();
+  if (!cus) return;
+  const path = `/v1/customers/${cus}/payment_methods?category=card`;
+  const st = newSaltTimestamp();
+  el.innerHTML = `
+    <div class="req-headline"><span class="method-pill get">GET</span><span class="req-path">${path}</span></div>
+    ${headersHTML(st)}
+    <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${prepared ? 'back office · saved cards (prepared)' : 'back office · saved cards'}</span></div>
+    <div class="jsonv"><div class="jsonv-body"><span class="jv-empty">— GET has no request body —</span></div></div>`;
+  fillSignature(el, 'get', path, st, null);
+}
+function paintWebhookCard(events, label = 'back office · refund') {
   const el = $('#panel-webhooks');
   if (!el || state.leftView !== 'backoffice') return;
   el.innerHTML = `
-    <div class="wh-status live"><span class="wh-status-dot"></span>Delivered<span class="wh-ref">back office · refund</span></div>
+    <div class="wh-status live"><span class="wh-status-dot"></span>Delivered<span class="wh-ref">${label}</span></div>
     ${events.map((e, i) => {
       const kind = classify(e);
       return `
@@ -420,7 +582,8 @@ async function retrieveAndOpen(reference) {
   setActiveTab('response');
   paintResponse(null, true, 'RETRIEVING…');
   try {
-    const { httpStatus, data } = await retrievePayment(entry.payment_id, state.env);
+    // signed by the MID that created the payment — the only one that can see it
+    const { httpStatus, data } = await retrievePayment(entry.payment_id, state.env, entry.profile || state.profile);
     const okResp = httpStatus < 400 && !data?.error;
     if (okResp && data?.data) applyPaymentObject(reference, data.data); // ledger is always safe to update, even if the panel paint is superseded
     if (mySeq !== actionSeq) return; // superseded by a newer action — leave the panel alone
@@ -504,14 +667,15 @@ async function fireRefund() {
   setActiveTab('request');
 
   try {
-    const { httpStatus, data } = await createRefund({ ...body, env: state.env });
+    // refunds must be signed by the MID that took the payment
+    const { httpStatus, data } = await createRefund({ ...body, env: state.env, profile: entry.profile || state.profile });
     const ok = httpStatus < 400 && !data?.error;
     paintResponse(data, ok, ok ? 'REFUND CREATED' : (data?.raw?.error_code || data?.error || 'ERROR'));
     setActiveTab('response');
     if (ok) {
       const d = data?.data;
       if (d?.id) updateRefund(entry.reference, refundRef, { refund_id: d.id, amount: d.amount ?? legs.body.amount, currency: d.currency ?? legs.body.currency });
-      watchRefundWebhook(refundRef); // real REFUND_COMPLETED / PAYMENT_REFUND_FAILED
+      watchEventForRef(refundRef, 'back office · refund'); // real REFUND_COMPLETED / PAYMENT_REFUND_FAILED
     } else {
       // Rapyd rejected the refund synchronously (e.g. amount exceeds
       // refundable) — mark it failed and surface a PAYMENT_REFUND_FAILED
@@ -553,17 +717,19 @@ function refundFailedEvent(refundRef, body, data) {
   };
 }
 
-/* ── Refund webhook watcher (card + confirmation beat) ────── */
+/* ── Back-office webhook watcher (card + confirmation beat) ──
+   Shared by refunds AND MIT charges — watches one reference until its real
+   event lands, paints the card, jumps to the Webhooks tab (locked UX #2). */
 function stopRefundWatch() { if (refundWatchTimer) clearInterval(refundWatchTimer); refundWatchTimer = null; }
-function watchRefundWebhook(refundRef) {
+function watchEventForRef(ref, label) {
   stopRefundWatch();
   let elapsed = 0;
   const tick = async () => {
     elapsed += 3000;
     let events = [];
-    try { const d = await fetchWebhooksBatch([refundRef]); events = d.byRef?.[refundRef] || []; } catch { /* transient */ }
+    try { const d = await fetchWebhooksBatch([ref]); events = d.byRef?.[ref] || []; } catch { /* transient */ }
     if (events.length) {
-      paintWebhookCard(events);
+      paintWebhookCard(events, label);
       if (state.leftView === 'backoffice') setActiveTab('webhooks');
       stopRefundWatch();
     }
@@ -586,20 +752,160 @@ function maybeFinalizeRefund() {
   }
 }
 
+/* ── Customer-on-file actions (MIT charge + live sync) ─────── */
+function openChargeForm(credRef) {
+  const cred = customers.getCredential(credRef);
+  if (!cred || chargeFiring) return;
+  ++actionSeq; // supersede any in-flight GET
+  cofChargeRef = credRef;
+  chargeForm = { amount: chargeDefaultAmount(cred) };
+  renderCof();
+  paintChargeRequest(mitBody(cred, chargeForm.amount, '(assigned on fire)'), false);
+  setActiveTab('request');
+}
+function closeChargeForm() {
+  cofChargeRef = null;
+  renderCof();
+}
+function onChargeAmountInput(raw) {
+  // digits + single decimal point (mirrors the refund form's filter)
+  let vlr = raw.replace(/[^\d.]/g, '');
+  const dot = vlr.indexOf('.');
+  if (dot !== -1) vlr = vlr.slice(0, dot + 1) + vlr.slice(dot + 1).replace(/\./g, '');
+  chargeForm.amount = vlr;
+  const cred = customers.getCredential(cofChargeRef);
+  if (cred) paintChargeRequest(mitBody(cred, chargeForm.amount, '(assigned on fire)'), false); // live body, form DOM untouched
+}
+
+async function fireCharge() {
+  const cred = customers.getCredential(cofChargeRef);
+  if (!cred || chargeFiring) return;
+  if (!(round2(chargeForm.amount) > 0)) return; // guard blank/zero
+  const p = productForCred(cred);
+  const ref = `pb_mit_${Date.now()}`;
+  const body = mitBody(cred, chargeForm.amount, ref);
+
+  ++actionSeq; // supersede any still-in-flight GET
+  chargeFiring = true;
+  pendingChargeRef = ref;
+  recordPayment(ref, {
+    model: cred.origin_model || 'own-fields',
+    vertical: cred.origin_vertical || state.vertical,
+    amount: String(body.amount), currency: body.currency,
+    last4: cred.last4, brand: cred.brand,
+    origin: 'backoffice', initiation_type: 'recurring', profile: state.profile,
+    credential: { kind: cred.kind, label: `${cred.brand || 'Card'} ···${cred.last4 || ''}` },
+    aft: cred.aft,
+  });
+  renderCof(); // reflect "Processing…" on the button
+  paintChargeRequest(body, true); // freeze the signed body view (env/profile are transport-only)
+  setActiveTab('request');
+
+  try {
+    const { httpStatus, data } = await createDirectPayment({ ...body, env: state.env, profile: state.profile });
+    const ok = httpStatus < 400 && !data?.error;
+    paintResponse(data, ok, ok ? 'CHARGE CREATED' : (data?.raw?.error_code || data?.error || 'ERROR'));
+    setActiveTab('response');
+    if (ok) {
+      const d = data?.data;
+      if (d?.id) setPaymentId(ref, d.id);
+      updateStatus(ref, { phase: 'awaiting_confirmation' });
+      watchEventForRef(ref, 'back office · scheduled charge'); // real PAYMENT_COMPLETED / PAYMENT_FAILED
+    } else {
+      // Rapyd rejected the charge synchronously — mark it failed and surface a
+      // PAYMENT_FAILED event on the webhook tab, grounded in the real error.
+      updateStatus(ref, { status: 'failed', phase: 'declined' });
+      paintWebhookCard([paymentFailedEvent(ref, body, data)], 'back office · scheduled charge');
+    }
+  } catch (err) {
+    paintResponse({ error: 'network_error', message: err.message }, false, 'NETWORK ERROR');
+    setActiveTab('response');
+    updateStatus(ref, { status: 'failed', phase: 'error' });
+  } finally {
+    chargeFiring = false;
+    renderCof();
+  }
+}
+
+/* A PAYMENT_FAILED webhook shape, built from the synchronous Rapyd rejection
+   so the webhook tab reflects the failed MIT charge end-to-end. */
+function paymentFailedEvent(ref, body, data) {
+  const rapyd = data?.raw || {};
+  return {
+    type: 'PAYMENT_FAILED',
+    status: rapyd.status || 'ERROR',
+    raw: {
+      type: 'PAYMENT_FAILED',
+      data: {
+        merchant_reference_id: ref,
+        amount: body.amount,
+        currency: body.currency,
+        initiation_type: body.initiation_type,
+        status: 'ERROR',
+        failure_code: rapyd.error_code || data?.error || 'PAYMENT_ERROR',
+        failure_message: rapyd.message || data?.message || 'The charge could not be processed.',
+      },
+    },
+  };
+}
+
+/* The API-visible version of the silent token backfill — fires the real list
+   GET, paints its response, and re-derives the credential rows. */
+async function fireSync() {
+  if (!customers.getCustomerId()) return;
+  const mySeq = ++actionSeq;
+  paintListRequest(false);
+  setActiveTab('response');
+  paintResponse(null, true, 'RETRIEVING…');
+  const { httpStatus, data } = await customers.refreshTokens();
+  if (mySeq !== actionSeq) return; // superseded — leave the panel alone
+  const ok = httpStatus < 400 && !data?.error;
+  paintResponse(data, ok, ok ? 'SAVED CARDS RETRIEVED' : 'ERROR');
+}
+
+/* On MIT-charge completion (surfaced by the ledger poller), close the form —
+   the new payment tile is already in the list below. */
+function maybeFinalizeCharge() {
+  if (!pendingChargeRef) return;
+  const e = getLedger().find((x) => x.reference === pendingChargeRef);
+  if (e && (e.status === 'completed' || e.status === 'failed')) {
+    pendingChargeRef = null;
+    cofChargeRef = null;
+  }
+}
+
 /* ── Boot ─────────────────────────────────────────────────── */
 export function mount() {
   subscribeLedger(() => {
     if (state.leftView !== 'backoffice') return;
     renderWallet();
     maybeFinalizeRefund();
+    maybeFinalizeCharge();
     if (!refundOpen) renderBody(); // never clobber a form the SE is mid-edit on
+    if (!cofChargeRef) renderCof(); // same rule for the charge form (fireCharge repaints itself)
+  });
+
+  // Credentials changing (webhook harvest, sync backfill, profile re-key)
+  // repaint the customer-on-file card — but never over an open charge form.
+  customers.subscribeCustomers(() => {
+    if (state.leftView !== 'backoffice') return;
+    if (!cofChargeRef) renderCof();
   });
 
   const root = $('#backoffice');
 
-  // hover a completed tile → prepared GET preview on the right
+  // hover a completed tile → prepared GET preview on the right;
+  // hover the customer card → prepared saved-cards GET
   root.addEventListener('mouseover', (e) => {
-    if (view !== 'list' || firing) return;
+    if (view !== 'list' || firing || chargeFiring) return;
+    const cof = e.target.closest('.bo-cof-card');
+    if (cof && !cofChargeRef && customers.getCustomerId()) {
+      if (lastHoverRef === 'cof') return;
+      lastHoverRef = 'cof';
+      paintListRequest(true);
+      setActiveTab('request');
+      return;
+    }
     const tile = e.target.closest('.bo-tile.clickable');
     if (!tile || tile.dataset.ref === lastHoverRef) return;
     const entry = getEntry(tile.dataset.ref);
@@ -612,9 +918,16 @@ export function mount() {
 
   root.addEventListener('click', (e) => {
     // navigation
-    if (e.target.closest('#bo-back')) { view = 'list'; detailRef = null; refundOpen = false; lastHoverRef = null; renderBody(); return; }
+    if (e.target.closest('#bo-back')) { view = 'list'; detailRef = null; refundOpen = false; lastHoverRef = null; renderBody(); renderCof(); return; }
     const tile = e.target.closest('.bo-tile.clickable');
-    if (tile && view === 'list') { retrieveAndOpen(tile.dataset.ref); return; }
+    if (tile && view === 'list') { retrieveAndOpen(tile.dataset.ref); renderCof(); return; }
+
+    // customer on file
+    if (e.target.closest('#bo-cof-sync')) { fireSync(); return; }
+    const chargeBtn = e.target.closest('.bo-cof-charge[data-charge]');
+    if (chargeBtn && !chargeBtn.disabled) { openChargeForm(chargeBtn.dataset.charge); return; }
+    if (e.target.closest('#bo-charge-cancel')) { closeChargeForm(); return; }
+    if (e.target.closest('#bo-charge-fire')) { fireCharge(); return; }
 
     // refund form
     if (e.target.closest('#bo-refund-open')) { openRefundForm(); return; }
@@ -626,6 +939,7 @@ export function mount() {
 
   root.addEventListener('input', (e) => {
     if (e.target.id === 'bo-refund-amount') { onAmountInput(e.target.value); return; }
+    if (e.target.id === 'bo-charge-amount') { onChargeAmountInput(e.target.value); return; }
     if (e.target.id === 'bo-refund-reason') {
       form.reason = e.target.value;
       const entry = getEntry(detailRef);

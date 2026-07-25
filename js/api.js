@@ -41,11 +41,40 @@ export async function createRefund(body) {
   return { ok: res.ok, httpStatus: res.status, data };
 }
 
-/** GET /api/retrieve-payment?id=payment_xxx&env=… → Rapyd GET /v1/payments/{id}.
+/** GET /api/retrieve-payment?id=payment_xxx&env=…&profile=… → Rapyd GET /v1/payments/{id}.
     Used by the back office to pull the live payment (settled FX legs +
-    refunded_amount) when the SE clicks through to a payment's detail view. */
-export async function retrievePayment(id, env) {
-  const res = await fetch(`${BACKEND_URL}/api/retrieve-payment?id=${encodeURIComponent(id)}&env=${env}`);
+    refunded_amount) when the SE clicks through to a payment's detail view.
+    `profile` = the sandbox MID that created the payment — it's the only one
+    that can see it. */
+export async function retrievePayment(id, env, profile) {
+  const qs = new URLSearchParams({ id, env });
+  if (profile) qs.set('profile', profile);
+  const res = await fetch(`${BACKEND_URL}/api/retrieve-payment?${qs.toString()}`);
+  let data = null;
+  try { data = await res.json(); } catch { /* non-JSON */ }
+  return { ok: res.ok, httpStatus: res.status, data };
+}
+
+/** POST /api/create-customer → Rapyd POST /v1/customers. Always the ENRICHED
+    body (see customers.js) so the one session customer is AFT-ready. */
+export async function createCustomer(body) {
+  const res = await fetch(`${BACKEND_URL}/api/create-customer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  let data = null;
+  try { data = await res.json(); } catch { /* non-JSON */ }
+  return { ok: res.ok, httpStatus: res.status, data };
+}
+
+/** GET /api/list-customer-payment-methods → Rapyd GET
+    /v1/customers/{id}/payment_methods?category=card. Card objects carry
+    id (card_***), last4, expiry and network_reference_id. */
+export async function listCustomerPaymentMethods(customerId, { env, profile } = {}) {
+  const qs = new URLSearchParams({ customer: customerId, env: env || 'sandbox' });
+  if (profile) qs.set('profile', profile);
+  const res = await fetch(`${BACKEND_URL}/api/list-customer-payment-methods?${qs.toString()}`);
   let data = null;
   try { data = await res.json(); } catch { /* non-JSON */ }
   return { ok: res.ok, httpStatus: res.status, data };
@@ -55,7 +84,7 @@ export async function retrievePayment(id, env) {
     Powers the FX popover's live "customer pays / you receive" preview. buy_ is
     the side the merchant receives, sell_ the side the customer is charged;
     amount is in the fixed_side currency (see app.js's fxPreviewParams). */
-export async function getFxRate({ buyCurrency, sellCurrency, amount, fixedSide, env }) {
+export async function getFxRate({ buyCurrency, sellCurrency, amount, fixedSide, env, profile }) {
   const qs = new URLSearchParams({
     buy_currency: buyCurrency,
     sell_currency: sellCurrency,
@@ -63,6 +92,7 @@ export async function getFxRate({ buyCurrency, sellCurrency, amount, fixedSide, 
     fixed_side: fixedSide,
     env,
   });
+  if (profile) qs.set('profile', profile);
   const res = await fetch(`${BACKEND_URL}/api/get-fx-rate?${qs.toString()}`);
   let data = null;
   try { data = await res.json(); } catch { /* non-JSON */ }

@@ -19,14 +19,17 @@
    ───────────────────────────────────────────────────────────── */
 
 import { state } from '../state.js';
-import { VERTICALS, activeProduct, customerCharge, chargeText, fxSnapshot } from '../verticals.js';
-import { createCheckoutSession } from '../api.js';
+import { VERTICALS, activeProduct, customerCharge, chargeText, fxSnapshot, productCta, productSelectorHTML } from '../verticals.js';
+import { createCheckoutSession, createCustomer, createDirectPayment } from '../api.js';
+import { profileEwallet } from '../profiles.js';
+import { clientDetails } from '../client-details.js';
 import { renderJSONView } from '../json-view.js';
 import { setActiveTab, setStatus } from '../ui.js';
 import { startWebhookWatch, setWatchPaymentId } from '../webhooks.js';
-import { renderProcessing, renderSuccess, renderError } from '../screens.js';
+import { renderProcessing, render3DS, renderSuccess, renderError } from '../screens.js';
 import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
 import * as ledger from '../ledger.js';
+import * as customers from '../customers.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -53,6 +56,19 @@ let lastHeartbeat = null;
 let listenersBound = false;
 let lastSession = null;
 
+/* Card on file (non-PCI): the HCP saves the card_*** against the session
+   cus_*** — a customer is a PREREQUISITE for saving through this route.
+   Subscription products force it on (subscribing inherently stores the card). */
+let cof = false;            // "Attach customer" → `customer` on the checkout body
+let saveDefault = true;     // custom_elements.save_card_default
+let requireCvv = false;     // require_card_cvv (CVV re-entry on saved-card reuse)
+let pendingCof = null;      // snapshot between launch and PAYMENT_COMPLETED
+let lastExpress = null;     // persisted express S2S request/response for refreshRightPanel
+
+const isSubscription = () => activeProduct().billing === 'subscription';
+const recurrence = () => (isSubscription() ? 'recurring' : 'unscheduled');
+const effectiveCof = () => cof || isSubscription();
+
 const AP_TYPES = ['add-money', 'book', 'buy', 'check-out', 'contribute', 'donate', 'order', 'plain', 'reload', 'rent', 'subscribe', 'support', 'tip', 'top-up'];
 const GP_TYPES = ['book', 'buy', 'checkout', 'donate', 'order', 'pay', 'subscribe'];
 const AP_COLORS = ['black', 'white', 'white-outline'];
@@ -64,6 +80,7 @@ const accent = () => custom.btnColor || VERTICALS[state.vertical].dot;
 function displayBody() {
   const v = VERTICALS[state.vertical];
   const p = activeProduct();
+  const cofOn = effectiveCof();
   return {
     amount: Number(p.amount),
     capture: true,
@@ -71,13 +88,22 @@ function displayBody() {
     // demo corridor: everything flows through DE regardless of vertical skin
     // (US/MT aren't enabled on this sandbox MID and fail the session)
     country: 'DE',
+    // Card on file: `customer` alone gives the hosted page its save-card
+    // option AND lists the customer's saved cards on a return visit.
+    ...(cofOn ? {
+      customer: customers.getCustomerId() || '(created on launch)',
+      require_card_cvv: requireCvv,
+      recurrence_type: recurrence(),
+      // scheme rule: recurring/installment saves must set save_payment_method
+      ...(recurrence() === 'recurring' ? { save_payment_method: true } : {}),
+    } : {}),
     description: p.name,
     statement_descriptor: v.descriptor,
     merchant_reference_id: state.reference || '(assigned on launch)',
     // real pages — the vertical domains (shop.paybridge.com etc.) are display-only fiction
     complete_checkout_url: 'https://rapydtoolkit.com/complete',
     cancel_checkout_url: 'https://rapydtoolkit.com/cancel',
-    custom_elements: { display_description: true },
+    custom_elements: { display_description: true, ...(cofOn ? { save_card_default: saveDefault } : {}) },
     payment_method_type_categories: ['card'],
     payment_method_options: { '3d_required': tds },
     // No-FX flows must omit all three fields entirely — sending any of them
@@ -92,7 +118,45 @@ function displayBody() {
 function postBody() {
   const b = displayBody();
   b.merchant_reference_id = state.reference;
-  return { ...b, env: state.env };
+  return { ...b, env: state.env, profile: state.profile };
+}
+
+/* Express S2S token charge — the non-PCI merchant's OTHER reuse path:
+   a direct POST /v1/payments with the saved card_*** (no card data ever
+   touches the merchant, so this is open to non-PCI integrations too). */
+function expressBody(cred) {
+  const v = VERTICALS[state.vertical];
+  const p = activeProduct();
+  const body = {
+    amount: Number(p.amount),
+    currency: p.currency,
+  };
+  if (state.fx.enabled && state.fx.requestedCurrency) {
+    body.requested_currency = state.fx.requestedCurrency;
+    body.fixed_side = state.fx.fixedSide;
+    body.expiration = Math.floor(Date.now() / 1000) + 24 * 3600;
+  }
+  body.capture = true;
+  const wallet = profileEwallet();
+  if (wallet) body.ewallet = wallet;
+  body.customer = customers.getCustomerId();
+  body.merchant_reference_id = state.reference || '(assigned on pay)';
+  body.statement_descriptor = v.descriptor;
+  body.description = p.name;
+  body.payment_method = cred.card_id;
+  body.initiation_type = 'customer_present'; // the customer clicked — still CIT
+  const pmo = {};
+  if (tds) pmo['3d_required'] = true;
+  if (p.aft) {
+    pmo.aft = true;
+    pmo.is_direct_purchase = true;
+    pmo.purpose_code = p.purpose_code;
+    pmo.special_condition_indicator = p.special_condition_indicator;
+  }
+  if (Object.keys(pmo).length) body.payment_method_options = pmo;
+  body.address = customers.demoAddress();
+  body.client_details = clientDetails(); // ip_address injected server-side
+  return body;
 }
 
 /* ── Client-side toolkit config (mirrors the panel) ──────── */
@@ -126,16 +190,41 @@ function tkTotalsHTML() {
   const feeLabel = p.delivery ? 'Delivery' : 'Fees';
   const feeValue = p.delivery || 'Free';
   const amt = chargeText(c);
+  const mo = p.billing === 'subscription' ? ' <span class="per-mo">/mo</span>' : '';
   return `
     <div class="co-line"><span>Subtotal</span><span>${amt}</span></div>
     <div class="co-line"><span>${feeLabel}</span><span class="${feeValue === 'Free' ? 'free' : ''}">${feeValue}</span></div>
-    <div class="co-line total"><span>Total</span><span class="co-total-amt">${amt}</span></div>`;
+    <div class="co-line total"><span>Total</span><span class="co-total-amt">${amt}${mo}</span></div>`;
 }
+/* Express slot content — rendered whenever the customer has a token saved for
+   customer-present reuse (one-time products only; subscriptions bill from the
+   back office). Repainted in place by the customers subscription. */
+function expressHTML() {
+  const p = activeProduct();
+  if (p.billing !== 'one_time') return '';
+  const creds = customers.credentialsFor('unscheduled').filter(c => c.kind === 'token');
+  if (!creds.length) return '';
+  const c = creds[creds.length - 1];
+  const exp = c.expiration_month && c.expiration_year ? `${c.expiration_month}/${c.expiration_year}` : '··/··';
+  return `
+    <div class="tk-express" data-cred="${c.ref}">
+      <div class="tk-express-head">Express checkout</div>
+      <div class="cof-chip active static">
+        <span class="cof-chip-brand">${c.brand || 'Card'}</span>
+        <span class="cof-chip-num">···· ${c.last4 || '····'}</span>
+        <span class="cof-chip-exp">${exp}</span>
+        <span class="cof-chip-kind token">${c.card_id ? `${c.card_id.slice(0, 9)}…` : 'card_ token'}</span>
+      </div>
+      <button type="button" class="co-cta tk-express-pay" id="tk-express-pay">${productCta()} with saved card</button>
+      <div class="tk-express-alt">S2S <code>card_***</code> charge — or use the checkout on the right for a new card</div>
+    </div>`;
+}
+
 function summaryHTML() {
   const v = VERTICALS[state.vertical];
   const p = activeProduct();
   const [c1, c2] = p.thumb;
-  const glyph = { ecommerce: '🪑', crypto: '₿', gaming: '🎲' }[state.vertical] || '◆';
+  const glyph = p.glyph || { ecommerce: '🪑', crypto: '₿', gaming: '🎲' }[state.vertical] || '◆';
   return `
     <aside class="tk-summary">
       <div class="tk-brand">
@@ -143,6 +232,7 @@ function summaryHTML() {
         <span>${v.merchant}</span>
       </div>
       <div class="tk-sum-label">Your order</div>
+      ${productSelectorHTML()}
       <div class="co-order">
         <div class="co-thumb" style="background:linear-gradient(135deg,${c1},${c2})">${glyph}</div>
         <div class="co-order-info">
@@ -152,6 +242,7 @@ function summaryHTML() {
         <button type="button" class="fx-trigger${state.fx.enabled ? ' configured' : ''}" id="fx-trigger" title="Configure currency conversion">FX</button>
       </div>
       <div class="co-totals" id="tk-order-totals">${tkTotalsHTML()}</div>
+      <div id="tk-express-slot">${expressHTML()}</div>
       <div class="tk-secure">
         <div class="tk-secure-head">🔒 Secure checkout</div>
         <p>Payments are encrypted end-to-end and processed by Rapyd. Card details never touch ${v.merchant}'s servers.</p>
@@ -219,6 +310,18 @@ function configPanelHTML() {
         ${row('Require 3-D Secure', 'payment_method_options.3d_required',
           `<label class="tkc-switch-wrap"><input type="checkbox" class="tkc-switch" id="tk-tds" ${tds ? 'checked' : ''} /></label>`)}
         ${row('Challenge', 'wait_on_payment_redirect', seg('tdsFlow', [['iframe', 'In iframe'], ['redirect', 'Redirect']], tdsFlow), `id="tkc-row-challenge" ${tds ? '' : 'hidden'}`)}
+      </div>
+
+      <div class="tkc-sec" id="tkc-cof">
+        <div class="tkc-sec-label">Card on file</div>
+        ${row('Attach customer', 'customer',
+          `<label class="tkc-switch-wrap"><input type="checkbox" class="tkc-switch" id="tk-cof" ${effectiveCof() ? 'checked' : ''} ${isSubscription() ? 'disabled' : ''} /></label>`)}
+        ${row('Save box pre-ticked', 'custom_elements.save_card_default',
+          `<label class="tkc-switch-wrap"><input type="checkbox" class="tkc-switch" id="tk-savedef" ${saveDefault ? 'checked' : ''} /></label>`, `id="tkc-row-savedef" ${effectiveCof() ? '' : 'hidden'}`)}
+        ${row('CVV on reuse', 'require_card_cvv',
+          `<label class="tkc-switch-wrap"><input type="checkbox" class="tkc-switch" id="tk-reqcvv" ${requireCvv ? 'checked' : ''} /></label>`, `id="tkc-row-reqcvv" ${effectiveCof() ? '' : 'hidden'}`)}
+        ${row('Purpose', 'recurrence_type', `<span class="tkc-fixed"><code>${recurrence()}</code></span>`, `id="tkc-row-rec" ${effectiveCof() ? '' : 'hidden'}`)}
+        ${isSubscription() ? `<div class="tkc-note">Subscription product — the card must be stored; MIT charges run from the back office.</div>` : ''}
       </div>
 
       <div class="tkc-sec" id="tkc-wallets">
@@ -301,11 +404,52 @@ function renderResponse() {
     ${renderJSONView(lastSession)}`;
 }
 
+/* Express S2S request/response paints — the right panel flips from
+   POST /v1/checkout to POST /v1/payments when the saved token is charged. */
+function paintExpressRequest(body) {
+  const el = $('#panel-request');
+  if (!el) return;
+  const st = newSaltTimestamp();
+  el.innerHTML = `
+    <div class="req-headline"><span class="method-pill post">POST</span><span class="req-path">/v1/payments</span></div>
+    ${headersHTML(st)}
+    <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">express · saved card_*** token — no card data</span></div>
+    ${renderJSONView(body)}`;
+  fillSignature(el, 'post', '/v1/payments', st, body);
+}
+function paintExpressResponse(httpStatus, data) {
+  const el = $('#panel-response');
+  if (!el) return;
+  const d = data?.data;
+  const ok = httpStatus < 400 && !data?.error;
+  const badge = d?.status === 'CLO' && d?.paid ? 'PAID · CLO' : d?.status === 'ACT' ? 'ACTION · ACT' : ok ? (d?.status || 'OK') : String(data?.error || 'ERROR');
+  el.innerHTML = `
+    <div class="eng-pillrow">
+      <span class="wh-pill ${ok ? 'success' : 'failure'}">HTTP ${httpStatus}</span>
+      <span class="wh-pill ${ok ? (d?.status === 'ACT' ? 'pending' : 'success') : 'failure'}">${badge}</span>
+    </div>
+    ${renderJSONView(data ?? { error: 'no response body' })}`;
+}
+
 /** See own-fields.js's refreshRightPanel — same reasoning. renderResponse()
-    here already reads off persisted `lastSession`, so it's idempotent. */
+    here already reads off persisted `lastSession`, so it's idempotent. An
+    express charge supersedes the session panels until the next launch. */
 export function refreshRightPanel() {
+  if (lastExpress) {
+    paintExpressRequest(lastExpress.body);
+    if (lastExpress.httpStatus != null) paintExpressResponse(lastExpress.httpStatus, lastExpress.data);
+    return;
+  }
   renderRequest();
   renderResponse();
+}
+
+/** Profile switch (SC1/SC2/SC3): the express slot and body signing identity
+    change; repaint without resetting the page. */
+export function refreshProfile() {
+  const slot = $('#tk-express-slot');
+  if (slot) slot.innerHTML = expressHTML();
+  refreshRightPanel();
 }
 
 // Terminal-style log, tagged like a real dev console: HH:MM:SS  tag  message
@@ -344,10 +488,39 @@ function handleTerminal(ev) {
   if (success) {
     setStatus('Paid', 'ok'); renderSuccess(ev);
     ledger.updateStatus(state.reference, { status: 'completed', phase: 'completed' });
+    harvestCofToken(ev);
   } else {
     setStatus('Failed', 'error'); renderError(ev);
     ledger.updateStatus(state.reference, { status: 'failed', phase: 'failed' });
+    pendingCof = null;
   }
+}
+
+/** The HCP saved the card during this payment — pull the card_*** out of the
+    PAYMENT_COMPLETED webhook (never PAYMENT_SUCCEEDED), then let the list
+    endpoint backfill expiry etc. */
+function harvestCofToken(ev) {
+  const pc = pendingCof;
+  pendingCof = null;
+  const d = ev.raw?.data;
+  if (!pc || !d) return;
+  const pmd = d.payment_method_data || {};
+  const cardId =
+    (typeof d.payment_method === 'string' && /^card_/.test(d.payment_method) && d.payment_method) ||
+    (typeof pmd.id === 'string' && /^card_/.test(pmd.id) && pmd.id) || null;
+  if (cardId) {
+    const brand = /visa/i.test(pmd.type || '') ? 'Visa' : /master/i.test(pmd.type || '') ? 'Mastercard' : 'Card';
+    const ref = customers.upsertTokenCredential({
+      card_id: cardId, type: pmd.type || null, brand, last4: pmd.last4 || null,
+      expiration_month: null, expiration_year: null,
+      recurrence_type: pc.recurrence, aft: false,
+      origin_vertical: state.vertical, origin_model: 'toolkit', origin_product: pc.product,
+    });
+    if (pmd.network_reference_id) customers.setNetworkReferenceId(ref, pmd.network_reference_id);
+    logEvent('card saved', `${cardId} · recurrence ${pc.recurrence}`, 'tk', 'ok');
+  }
+  logEvent('GET /v1/customers/{id}/payment_methods', 'syncing saved cards', 'api');
+  customers.refreshTokens();
 }
 
 /* ── Toolkit script + render ─────────────────────────────── */
@@ -427,7 +600,38 @@ async function launch() {
   events = [];
   lastHeartbeat = null;
   lastSession = null;
+  lastExpress = null;
   renderConsole();
+
+  // Card on file: a cus_*** is a PREREQUISITE for saving a card through the
+  // hosted route — create it first (two-beat). Fails → STOP, nothing recorded.
+  if (effectiveCof() && !customers.getCustomerId()) {
+    logEvent('POST /v1/customers', 'card on file needs a customer first', 'api');
+    try {
+      const { httpStatus, data } = await createCustomer({ ...customers.enrichedCustomerBody(), env: state.env, profile: state.profile });
+      const id = data?.data?.id;
+      if (httpStatus >= 400 || data?.error || !id) {
+        lastSession = { error: 'error', message: data?.message || data?.error || 'Customer creation failed' };
+        renderResponse();
+        setStatus('Error', 'error');
+        logEvent('POST /v1/customers', data?.message || 'failed', 'api', 'err');
+        renderError({ status: 'ERR', message: data?.message || 'Customer creation failed.' });
+        btn.disabled = false;
+        btn.textContent = mode === 'hosted' ? 'Create session →' : 'Render toolkit →';
+        return;
+      }
+      customers.setCustomerId(id);
+      logEvent('POST /v1/customers', `${id} · created (enriched)`, 'api', 'ok');
+    } catch (err) {
+      setStatus('Error', 'error');
+      logEvent('POST /v1/customers', err.message, 'api', 'err');
+      renderError({ status: 'ERR', message: err.message });
+      btn.disabled = false;
+      btn.textContent = mode === 'hosted' ? 'Create session →' : 'Render toolkit →';
+      return;
+    }
+  }
+
   state.reference = `pb_${state.vertical}_tk_${Date.now()}`;
   {
     const v = VERTICALS[state.vertical];
@@ -437,11 +641,19 @@ async function launch() {
     // matches the checkout; fx carries the legs (charged / base / receive).
     const fxOn = state.fx.enabled && state.fx.requestedCurrency;
     const charge = customerCharge();
-    state.lastPayment = { descriptor: v.descriptor, amount: charge.amount ?? p.amount, currency: charge.currency, last4: null, fx: fxSnapshot() };
+    state.lastPayment = {
+      descriptor: v.descriptor, amount: charge.amount ?? p.amount, currency: charge.currency, last4: null, fx: fxSnapshot(),
+      customer_id: effectiveCof() ? customers.getCustomerId() : null,
+      credential_label: effectiveCof() ? `saving · ${recurrence()}` : null,
+      initiation_type: 'customer_present',
+      note: p.successNote || v.successNote,
+    };
     ledger.recordPayment(state.reference, {
       model: 'toolkit', vertical: state.vertical, amount: p.amount, currency: p.currency,
       requested_currency: fxOn ? state.fx.requestedCurrency : null, fixed_side: fxOn ? state.fx.fixedSide : null,
+      origin: 'client', initiation_type: 'customer_present', profile: state.profile,
     });
+    pendingCof = effectiveCof() ? { recurrence: recurrence(), product: p.id } : null;
   }
   renderRequest();
   setActiveTab('request');
@@ -498,6 +710,78 @@ async function launch() {
   }
 }
 
+/* ── Express S2S token charge ────────────────────────────── */
+async function expressPay(credRef) {
+  const cred = customers.getCredential(credRef);
+  if (!cred || !cred.card_id) return;
+  const v = VERTICALS[state.vertical];
+  const p = activeProduct();
+  setStatus('Processing…', 'processing');
+  state.reference = `pb_${state.vertical}_xp_${Date.now()}`;
+  const body = expressBody(cred);
+  body.merchant_reference_id = state.reference;
+
+  const fxOn = state.fx.enabled && state.fx.requestedCurrency;
+  const charge = customerCharge();
+  state.lastPayment = {
+    descriptor: v.descriptor, amount: charge.amount ?? p.amount, currency: charge.currency,
+    last4: cred.last4, network: cred.brand, fx: fxSnapshot(),
+    customer_id: customers.getCustomerId(),
+    credential_label: `${cred.brand} ···${cred.last4} (token)`,
+    initiation_type: 'customer_present',
+    aft: !!p.aft, is_direct_purchase: p.aft ? true : null,
+    note: p.successNote || v.successNote,
+  };
+  ledger.recordPayment(state.reference, {
+    model: 'toolkit', vertical: state.vertical, amount: p.amount, currency: p.currency,
+    requested_currency: fxOn ? state.fx.requestedCurrency : null, fixed_side: fxOn ? state.fx.fixedSide : null,
+    last4: cred.last4, brand: cred.brand,
+    origin: 'client', initiation_type: 'customer_present', profile: state.profile,
+    credential: { kind: 'token', label: `${cred.brand} ···${cred.last4}` },
+    aft: !!p.aft,
+  });
+
+  lastExpress = { body, httpStatus: null, data: null };
+  paintExpressRequest(body);
+  setActiveTab('request');
+  logEvent('POST /v1/payments', `express · ${cred.card_id}`, 'api');
+  renderProcessing('Charging your saved card…', 'No card entry needed — the token references the stored card.');
+
+  try {
+    const { httpStatus, data } = await createDirectPayment({ ...body, env: state.env, profile: state.profile });
+    lastExpress = { body, httpStatus, data };
+    paintExpressResponse(httpStatus, data);
+    setActiveTab('response');
+    const d = data?.data;
+    if (!d || data?.error) {
+      setStatus('Declined', 'error');
+      logEvent('POST /v1/payments', data?.message || data?.error || 'declined', 'api', 'err');
+      renderError({ status: data?.error || 'ERR', message: data?.message || 'The payment was declined.' });
+      ledger.updateStatus(state.reference, { status: 'failed', phase: 'declined' });
+      return;
+    }
+    ledger.setPaymentId(state.reference, d.id);
+    logEvent('POST /v1/payments', `${d.id} · ${d.status}`, 'api', 'ok');
+    if (d.status === 'ACT' && d.next_action === '3d_verification') {
+      setStatus('3DS challenge', 'action');
+      render3DS(d.redirect_url);
+      ledger.updateStatus(state.reference, { phase: 'pending_3ds' });
+    } else {
+      setStatus('Confirming…', 'processing');
+      renderProcessing('Payment received', 'Confirming via webhook…');
+      ledger.updateStatus(state.reference, { phase: 'awaiting_confirmation' });
+    }
+    startWebhookWatch({ reference: state.reference, payment_id: d.id, onTerminal: handleTerminal, onPoll: () => { lastHeartbeat = new Date(); renderConsole(); } });
+  } catch (err) {
+    lastExpress = { body, httpStatus: 0, data: { error: 'network_error', message: err.message } };
+    paintExpressResponse(0, lastExpress.data);
+    setStatus('Error', 'error');
+    logEvent('POST /v1/payments', err.message, 'api', 'err');
+    renderError({ status: 'ERR', message: err.message });
+    ledger.updateStatus(state.reference, { status: 'failed', phase: 'error' });
+  }
+}
+
 /* ── Mount ───────────────────────────────────────────────── */
 export function mount() {
   const panel = $('#tk-config');
@@ -527,6 +811,22 @@ export function mount() {
     tds = e.target.checked;
     syncControlVisibility();
     renderRequest();
+  });
+  // Card on file — the customer/save controls mirror straight into the body.
+  $('#tk-cof')?.addEventListener('change', e => {
+    cof = e.target.checked;
+    ['tkc-row-savedef', 'tkc-row-reqcvv', 'tkc-row-rec'].forEach(id => $(`#${id}`)?.toggleAttribute('hidden', !effectiveCof()));
+    renderRequest();
+  });
+  $('#tk-savedef')?.addEventListener('change', e => { saveDefault = e.target.checked; renderRequest(); });
+  $('#tk-reqcvv')?.addEventListener('change', e => { requireCvv = e.target.checked; renderRequest(); });
+  // Express S2S — delegated on the page root (the express slot repaints as
+  // tokens land, but the root lives for the whole page).
+  $('.tk-checkout')?.addEventListener('click', e => {
+    if (e.target.closest('#tk-express-pay')) {
+      const slot = e.target.closest('.tk-express');
+      if (slot?.dataset.cred) expressPay(slot.dataset.cred);
+    }
   });
   // Each wallet is its own on/off switch, independent of the other
   const wireWallet = (id, key) => $(`#${id}`).addEventListener('change', e => {
@@ -558,3 +858,11 @@ export function mount() {
 
   $('#tk-launch').addEventListener('click', launch);
 }
+
+// Tokens landing (webhook harvest / list backfill / profile re-key) surface
+// the express block without disturbing the rest of the page.
+customers.subscribeCustomers(() => {
+  if (state.model !== 'toolkit' || state.leftView !== 'client') return;
+  const slot = $('#tk-express-slot');
+  if (slot) slot.innerHTML = expressHTML();
+});

@@ -169,16 +169,30 @@ export function renderSuccess(event = {}) {
   const pay = event.raw?.data || {};
   const lp = state.lastPayment || {};
   const reference = pay.merchant_reference_id || state.reference || '—';
+  // Product/AFT-aware copy: the flow picks the note at pay time (e.g. the
+  // crypto "wallet funded, buy later" variant when is_direct_purchase=false).
+  const note = lp.note || v.successNote;
+  // Stored-credential facts — pulled from the terminal webhook when present.
+  // These rows only render when the payment actually carried them
+  // (factsHTML drops null/empty values).
+  const pmd = pay.payment_method_data || {};
+  const cardToken = typeof pay.payment_method === 'string' && /^card_/.test(pay.payment_method) ? pay.payment_method : null;
   host().innerHTML = `
     <div class="screen success">
       ${badgeHTML('ok')}
       <div class="screen-title rise-1">${successVerb(v)} confirmed</div>
       <div class="screen-sub rise-2">${v.merchant} · <strong>${paidLabel()}</strong></div>
-      ${v.successNote ? `<div class="screen-next rise-3">${v.successNote}</div>` : ''}
+      ${note ? `<div class="screen-next rise-3">${note}</div>` : ''}
       ${factsHTML([
         ['Payment', event.payment_id || '—'],
         ['Reference', reference],
         ['Card', cardLabel(pay, lp)],
+        ['Customer', lp.customer_id],
+        ['Credential', lp.credential_label],
+        ['Card token', cardToken],
+        ['network_reference_id', pmd.network_reference_id],
+        ['initiation_type', lp.initiation_type],
+        ['AFT', lp.aft ? (lp.is_direct_purchase === false ? 'wallet funding' : 'direct purchase') : null],
         ['Status', event.status || 'CLO'],
         ['Confirmed by', event.type || 'webhook'],
       ])}

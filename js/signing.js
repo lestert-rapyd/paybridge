@@ -12,20 +12,21 @@
    ───────────────────────────────────────────────────────────── */
 
 import { state } from './state.js';
+import { activeProfile } from './profiles.js';
 
 const HEXC = '0123456789abcdef';
 function randHex(n) { let s = ''; for (let i = 0; i < n; i++) s += HEXC[Math.floor(Math.random() * 16)]; return s; }
 
-// Separate demo identities per environment, so the header visibly changes
-// when the Sandbox/Live switch flips (mirrors the real access_key/secret_key
-// pairing being per-environment on Rapyd's side).
-const DEMO_KEYS = {
-  sandbox: { access: 'rak_' + randHex(20).toUpperCase(), secret: 'rsk_' + randHex(40) },
-  live:    { access: 'rak_' + randHex(20).toUpperCase(), secret: 'rsk_' + randHex(40) },
-};
+// One display identity per env/profile, so the header visibly changes when
+// the Sandbox/Live switch OR the SC1/SC2/SC3 profile flips. Sandbox shows the
+// profile's REAL access key (public identifier, redacted below) — the secret
+// is always a random demo value; the real signature is computed server-side.
+const DEMO_LIVE_ACCESS = 'rak_' + randHex(20).toUpperCase();
+const DEMO_SECRETS = {}; // identity -> random rsk_
+const identity = () => (state.env === 'live' ? 'live' : `sandbox:${state.profile}`);
 
-const accessKey = () => DEMO_KEYS[state.env].access;
-const secretKey = () => DEMO_KEYS[state.env].secret;
+const accessKey = () => (state.env === 'live' ? DEMO_LIVE_ACCESS : activeProfile().access_key);
+const secretKey = () => (DEMO_SECRETS[identity()] ||= 'rsk_' + randHex(40));
 
 // "rak_A1B***X9Z" — first 3 / last 3 chars of the key body, prefix kept in full.
 export function redactKey(key) {
@@ -39,9 +40,9 @@ export function redactKey(key) {
 const enc = (s) => new TextEncoder().encode(s);
 const keyPromises = {};
 function hmacKey() {
-  const env = state.env;
-  keyPromises[env] ||= crypto.subtle.importKey('raw', enc(secretKey()), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  return keyPromises[env];
+  const id = identity();
+  keyPromises[id] ||= crypto.subtle.importKey('raw', enc(secretKey()), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return keyPromises[id];
 }
 
 export function newSaltTimestamp() {

@@ -115,8 +115,14 @@ export function refundedTotals(entry) {
 
 /** Called right when a flow builds its outbound body — captures exactly
     what the customer was charged, independent of what the webhook later
-    reports (this is what makes the FX-safe refund default correct). */
-export function recordPayment(reference, { model, vertical, amount, currency, requested_currency, fixed_side, last4, brand }) {
+    reports (this is what makes the FX-safe refund default correct).
+    Stored-credential extensions (all optional, additive):
+      origin          'client' | 'backoffice' (MIT charges fire from back office)
+      initiation_type the body's initiation_type ('customer_present' default)
+      credential      { kind: 'vault'|'token', label } when a stored card paid
+      aft             the payment carried the AFT indicator block
+      profile         sandbox MID that created it (retrieval/refunds must reuse it) */
+export function recordPayment(reference, { model, vertical, amount, currency, requested_currency, fixed_side, last4, brand, origin, initiation_type, credential, aft, profile }) {
   entries.set(reference, {
     reference,
     kind: 'payment',
@@ -129,6 +135,11 @@ export function recordPayment(reference, { model, vertical, amount, currency, re
     brand: brand || null,
     requested_currency: requested_currency || null,
     fixed_side: fixed_side || null,
+    origin: origin || 'client',
+    initiation_type: initiation_type || 'customer_present',
+    credential: credential || null,
+    aft: !!aft,
+    profile: profile || state.profile,
     status: 'pending',   // 'pending' | 'completed' | 'failed'
     phase: 'created',    // human-readable live phase for the back-office pill
     settled: null,       // filled from PAYMENT_COMPLETED / GET (see settlementOf)

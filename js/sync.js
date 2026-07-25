@@ -9,6 +9,8 @@ export const FIELD_MAP = {
   'f-expiry': ['payment_method.fields.expiration_month', 'payment_method.fields.expiration_year'],
   'f-cvv':    ['payment_method.fields.cvv'],
   'f-name':   ['payment_method.fields.name'],
+  // "save my card" adds the whole stored-credential block
+  'f-save':   ['save_payment_method', 'customer', 'payment_method.fields.recurrence_type'],
   'tile-amount':   ['amount'],
   'tile-currency': ['currency'],
   'fx-currency':   ['requested_currency'],

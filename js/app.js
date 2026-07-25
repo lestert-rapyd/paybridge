@@ -2,7 +2,8 @@
    PayBridge Demo Suite — bootstrap (on-brand redesign)
    ───────────────────────────────────────────────────────────── */
 
-import { VERTICALS, VERTICAL_ORDER, activeProduct, customerCharge, fxQuoteKey, chargeText } from './verticals.js';
+import { VERTICALS, VERTICAL_ORDER, activeProduct, customerCharge, fxQuoteKey, chargeText, productCta, productSelectorHTML } from './verticals.js';
+import { PROFILES, PROFILE_ORDER } from './profiles.js';
 import { state, setState, subscribe } from './state.js';
 import { setActiveTab, setStatus } from './ui.js';
 import { stopWebhookWatch } from './webhooks.js';
@@ -42,12 +43,14 @@ const CURRENCIES = ['USD', 'EUR', 'GBP', 'SGD'];
 // `c` is a customerCharge() object — the amount the customer actually pays,
 // which is the base price under 'sell' but the converted requested-currency
 // figure under 'buy'. Subtotal and Total both reflect it (Option 2).
-function totalsHTML(c, feeLabel, feeValue) {
+// Subscription products carry a small "/mo" on the total line.
+function totalsHTML(c, feeLabel, feeValue, perMonth = false) {
   const amt = chargeText(c);
+  const mo = perMonth ? ' <span class="per-mo">/mo</span>' : '';
   return `
     <div class="co-line"><span>Subtotal</span><span>${amt}</span></div>
     <div class="co-line"><span>${feeLabel}</span><span class="${feeValue === 'Free' ? 'free' : ''}">${feeValue}</span></div>
-    <div class="co-line total"><span>Total</span><span class="co-total-amt">${amt}</span></div>`;
+    <div class="co-line total"><span>Total</span><span class="co-total-amt">${amt}${mo}</span></div>`;
 }
 function ensureFxCurrencyValid() {
   const options = CURRENCIES.filter(c => c !== activeProduct().currency);
@@ -174,10 +177,11 @@ function syncFx() {
 function refreshCharge() {
   const c = customerCharge();
   const p = activeProduct();
+  const sub = p.billing === 'subscription';
   const totalsEl = $('#order-totals');
-  if (totalsEl) totalsEl.innerHTML = totalsHTML(c, p.delivery ? 'Delivery' : 'Fees', p.delivery || 'Free');
+  if (totalsEl) totalsEl.innerHTML = totalsHTML(c, p.delivery ? 'Delivery' : 'Fees', p.delivery || 'Free', sub);
   const payBtn = $('#pay-btn');
-  if (payBtn) payBtn.textContent = `${VERTICALS[state.vertical].cta} ${chargeText(c)}`;
+  if (payBtn) payBtn.textContent = `${productCta()} ${chargeText(c)}${sub ? ' /mo' : ''}`;
   FLOWS[state.model].refreshSummary?.();
 }
 function openFxPopover() {
@@ -287,7 +291,8 @@ function commitTileEdit(currencyOverride) {
     currencyBtn.dataset.currency = currencyOverride;
     currencyBtn.innerHTML = `${currencyOverride}<span class="cur-caret">▾</span>`;
   }
-  state.productOverride = { vertical: state.vertical, amount: filtered, currency };
+  // keyed by product too — an edited price never leaks onto a sibling product
+  state.productOverride = { vertical: state.vertical, productId: activeProduct().id, amount: filtered, currency };
   refreshAfterEdit();
 }
 
@@ -318,8 +323,10 @@ function renderCheckout() {
       <div class="co-merchant">${v.merchant}</div>
       <div class="co-tagline"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#a8a297" stroke-width="2.6"><rect x="4" y="10" width="16" height="11" rx="2.5"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>${v.headline.toUpperCase()}</div>
 
+      ${productSelectorHTML()}
+
       <div class="co-order">
-        <div class="co-thumb" style="background:linear-gradient(135deg,${c1},${c2})">${THUMB_GLYPH[state.vertical]}</div>
+        <div class="co-thumb" style="background:linear-gradient(135deg,${c1},${c2})">${p.glyph || THUMB_GLYPH[state.vertical]}</div>
         <div class="co-order-info">
           <div class="co-order-name">${p.name}</div>
           <div class="co-order-desc">${p.desc}</div>
@@ -331,10 +338,10 @@ function renderCheckout() {
         <button type="button" class="fx-trigger${state.fx.enabled ? ' configured' : ''}" id="fx-trigger" title="Configure currency conversion">FX</button>
       </div>
 
-      <div class="co-totals" id="order-totals">${totalsHTML(customerCharge(), feeLabel, feeValue)}</div>
+      <div class="co-totals" id="order-totals">${totalsHTML(customerCharge(), feeLabel, feeValue, p.billing === 'subscription')}</div>
 
       ${payLabel}
-      ${flow.renderPaymentHTML()}`;
+      <div id="pay-region">${flow.renderPaymentHTML()}</div>`;
   }
 
   // Clear out-of-window annotations (bank-app view) on any re-render.
@@ -388,6 +395,24 @@ function toggleLeftView() {
   else FLOWS[state.model].refreshRightPanel?.();
 }
 
+/* ── Sandbox key-profile switch (subbar, sandbox only) ───────
+   Minimal selector over the three sandbox MIDs. Switching a profile is a
+   DIRECT state mutation (never a reset — invariant: an in-flight checkout
+   survives); the affected surfaces repaint explicitly. Feature badges make
+   the MID differences part of the demo (3DS provider, NRID availability). */
+function renderProfileSwitch() {
+  const el = $('#profile-switch');
+  if (!el) return;
+  el.hidden = state.env !== 'sandbox';
+  el.innerHTML = PROFILE_ORDER.map(id => {
+    const pf = PROFILES[id];
+    return `<button data-profile="${id}" class="${id === state.profile ? 'active' : ''}" title="access_key ${pf.access_key}">
+      <span class="pf-id">${id}</span>
+      <span class="pf-feat">3DS ${pf.tds === 'rapyd' ? 'Rapyd' : 'Ext'} · ${pf.nrid ? 'NRID ✓' : 'NRID ✗'}</span>
+    </button>`;
+  }).join('');
+}
+
 /* ── Header controls ─────────────────────────────────────── */
 function renderVerticalPills() {
   $('#vertical-pills').innerHTML = VERTICAL_ORDER.map(id => {
@@ -405,6 +430,7 @@ function syncControlStates() {
   $$('.model-btn').forEach(b => b.classList.toggle('active', b.dataset.model === state.model));
   $('#client-domain').textContent = VERTICALS[state.vertical].domain;
   $('#model-desc').textContent = MODEL_DESC[state.model];
+  renderProfileSwitch(); // visibility tracks the env switch
 }
 
 /* ── Wiring ──────────────────────────────────────────────── */
@@ -429,6 +455,16 @@ function wire() {
     const btn = e.target.closest('.left-tab');
     if (btn && btn.dataset.view !== state.leftView) setState({ leftView: btn.dataset.view });
   });
+  // Sandbox key-profile switch — direct mutation + targeted repaints (the
+  // client flow's DOM is never reset; per-profile stores re-key themselves).
+  $('#profile-switch').addEventListener('click', e => {
+    const btn = e.target.closest('button[data-profile]');
+    if (!btn || btn.dataset.profile === state.profile) return;
+    state.profile = btn.dataset.profile;
+    renderProfileSwitch();
+    FLOWS[state.model].refreshProfile?.();
+    if (state.leftView === 'backoffice') backOffice.render();
+  });
 
   // Price tile + FX popover — delegated on stable containers (#checkout,
   // #fx-popover and #cur-dropdown never get destroyed, only their innerHTML
@@ -440,6 +476,16 @@ function wire() {
     if (curBtn) { toggleCurDropdown('tile', curBtn); return; }
     if (e.target.closest('#fx-trigger')) {
       $('#fx-popover').hidden ? openFxPopover() : closeFxPopover();
+      return;
+    }
+    // Customer-facing product selector (shared by the standard shell and the
+    // toolkit summary — both render inside the stable #checkout root).
+    // Switching product is a context change for the client page: re-render it
+    // fresh (the price override falls away via its productId guard).
+    const prodBtn = e.target.closest('#prod-select button[data-product]');
+    if (prodBtn && prodBtn.dataset.product !== activeProduct().id) {
+      state.selectedProduct = { vertical: state.vertical, productId: prodBtn.dataset.product };
+      renderCheckout();
     }
   });
   $('#fx-popover').addEventListener('change', e => {

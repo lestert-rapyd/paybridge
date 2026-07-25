@@ -10,6 +10,16 @@ export const state = {
   model:    'own-fields',   // 'own-fields' | 'toolkit'
   leftView: 'client',       // 'client' | 'backoffice' — which left-pane tab is active
 
+  // Sandbox key profile (SC1|SC2|SC3 — see js/profiles.js). Mutated DIRECTLY
+  // (like fx below) so switching MIDs never resets an in-flight client flow;
+  // app.js repaints the affected surfaces explicitly.
+  profile: 'SC1',
+
+  // Client-site product selector: { vertical, productId } | null. Mutated
+  // DIRECTLY; falls back to the vertical's first product when it doesn't match
+  // the active vertical (same guard pattern as productOverride).
+  selectedProduct: null,
+
   // populated by later phases:
   reference:  null,         // merchant_reference_id of the active session
   paymentId:  null,         // payment_xxx once created

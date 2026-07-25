@@ -19,6 +19,7 @@ let timer = null;
 let ref = null;
 let paymentId = null;
 let paymentIdAt = 0;    // when we learned the payment id — fallback timing keys off this
+let watchProfile = null; // sandbox MID that created the payment — the only one that can retrieve it
 let startedAt = 0;
 let configured = null;
 let fallbackDone = false;
@@ -32,6 +33,7 @@ export function startWebhookWatch({ reference, payment_id, onTerminal: cb, onPol
   ref = reference;
   paymentId = payment_id || null;
   paymentIdAt = payment_id ? Date.now() : 0;
+  watchProfile = state.profile; // captured now — a later profile switch must not re-key the fallback
   onTerminal = cb || null;
   onPoll = pollCb || null;
   startedAt = Date.now();
@@ -89,7 +91,7 @@ async function poll() {
   if (!events.length && !fallbackDone && paymentId && paymentIdAt && Date.now() - paymentIdAt > 15000) {
     fallbackDone = true;
     try {
-      const r = await fetch(`${BACKEND_URL}/api/retrieve-payment?id=${encodeURIComponent(paymentId)}&env=${state.env}`);
+      const r = await fetch(`${BACKEND_URL}/api/retrieve-payment?id=${encodeURIComponent(paymentId)}&env=${state.env}&profile=${watchProfile || state.profile}`);
       const j = await r.json();
       const p = j?.data;
       if (p) {
