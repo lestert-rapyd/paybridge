@@ -280,15 +280,15 @@
 .tkc-fixed code {
   font-family: var(--font-mono);
   font-size: 10.5px;
-  color: var(--eng-text, #f6ecff);
-  background: var(--eng-surface-2, #1c1230);
-  border: 1px solid var(--eng-line, #2a1c3b);
+  color: var(--eng-text);
+  background: var(--eng-surface-2);
+  border: 1px solid var(--eng-line);
   padding: 3px 9px;
   border-radius: 999px;
 }
 .tkc-note {
   font-size: 10.5px;
-  color: var(--eng-muted, #9a86b0);
+  color: var(--eng-muted);
   padding: 4px 2px 0;
   line-height: 1.5;
 }
@@ -340,7 +340,7 @@
   border: 1px solid var(--accent);
   border-radius: var(--r-sm);
   background: var(--accent);
-  color: var(--on-accent, #fff);
+  color: var(--on-accent);
   font-family: var(--font-sans);
   font-size: 11px;
   font-weight: 700;
