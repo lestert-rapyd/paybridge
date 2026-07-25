@@ -25,9 +25,15 @@
       <div class="vertical-pills" id="vertical-pills"><!-- rendered by app.js --></div>
 
       <div class="topbar-right">
-        <div class="env-switch" id="env-switch">
-          <button data-env="sandbox" class="active">Sandbox</button>
-          <button data-env="live">Live</button>
+        <!-- Sandbox/Live radio with the sandbox credential picker folded in:
+             the Sandbox button carries the active SC tag + caret and opens
+             #cred-panel (rendered by app.js). Live has a single key pair. -->
+        <div class="env-picker" id="env-picker">
+          <div class="env-switch" id="env-switch">
+            <button data-env="sandbox" class="active">Sandbox<span class="env-cred" id="env-cred-tag"></span><span class="env-caret" aria-hidden="true">▾</span></button>
+            <button data-env="live">Live</button>
+          </div>
+          <div class="cred-panel" id="cred-panel" hidden><!-- rendered by app.js --></div>
         </div>
       </div>
     </header>
@@ -43,7 +49,6 @@
         </button>
       </div>
       <div class="model-desc" id="model-desc"></div>
-      <div class="profile-switch" id="profile-switch" title="Sandbox key profile"><!-- rendered by app.js --></div>
     </div>
 
     <!-- ── Split ── -->

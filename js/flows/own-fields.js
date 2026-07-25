@@ -27,7 +27,7 @@
 import { state } from '../state.js';
 import { VERTICALS, activeProduct, customerCharge, chargeText, fxSnapshot, productCta } from '../verticals.js';
 import { createDirectPayment, createCustomer } from '../api.js';
-import { profileEwallet, nridAvailable } from '../profiles.js';
+import { profileEwallet, nridAvailable, activeProfile } from '../profiles.js';
 import { clientDetails } from '../client-details.js';
 import { renderJSONView, highlightPaths } from '../json-view.js';
 import { setActiveTab, setStatus } from '../ui.js';
@@ -318,7 +318,7 @@ function deckHTML() {
           ? 'subscription product → recurring · MIT charges run from the back office'
           : 'one-time product → unscheduled · customer-present reuse on this page'}</span></div>
       </div>
-      ${storage !== 'token' && sc3 ? `<div class="se-warn">SC3 does not return <code>network_reference_id</code> — vault reuse will require CVV re-entry.</div>` : ''}`;
+      ${storage !== 'token' && sc3 ? `<div class="se-warn">${activeProfile().label} does not return <code>network_reference_id</code> — vault reuse will require CVV re-entry.</div>` : ''}`;
   }
   const cred = activeCredential();
   if (!cred) return '';
@@ -332,7 +332,7 @@ function deckHTML() {
   }
   const nridOk = !!cred.network_reference_id && nridAvailable();
   const nridTitle = !nridAvailable()
-    ? 'This profile (SC3) does not return network_reference_id'
+    ? `This profile (${activeProfile().label}) does not return network_reference_id`
     : 'No network_reference_id captured yet for this card';
   const mode = currentMode();
   return `

@@ -1,50 +1,60 @@
 /* ─────────────────────────────────────────────────────────────
    Card-on-file / recurring / AFT additions.
    Sits AFTER main.css; uses tokens.css variables only — no new colours.
-   New surfaces: subbar profile switch (prof-), client-site product
+   New surfaces: sandbox credential picker (cred-), client-site product
    selector (prod-), saved-card chips + returning view (cof-), the SE
    strategy deck (se-), toolkit express block + config extras (tk-/tkc-),
    and the back-office customer-on-file card (bo-cof-/bo-charge-).
    ───────────────────────────────────────────────────────────── */
 
-/* ── Sandbox key-profile switch (subbar) ─────────────────── */
-.profile-switch {
-  display: flex;
-  gap: 5px;
-  margin-left: auto;
-  align-items: stretch;
-  flex-shrink: 0;
+/* ── Sandbox credential picker (folded into the Sandbox/Live toggle) ──
+   Popover under the env switch; light-theme surface so it reads as an
+   extension of the client chrome, not the dark engine room. */
+.cred-panel {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 40;
+  width: 300px; padding: 6px;
+  background: var(--surface); border: 1px solid var(--line-2);
+  border-radius: var(--r-md); box-shadow: var(--shadow-pop);
 }
-.profile-switch[hidden] { display: none; }
-.profile-switch button {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  padding: 3px 8px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  color: var(--ink-2);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 1.2;
-  cursor: pointer;
-  transition: border-color .15s, background .15s, color .15s;
+.cred-panel[hidden] { display: none; }
+.cred-panel-head {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  padding: 6px 8px 8px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--ink-3);
 }
-.profile-switch button:hover { border-color: var(--ink-4); }
-.profile-switch button.active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--ink);
+.cred-panel-head .cph-note {
+  font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--ink-4);
 }
-.profile-switch .pf-id { font-weight: 700; letter-spacing: .04em; }
-.profile-switch .pf-feat { font-size: 8px; color: var(--ink-3); white-space: nowrap; }
-.profile-switch button.active .pf-feat { color: var(--ink-2); }
-/* the subbar has to share a row with the model desc — let the desc give way
-   gracefully instead of pushing SC3 off-screen */
-.subbar { flex-wrap: wrap; }
-.subbar .model-desc { flex: 1 1 140px; min-width: 0; }
+.cred-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 9px 10px; text-align: left; cursor: pointer;
+  border: 1px solid transparent; border-radius: var(--r-sm);
+  background: transparent; color: var(--ink-2);
+  transition: border-color .15s, background .15s;
+}
+.cred-row:hover { background: var(--surface-2); }
+.cred-row.active { border-color: var(--accent); background: var(--accent-soft); }
+.cred-radio {
+  width: 15px; height: 15px; flex: none; position: relative;
+  border: 2px solid var(--line-2); border-radius: 50%;
+}
+.cred-row.active .cred-radio { border-color: var(--accent); }
+.cred-row.active .cred-radio::after {
+  content: ""; position: absolute; inset: 2px; border-radius: 50%; background: var(--accent);
+}
+.cred-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.cred-id { font-family: var(--font-mono); font-weight: 700; font-size: 12px; letter-spacing: .04em; color: var(--ink); }
+.cred-sub { font-size: 10.5px; color: var(--ink-3); }
+.cred-key { font-family: var(--font-mono); font-size: 9.5px; color: var(--ink-4); }
+.cred-flags { flex: none; display: flex; gap: 4px; }
+.cred-flag {
+  font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  padding: 2px 5px; border-radius: 4px; white-space: nowrap;
+  background: var(--surface-2); color: var(--ink-3);
+}
+.cred-flag.on  { background: rgba(18,183,106,.14); color: var(--ok-deep); }
+.cred-flag.off { background: rgba(239,68,68,.10);  color: var(--err-deep); }
 
 /* ── Client-site product selector (customer-facing) ──────── */
 .prod-select {

@@ -43,7 +43,7 @@ let refundOpen = false;   // is the refund form expanded
 let firing = false;       // a refund POST is in flight
 let pendingRefundRef = null; // refund ref we're waiting to confirm
 let lastHoverRef = null;  // avoids redundant GET-preview repaints on hover
-let form = { amount: '', reason: '', route: null }; // route: 'customer' | 'merchant' | null
+let form = { amount: '', reason: '', route: null, scope: 'full' }; // route: 'customer'|'merchant'|null · scope: 'full'|'partial'
 let refundWatchTimer = null;
 
 /* Customer-on-file / MIT charge state (mirrors the refund form's pattern) */
@@ -96,19 +96,16 @@ function renderWallet() {
   const curs = Object.keys(bal);
   const count = getLedger().filter((e) => e.status === 'completed').length;
 
-  // primary = settlement currency of the most recent completed payment
-  let primaryCur = curs[0] || null;
-  for (const e of getLedger().filter((x) => x.status === 'completed')) {
-    const c = e.settled?.merchant_requested_currency || e.settled?.currency || e.currency;
-    if (c && bal[c] != null) { primaryCur = c; break; }
-  }
-  const others = curs.filter((c) => c !== primaryCur);
+  // Every currency held this session, one figure each at equal visual weight —
+  // no "primary" currency, since a multi-currency wallet has no single headline.
+  const rows = curs.length
+    ? curs.map((c) => `<div class="bo-wallet-bal">${money(bal[c], c)}</div>`).join('')
+    : `<div class="bo-wallet-bal">0.00</div>`;
 
   el.innerHTML = `
     <div class="bo-wallet-card">
       <div class="bo-wallet-ballabel">Wallet balance</div>
-      <div class="bo-wallet-balmain">${primaryCur ? money(bal[primaryCur], primaryCur) : '0.00'}</div>
-      ${others.map((c) => `<div class="bo-wallet-balsub">${money(bal[c], c)}</div>`).join('')}
+      <div class="bo-wallet-bals">${rows}</div>
       <div class="bo-wallet-meta">${count} payment${count === 1 ? '' : 's'} this session</div>
     </div>`;
 }
@@ -202,57 +199,107 @@ function refundHistoryHTML(entry) {
     </div>`;
 }
 
-function routeCardsHTML(entry) {
+/* The full refundable slice, expressed in the customer's currency (that's the
+   basis refundedTotals() reports in). */
+function fullCustomerRefundable(entry) {
+  const t = refundedTotals(entry);
+  return t.remaining > 0 ? t.remaining : t.total;
+}
+/* Same slice, converted into a given route's currency (customer or merchant). */
+function fullRefundAmount(entry, route) {
+  const custFull = fullCustomerRefundable(entry);
+  const fxr = (entry.settled || {}).fx_rate;
+  return route === 'merchant' && fxr ? round2(custFull * fxr) : custFull;
+}
+
+const guarTag = (guaranteed) => guaranteed
+  ? `<span class="bo-guar yes">guaranteed</span>`
+  : `<span class="bo-guar no">not guaranteed</span>`;
+
+/* ── FULL refund: the two settlement routes ───────────────────
+   Both routes return the whole order — they differ only in WHICH leg is
+   contractually fixed. Whichever currency you denominate the refund in is the
+   guaranteed leg; the converted leg floats with the rate at refund time. */
+function fullRoutesHTML(entry) {
   const s = entry.settled || {};
   const fxr = s.fx_rate;
   const custCur = s.currency || entry.currency;
   const merchCur = s.merchant_requested_currency;
-  const amt = round2(form.amount);
-  // The active route's amount is in THAT route's currency. Only the active
-  // card shows numeric legs (an inactive card's legs would misread the shared
-  // amount as its own currency) — computed from the two legs of the refund.
-  const legs = (route) => {
-    if (route === 'customer') return { wallet: money(round2(amt * (fxr || 1)), merchCur), out: money(amt, custCur) };
-    return { wallet: money(amt, merchCur), out: money(round2(fxr ? amt / fxr : amt), custCur) };
-  };
-  const card = (route, title, note) => {
-    const active = form.route === route;
-    const l = active ? legs(route) : null;
-    return `
-    <button type="button" class="bo-route ${active ? 'active' : ''}" data-route="${route}">
+  const custFull = fullCustomerRefundable(entry);
+  const wallet = money(round2(custFull * (fxr || 1)), merchCur); // debited from the wallet
+  const out = money(custFull, custCur);                          // received by the customer
+  const leg = (label, val, guaranteed) =>
+    `<div class="bo-route-leg"><span>${label}</span><span class="bo-leg-val"><b>${val}</b>${guarTag(guaranteed)}</span></div>`;
+  const card = (route, title, note, walletGuar, outGuar) => `
+    <button type="button" class="bo-route ${form.route === route ? 'active' : ''}" data-route="${route}">
       <div class="bo-route-title">${title}</div>
       <div class="bo-route-note">${note}</div>
-      ${l ? `<div class="bo-route-legs">
-        <div class="bo-route-leg"><span>Leaves your wallet</span><b>${l.wallet}</b></div>
-        <div class="bo-route-leg"><span>Goes out to customer</span><b>${l.out}</b></div>
-      </div>` : ''}
+      <div class="bo-route-legs">
+        ${leg('Leaves your wallet', wallet, walletGuar)}
+        ${leg('Goes out to customer', out, outGuar)}
+      </div>
     </button>`;
-  };
   return `
     <div class="bo-route-anchor">You received <b>${money(s.merchant_requested_amount, merchCur)}</b> for this order · rate 1 ${custCur} = ${fmt(fxr)} ${merchCur}</div>
     <div class="bo-routes">
-      ${card('customer', 'Make the customer whole', 'Refund what they paid — you may pay out more than you received.')}
-      ${card('merchant', 'Refund what you received', 'Refund your settled amount — the customer may get back less than they paid.')}
+      ${card('customer', 'Refund what they paid',
+        'The customer is made whole in the currency they paid — your wallet debit floats with the rate.',
+        /*wallet*/ false, /*out*/ true)}
+      ${card('merchant', 'Refund what you received',
+        'Your wallet is debited exactly what you settled — the customer may get back less than they paid.',
+        /*wallet*/ true, /*out*/ false)}
     </div>`;
 }
 
-function refundFormHTML(entry) {
+/* FULL refund, no FX — a single currency, nothing to choose. */
+function fullSummaryHTML(entry) {
+  const custCur = (entry.settled || {}).currency || entry.currency;
+  const t = refundedTotals(entry);
+  const custFull = fullCustomerRefundable(entry);
+  return `<div class="bo-full-summary">Refunding the full <b>${money(custFull, custCur)}</b>${t.refunded > 0 ? ' remaining' : ''} back to the customer.</div>`;
+}
+
+/* ── PARTIAL refund: pick an amount, and (for FX) which currency of the
+   order's pair to denominate it in. Only the two captured currencies are
+   selectable — no third currency can be introduced at refund time. */
+function partialFieldsHTML(entry) {
   const fx = isFx(entry);
   const s = entry.settled || {};
   const custCur = s.currency || entry.currency;
   const merchCur = s.merchant_requested_currency;
-  const amtCur = fx ? (form.route === 'merchant' ? merchCur : custCur) : custCur;
+  const curControl = fx
+    ? `<div class="co-fx-seg bo-refcur-seg" id="bo-refund-curseg">
+         <button type="button" data-route="customer" class="${form.route === 'merchant' ? '' : 'active'}">${custCur}</button>
+         <button type="button" data-route="merchant" class="${form.route === 'merchant' ? 'active' : ''}">${merchCur}</button>
+       </div>`
+    : `<span class="bo-refund-currency">${custCur}</span>`;
+  return `
+    <div class="bo-refund-field">
+      <label>Amount</label>
+      <div class="bo-refund-amtfield">
+        <input type="text" inputmode="decimal" class="bo-refund-input bo-refund-amount" id="bo-refund-amount" value="${esc(form.amount)}" />
+        ${curControl}
+      </div>
+    </div>
+    ${fx ? `<div class="bo-partial-note">Only this order's pair — <b>${custCur}</b> or <b>${merchCur}</b> — can be refunded.</div>` : ''}`;
+}
+
+/* The Full / Partial scope toggle that sits at the top of the form. */
+function scopeSegHTML() {
+  const seg = (val, label) => `<button type="button" data-scope="${val}" class="${form.scope === val ? 'active' : ''}">${label}</button>`;
+  return `<div class="co-fx-seg bo-scope-seg" id="bo-refund-scope">${seg('full', 'Full refund')}${seg('partial', 'Partial refund')}</div>`;
+}
+
+function refundFormHTML(entry) {
+  const fx = isFx(entry);
+  const scopeBody = form.scope === 'partial'
+    ? partialFieldsHTML(entry)
+    : (fx ? fullRoutesHTML(entry) : fullSummaryHTML(entry));
   return `
     <div class="bo-refund-form">
       <div class="bo-refund-formhead">Issue a refund</div>
-      ${fx ? routeCardsHTML(entry) : ''}
-      <div class="bo-refund-field">
-        <label>Amount</label>
-        <div class="bo-refund-amtfield">
-          <input type="text" inputmode="decimal" class="bo-refund-input bo-refund-amount" id="bo-refund-amount" value="${esc(form.amount)}" />
-          <span class="bo-refund-currency">${amtCur}</span>
-        </div>
-      </div>
+      ${scopeSegHTML()}
+      ${scopeBody}
       <div class="bo-refund-field">
         <label>Reason</label>
         <input type="text" class="bo-refund-input" id="bo-refund-reason" value="${esc(form.reason)}" placeholder="e.g. Faulty merchandise" />
@@ -597,24 +644,47 @@ async function retrieveAndOpen(reference) {
 function openRefundForm() {
   const entry = getEntry(detailRef);
   if (!entry) return;
-  const t = refundedTotals(entry);
   const fx = isFx(entry);
-  form = { amount: fmt(t.remaining > 0 ? t.remaining : t.total), reason: '', route: fx ? 'customer' : null };
+  const route = fx ? 'customer' : null;
+  // Default to a FULL refund — the most common action — with the amount already
+  // set to the whole refundable slice in the default route's currency.
+  form = { amount: fmt(fullRefundAmount(entry, route)), reason: '', route, scope: 'full' };
   refundOpen = true;
   renderBody();
   paintRefundRequest(currentRefundBody(entry));
   setActiveTab('request');
 }
 
-function selectRoute(route) {
+/* Full ↔ Partial. Full re-pins the amount to the whole slice; Partial keeps
+   whatever's typed so the SE can dial it down. */
+function selectScope(scope) {
   const entry = getEntry(detailRef);
-  if (!entry) return;
+  if (!entry || form.scope === scope) return;
+  form.scope = scope;
+  if (isFx(entry) && !form.route) form.route = 'customer';
+  if (scope === 'full') form.amount = fmt(fullRefundAmount(entry, form.route));
+  renderBody();
+  paintRefundRequest(currentRefundBody(entry));
+}
+
+/* Route = which currency of the pair the refund is denominated in. In FULL
+   mode it re-pins to the whole slice; in PARTIAL mode it CONVERTS the typed
+   amount across the pair so the value carries over rather than resetting. */
+function setRefundRoute(route) {
+  const entry = getEntry(detailRef);
+  if (!entry || form.route === route) return;
+  const prev = form.route;
   form.route = route;
-  const s = entry.settled || {};
-  const t = refundedTotals(entry);
-  // reset the amount to the remaining slice, expressed in the chosen leg's currency
-  const custRemaining = t.remaining > 0 ? t.remaining : t.total;
-  form.amount = fmt(route === 'merchant' && s.fx_rate ? round2(custRemaining * s.fx_rate) : custRemaining);
+  const fxr = (entry.settled || {}).fx_rate || 1;
+  if (form.scope === 'full') {
+    form.amount = fmt(fullRefundAmount(entry, route));
+  } else {
+    const amt = round2(form.amount);
+    const converted = prev === 'customer' && route === 'merchant' ? round2(amt * fxr)
+      : prev === 'merchant' && route === 'customer' ? round2(fxr ? amt / fxr : amt)
+      : amt;
+    form.amount = fmt(converted);
+  }
   renderBody();
   paintRefundRequest(currentRefundBody(entry));
 }
@@ -932,8 +1002,12 @@ export function mount() {
     // refund form
     if (e.target.closest('#bo-refund-open')) { openRefundForm(); return; }
     if (e.target.closest('#bo-refund-cancel')) { refundOpen = false; renderBody(); return; }
-    const routeBtn = e.target.closest('.bo-route[data-route]');
-    if (routeBtn) { selectRoute(routeBtn.dataset.route); return; }
+    const scopeBtn = e.target.closest('#bo-refund-scope [data-scope]');
+    if (scopeBtn) { selectScope(scopeBtn.dataset.scope); return; }
+    // Full-refund route cards AND the partial currency selector both pick the
+    // denomination — route through the same handler.
+    const routeBtn = e.target.closest('.bo-route[data-route], #bo-refund-curseg [data-route]');
+    if (routeBtn) { setRefundRoute(routeBtn.dataset.route); return; }
     if (e.target.closest('#bo-refund-fire')) { fireRefund(); return; }
   });
 

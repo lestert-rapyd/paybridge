@@ -58,6 +58,11 @@ function ensureFxCurrencyValid() {
 }
 function fxPopoverHTML() {
   const fx = state.fx;
+  // requested_currency is always the FLOATING side. Under 'sell' the customer's
+  // charge is fixed and the merchant's payout floats → it's what you receive;
+  // under 'buy' the payout is fixed and the customer's charge floats → it's the
+  // currency the customer pays. Label it for whichever side it actually is.
+  const reqLabel = fx.fixedSide === 'buy' ? 'Currency the customer pays' : 'Currency you receive';
   return `
     <div class="fx-popover-head">
       <span>Currency conversion</span>
@@ -69,7 +74,7 @@ function fxPopoverHTML() {
     </label>
     <div class="fx-popover-body" id="fx-popover-body" ${fx.enabled ? '' : 'hidden'}>
       <div>
-        <div class="fx-popover-label">Currency you receive</div>
+        <div class="fx-popover-label">${reqLabel}</div>
         <button type="button" class="cur-trigger" id="fx-currency">${fx.requestedCurrency || ''}<span class="cur-caret">▾</span></button>
       </div>
       <div>
@@ -400,17 +405,48 @@ function toggleLeftView() {
    DIRECT state mutation (never a reset — invariant: an in-flight checkout
    survives); the affected surfaces repaint explicitly. Feature badges make
    the MID differences part of the demo (3DS provider, NRID availability). */
-function renderProfileSwitch() {
-  const el = $('#profile-switch');
-  if (!el) return;
-  el.hidden = state.env !== 'sandbox';
-  el.innerHTML = PROFILE_ORDER.map(id => {
+// The credential picker is a UI-only popover (open state lives here, not in
+// the reactive store) folded into the Sandbox button of the env switch.
+let credPanelOpen = false;
+
+const redactKey = k => k ? `${k.slice(0, 4)}····${k.slice(-4)}` : '';
+
+function credRowsHTML() {
+  return PROFILE_ORDER.map(id => {
     const pf = PROFILES[id];
-    return `<button data-profile="${id}" class="${id === state.profile ? 'active' : ''}" title="access_key ${pf.access_key}">
-      <span class="pf-id">${id}</span>
-      <span class="pf-feat">3DS ${pf.tds === 'rapyd' ? 'Rapyd' : 'Ext'} · ${pf.nrid ? 'NRID ✓' : 'NRID ✗'}</span>
+    const active = id === state.profile;
+    return `<button type="button" class="cred-row ${active ? 'active' : ''}" data-profile="${id}" title="access_key ${pf.access_key}">
+      <span class="cred-radio"></span>
+      <span class="cred-main">
+        <span class="cred-id">${id}</span>
+        <span class="cred-sub">3DS ${pf.tds === 'rapyd' ? 'Rapyd' : 'External'} · AFT ${pf.aft ? '✓' : '✗'}</span>
+        <span class="cred-key">${redactKey(pf.access_key)}</span>
+      </span>
+      <span class="cred-flags">
+        <span class="cred-flag ${pf.nrid ? 'on' : 'off'}">NRID ${pf.nrid ? '✓' : '✗'}</span>
+      </span>
     </button>`;
   }).join('');
+}
+
+/* ── Sandbox credential picker (folded into the Sandbox/Live toggle) ──
+   The Sandbox button shows the active SC tag; clicking it opens this panel
+   over the three MIDs. Selection is a DIRECT state mutation (never a reset —
+   an in-flight checkout survives), same invariant as the old subbar switch. */
+function renderCredPanel() {
+  const tag = $('#env-cred-tag');
+  if (tag) tag.textContent = state.env === 'sandbox' ? state.profile : '';
+  const panel = $('#cred-panel');
+  const picker = $('#env-picker');
+  if (!panel || !picker) return;
+  const open = credPanelOpen && state.env === 'sandbox';
+  picker.classList.toggle('open', open);
+  panel.hidden = !open;
+  if (open) {
+    panel.innerHTML = `
+      <div class="cred-panel-head">Sandbox credentials<span class="cph-note">MID keys signing your calls</span></div>
+      ${credRowsHTML()}`;
+  }
 }
 
 /* ── Header controls ─────────────────────────────────────── */
@@ -430,7 +466,7 @@ function syncControlStates() {
   $$('.model-btn').forEach(b => b.classList.toggle('active', b.dataset.model === state.model));
   $('#client-domain').textContent = VERTICALS[state.vertical].domain;
   $('#model-desc').textContent = MODEL_DESC[state.model];
-  renderProfileSwitch(); // visibility tracks the env switch
+  renderCredPanel(); // the SC tag + panel track the env switch
 }
 
 /* ── Wiring ──────────────────────────────────────────────── */
@@ -441,7 +477,15 @@ function wire() {
   });
   $('#env-switch').addEventListener('click', e => {
     const btn = e.target.closest('button[data-env]');
-    if (btn && btn.dataset.env !== state.env) setState({ env: btn.dataset.env });
+    if (!btn) return;
+    if (btn.dataset.env === 'live') {
+      credPanelOpen = false;
+      if (state.env !== 'live') setState({ env: 'live' }); else renderCredPanel();
+      return;
+    }
+    // Sandbox: arriving from Live opens the picker; clicking it again toggles.
+    if (state.env !== 'sandbox') { credPanelOpen = true; setState({ env: 'sandbox' }); }
+    else { credPanelOpen = !credPanelOpen; renderCredPanel(); }
   });
   $('#model-switch').addEventListener('click', e => {
     const btn = e.target.closest('.model-btn');
@@ -455,15 +499,27 @@ function wire() {
     const btn = e.target.closest('.left-tab');
     if (btn && btn.dataset.view !== state.leftView) setState({ leftView: btn.dataset.view });
   });
-  // Sandbox key-profile switch — direct mutation + targeted repaints (the
+  // Sandbox credential picker — direct mutation + targeted repaints (the
   // client flow's DOM is never reset; per-profile stores re-key themselves).
-  $('#profile-switch').addEventListener('click', e => {
+  // Picking a credential also dismisses the panel.
+  $('#cred-panel').addEventListener('click', e => {
     const btn = e.target.closest('button[data-profile]');
-    if (!btn || btn.dataset.profile === state.profile) return;
-    state.profile = btn.dataset.profile;
-    renderProfileSwitch();
-    FLOWS[state.model].refreshProfile?.();
-    if (state.leftView === 'backoffice') backOffice.render();
+    if (!btn) return;
+    if (btn.dataset.profile !== state.profile) {
+      state.profile = btn.dataset.profile;
+      FLOWS[state.model].refreshProfile?.();
+      if (state.leftView === 'backoffice') backOffice.render();
+    }
+    credPanelOpen = false;
+    renderCredPanel();
+  });
+  // Dismiss the picker on an outside click or Escape (the handlers above run
+  // first and stopPropagation isn't needed — they sit inside #env-picker).
+  document.addEventListener('click', e => {
+    if (credPanelOpen && !e.target.closest('#env-picker')) { credPanelOpen = false; renderCredPanel(); }
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && credPanelOpen) { credPanelOpen = false; renderCredPanel(); }
   });
 
   // Price tile + FX popover — delegated on stable containers (#checkout,

@@ -48,12 +48,22 @@ code { font-family: var(--font-mono); }
 .vertical-pills button.active { background: var(--chrome-pill-active); color: #fff; }
 
 .topbar-right { display: flex; align-items: center; gap: 14px; }
+.env-picker { position: relative; }
 .env-switch { display: flex; background: var(--chrome-inset); border-radius: 999px; padding: 3px; }
 .env-switch button {
+  display: inline-flex; align-items: center; gap: 6px;
   border: 0; background: transparent; color: var(--chrome-muted);
   padding: 6px 13px; border-radius: 999px; font-size: 12px; font-weight: 600; transition: all .15s ease;
 }
 .env-switch button.active { background: var(--accent); color: var(--on-accent); }
+.env-cred {
+  font-family: var(--font-mono); font-size: 9px; font-weight: 700; letter-spacing: .04em;
+  padding: 1px 5px; border-radius: 4px; background: var(--chrome-tag-bg); color: var(--chrome-text-3);
+}
+.env-cred:empty { display: none; }
+.env-switch button.active .env-cred { background: rgba(255,255,255,.22); color: #fff; }
+.env-caret { font-size: 8px; opacity: .7; transition: transform .15s ease; }
+.env-picker.open .env-caret { transform: rotate(180deg); }
 
 .status-ind {
   display: flex; align-items: center; gap: 8px;
@@ -160,8 +170,8 @@ code { font-family: var(--font-mono); }
    part of the same UI as the tiles below it. */
 .bo-wallet-card { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); padding: 16px 18px; margin-bottom: 18px; }
 .bo-wallet-ballabel { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
-.bo-wallet-balmain { font-size: 27px; font-weight: 800; letter-spacing: -.01em; color: var(--ink); line-height: 1.15; margin-top: 4px; }
-.bo-wallet-balsub { font-size: 14px; font-weight: 600; color: var(--ink-3); margin-top: 2px; }
+.bo-wallet-bals { display: flex; flex-direction: column; gap: 3px; margin-top: 5px; }
+.bo-wallet-bal { font-size: 22px; font-weight: 800; letter-spacing: -.01em; color: var(--ink); line-height: 1.2; }
 .bo-wallet-meta { font-size: 11.5px; color: var(--ink-3); margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 
 /* Section + tiles */
@@ -233,8 +243,20 @@ code { font-family: var(--font-mono); }
 .bo-route-title { font-size: 13px; font-weight: 700; color: var(--ink); }
 .bo-route-note { font-size: 11.5px; color: var(--ink-3); margin-top: 3px; line-height: 1.4; }
 .bo-route-legs { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
-.bo-route-leg { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-3); }
+.bo-route-leg { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink-3); }
 .bo-route-leg b { color: var(--ink); font-weight: 700; }
+.bo-leg-val { display: inline-flex; align-items: center; gap: 6px; }
+.bo-guar { font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 1px 5px; border-radius: 4px; white-space: nowrap; }
+.bo-guar.yes { background: rgba(18,183,106,.14); color: var(--ok-deep); }
+.bo-guar.no  { background: var(--surface-2); color: var(--ink-3); }
+/* Full/Partial scope toggle + partial-mode extras */
+.bo-scope-seg { margin-bottom: 12px; }
+.bo-refund-amtfield .bo-refcur-seg { flex: none; width: auto; background: var(--surface-2); }
+.bo-refund-amtfield .bo-refcur-seg button { padding: 6px 11px; font-family: var(--font-mono); }
+.bo-partial-note { font-size: 11px; color: var(--ink-3); margin: -2px 0 10px; }
+.bo-partial-note b { color: var(--ink-2); font-weight: 700; }
+.bo-full-summary { font-size: 12.5px; color: var(--ink-2); line-height: 1.5; margin-bottom: 14px; }
+.bo-full-summary b { color: var(--ink); font-weight: 700; }
 .bo-refund-field { margin-bottom: 10px; }
 .bo-refund-field label { display: block; font-size: 11px; font-weight: 600; color: var(--ink-3); margin-bottom: 5px; }
 .bo-refund-input {
@@ -1083,8 +1105,8 @@ details[open] .wh-chev { transform: rotate(90deg); }
   box-shadow: var(--shadow-tile);
 }
 .bo-wallet-ballabel { color: var(--c-ink-7); }
-.bo-wallet-balmain { color: var(--c-ink); }
-.bo-wallet-balsub, .bo-wallet-meta { color: var(--c-ink-5); }
+.bo-wallet-bal { color: var(--c-ink); }
+.bo-wallet-meta { color: var(--c-ink-5); }
 .bo-wallet-meta { border-top-color: var(--c-line); }
 .bo-section-label, .bo-refund-formhead { color: var(--c-ink-7); }
 .bo-tile.clickable:hover { border-color: var(--c-line-3); box-shadow: 0 1px 2px rgba(30,20,10,.05), 0 18px 36px -20px rgba(30,20,10,.3); }
