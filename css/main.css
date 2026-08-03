@@ -908,6 +908,15 @@ details[open] .wh-chev { transform: rotate(90deg); }
 /* checkout (PCI flow) */
 .co-merchant { font-family: inherit; font-size: 27px; font-weight: 800; letter-spacing: -.01em; color: var(--c-ink); }
 .co-tagline { display: flex; align-items: center; gap: 6px; font-size: 11px; letter-spacing: .11em; color: var(--c-ink-7); margin-top: 6px; }
+/* identity chooser — warm-card palette, same treatment as .prod-select */
+.id-block { margin: 22px 0 0; }
+.id-label { font-size: 11px; letter-spacing: .11em; color: var(--c-ink-7); margin-bottom: 7px; }
+.id-select { border-color: var(--c-line-3); border-radius: 10px; }
+.id-select button { background: #fff; color: var(--c-ink-4); font-size: 12px; padding: 9px 8px; }
+.id-select button + button { border-left-color: var(--c-line-3); }
+.id-select button:hover:not(:disabled):not(.active) { background: var(--c-soft-2); color: var(--c-ink-3); }
+.id-select button.active { background: color-mix(in srgb, var(--accent) 10%, #fff); color: var(--accent); }
+.id-caption { font-size: 11px; color: var(--c-ink-6); margin-top: 6px; }
 .co-order { gap: 14px; margin: 22px 0 0; padding: 14px 16px; background: var(--c-soft); border: 1px solid var(--c-line); border-radius: 14px; }
 .co-thumb { width: 48px; height: 48px; border-radius: var(--r-md); font-size: 22px; }
 .co-order-name { font-size: 15.5px; font-weight: 700; color: var(--c-ink-2); }

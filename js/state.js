@@ -20,6 +20,12 @@ export const state = {
   // the active vertical (same guard pattern as productOverride).
   selectedProduct: null,
 
+  // How the customer identifies at checkout: 'guest' | 'account' | 'returning'
+  // (see js/identity.js). Mutated DIRECTLY — picking a mode repaints the client
+  // page explicitly rather than resetting the flow. Read through
+  // identity.js's identityMode(), which degrades a stale choice.
+  identityMode: 'guest',
+
   // populated by later phases:
   reference:  null,         // merchant_reference_id of the active session
   paymentId:  null,         // payment_xxx once created

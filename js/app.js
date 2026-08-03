@@ -4,6 +4,7 @@
 
 import { VERTICALS, VERTICAL_ORDER, activeProduct, customerCharge, fxQuoteKey, chargeText, productCta, productSelectorHTML } from './verticals.js';
 import { PROFILES, PROFILE_ORDER } from './profiles.js';
+import { identityChooserHTML, identityMode, setIdentityMode } from './identity.js';
 import { state, setState, subscribe } from './state.js';
 import { setActiveTab, setStatus } from './ui.js';
 import { stopWebhookWatch } from './webhooks.js';
@@ -328,6 +329,8 @@ function renderCheckout() {
       <div class="co-merchant">${v.merchant}</div>
       <div class="co-tagline"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#a8a297" stroke-width="2.6"><rect x="4" y="10" width="16" height="11" rx="2.5"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>${v.headline.toUpperCase()}</div>
 
+      ${identityChooserHTML()}
+
       ${productSelectorHTML()}
 
       <div class="co-order">
@@ -541,6 +544,15 @@ function wire() {
     const prodBtn = e.target.closest('#prod-select button[data-product]');
     if (prodBtn && prodBtn.dataset.product !== activeProduct().id) {
       state.selectedProduct = { vertical: state.vertical, productId: prodBtn.dataset.product };
+      renderCheckout();
+      return;
+    }
+    // Identity chooser (guest / account / returning) — same deal: a context
+    // change for the client page, so re-render it rather than setState (which
+    // would count as a flow reset). Both shells render it inside #checkout.
+    const idBtn = e.target.closest('#identity-select button[data-mode]');
+    if (idBtn && !idBtn.disabled && idBtn.dataset.mode !== identityMode()) {
+      setIdentityMode(idBtn.dataset.mode);
       renderCheckout();
     }
   });

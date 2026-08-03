@@ -41,6 +41,7 @@ import {
 import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
 import * as ledger from '../ledger.js';
 import * as customers from '../customers.js';
+import { identityMode, usesCustomer, reusableCreds, promoteToReturning, refreshIdentityChooser } from '../identity.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -62,16 +63,42 @@ let pendingSave = null;        // snapshot between submit and PAYMENT_COMPLETED
 /* ── stored-credential helpers ───────────────────────────── */
 const isSubscription = () => activeProduct().billing === 'subscription';
 const recurrenceType = () => (isSubscription() ? 'recurring' : 'unscheduled');
-// Subscribing inherently stores the card — the checkbox locks on.
-const effectiveSave = () => save || isSubscription();
-
-function returningCreds() {
-  // The returning view is CIT-only: one-time products reusing `unscheduled`
-  // credentials. Subscription products always run a fresh first payment here
-  // (their MIT reuse lives in the back office).
-  return activeProduct().billing === 'one_time' ? customers.credentialsFor('unscheduled') : [];
+/* ── Storage-route availability ───────────────────────────────
+   Two independent constraints, so they're resolved in ONE place:
+   · token / both need a Rapyd customer → withdrawn from a guest
+   · vault needs network_reference_id  → withdrawn on a no-NRID MID
+     (customer-absent vault reuse would mean storing the CVV, which
+     PCI-DSS forbids)
+   Guest on a no-NRID MID withdraws BOTH — the card can't be stored at all,
+   and the save checkbox itself has to say so. Keys match `storage` values. */
+function storageAvailability() {
+  const vault = nridAvailable();
+  const token = usesCustomer();
+  return { vault, token, both: vault && token, any: vault || token };
 }
-const isReturning = () => !useDifferentCard && returningCreds().length > 0;
+const firstAvailableStorage = () => {
+  const a = storageAvailability();
+  return a.token ? 'token' : a.vault ? 'vault' : null;
+};
+/** Never leave `storage` sitting on a route the current context withdrew. */
+function ensureStorageValid() {
+  if (storageAvailability()[storage]) return;
+  const next = firstAvailableStorage();
+  if (next) storage = next;
+}
+// Subscribing inherently stores the card — the checkbox locks on. But nothing
+// can be saved when every route is withdrawn.
+const effectiveSave = () => (save || isSubscription()) && storageAvailability().any;
+
+// The returning view is CIT-only: one-time products reusing `unscheduled`
+// credentials. Subscription products always run a fresh first payment here
+// (their MIT reuse lives in the back office). Shared with identity.js, which
+// uses the same list to decide whether "Returning customer" is selectable.
+const returningCreds = reusableCreds;
+// Returning is now an explicit identity choice, not an auto-detect —
+// `useDifferentCard` remains a sub-state INSIDE returning mode ("use a
+// different card" shows the blank form but still attaches the cus_***).
+const isReturning = () => identityMode() === 'returning' && !useDifferentCard && returningCreds().length > 0;
 function activeCredential() {
   const creds = returningCreds();
   return creds.find(c => c.ref === selectedCredRef) || creds[creds.length - 1] || null;
@@ -120,11 +147,16 @@ function displayBody() {
 
   // customer: token saves/charges always reference the session cus_***;
   // a token-less AFT carries the enriched customer INLINE instead — both
-  // documented shapes get demonstrated.
-  if (saveToken || (returning && cred?.kind === 'token')) {
-    body.customer = cus || '(created on submit)';
-  } else if (aft) {
-    body.customer = cus || customers.enrichedCustomerBody();
+  // documented shapes get demonstrated. A GUEST carries neither: no account
+  // is created, so nothing may reference or inline one.
+  if (usesCustomer()) {
+    // A token-less AFT with no customer yet carries the enriched customer
+    // INLINE — the other documented shape, still worth demonstrating.
+    const inlineAft = !cus && aft && !saveToken && !(returning && cred?.kind === 'token');
+    // Otherwise the chosen identity attaches the session cus_*** — including a
+    // vault-only or save-less "Create an account" run, and a returning customer
+    // entering a different card (still the same account).
+    body.customer = inlineAft ? customers.enrichedCustomerBody() : (cus || '(created on submit)');
   }
 
   body.merchant_reference_id = state.reference || '(assigned on submit)';
@@ -252,8 +284,34 @@ function returningHTML() {
     </div>`;
 }
 
+/* "Save card" + the Strategy popover trigger. When BOTH storage routes are
+   withdrawn (a guest on a no-NRID MID) there's nothing to configure, so the
+   checkbox itself is disabled and names both remedies. */
+function saveRowHTML() {
+  const avail = storageAvailability();
+  if (!avail.any) {
+    return `
+      <div class="co-save-row">
+        <label class="co-tds">
+          <input type="checkbox" id="f-save" disabled />
+          <span>Save card for future purchases</span>
+        </label>
+      </div>
+      <div class="id-caption">Unavailable here: ${activeProfile().label} returns no <code>network_reference_id</code> (blocks the merchant vault) and guest checkout has no <code>cus_***</code> (blocks the Rapyd token). Create an account, or switch to <b>SC2</b>/<b>SC3</b>.</div>`;
+  }
+  return `
+    <div class="co-save-row">
+      <label class="co-tds">
+        <input type="checkbox" id="f-save" ${effectiveSave() ? 'checked' : ''} ${isSubscription() ? 'disabled' : ''} />
+        <span>${isSubscription() ? 'Card saved for your subscription' : 'Save card for future purchases'}</span>
+      </label>
+      ${effectiveSave() ? `<button type="button" class="sc-trigger" id="sc-trigger" title="Stored-credential strategy">Strategy ▸</button>` : ''}
+    </div>`;
+}
+
 export function renderPaymentHTML() {
   const p = activeProduct();
+  ensureStorageValid(); // the identity mode / MID may have withdrawn the active route
   if (isReturning()) return returningHTML();
   return `
     <div class="co-field">
@@ -279,13 +337,7 @@ export function renderPaymentHTML() {
       <div class="co-input"><input id="f-name" autocomplete="cc-name" placeholder="Jordan Taylor" /></div>
     </div>
     ${p.aft && !isSubscription() ? directPurchaseHTML() : ''}
-    <div class="co-save-row">
-      <label class="co-tds">
-        <input type="checkbox" id="f-save" ${effectiveSave() ? 'checked' : ''} ${isSubscription() ? 'disabled' : ''} />
-        <span>${isSubscription() ? 'Card saved for your subscription' : 'Save card for future purchases'}</span>
-      </label>
-      ${effectiveSave() ? `<button type="button" class="sc-trigger" id="sc-trigger" title="Stored-credential strategy">Strategy ▸</button>` : ''}
-    </div>
+    ${saveRowHTML()}
     <label class="co-tds">
       <input type="checkbox" id="f-tds" ${tds ? 'checked' : ''} />
       <span>Require 3-D Secure</span>
@@ -305,15 +357,20 @@ function deckHTML() {
       return `<div class="se-deck-empty">Tick <b>“save card”</b> to configure how this card is stored for reuse.</div>`;
     }
     const nridOk = nridAvailable();
+    const avail = storageAvailability();
     const needsCustomer = storage !== 'vault'; // token / both → a Rapyd customer holds the card_***
     const id = customers.getIdentity();
+    const WHY_NO_VAULT = 'This credential returns no network_reference_id — customer-absent vault reuse isn’t possible';
+    const WHY_NO_TOKEN = 'A Rapyd card_*** token is held by a customer — switch to “Create an account”';
+    const stBtn = (val, label, ok, why) =>
+      `<button type="button" data-val="${val}" class="${storage === val ? 'active' : ''}"${ok ? '' : ` disabled title="${why}"`}>${label}</button>`;
     return `
       <div class="se-row">
         <div class="se-lab">Storage<code>save_payment_method</code></div>
         <div class="se-seg" data-opt="storage">
-          <button type="button" data-val="vault" class="${storage === 'vault' ? 'active' : ''}" ${nridOk ? '' : 'disabled title="This credential returns no network_reference_id — customer-absent vault reuse isn’t possible"'}>Merchant vault (PCI)</button>
-          <button type="button" data-val="token" class="${storage === 'token' ? 'active' : ''}">Rapyd token</button>
-          <button type="button" data-val="both" class="${storage === 'both' ? 'active' : ''}">Both</button>
+          ${stBtn('vault', 'Merchant vault (PCI)', avail.vault, WHY_NO_VAULT)}
+          ${stBtn('token', 'Rapyd token', avail.token, WHY_NO_TOKEN)}
+          ${stBtn('both', 'Both', avail.both, avail.vault ? WHY_NO_TOKEN : WHY_NO_VAULT)}
         </div>
       </div>
       <div class="se-row">
@@ -331,7 +388,8 @@ function deckHTML() {
       <div class="sc-cust vault">
         <div class="sc-cust-body">No Rapyd customer — the merchant vaults the PAN itself; reuse re-sends the stored PAN.</div>
       </div>`}
-      ${!nridOk ? `<div class="se-warn">${activeProfile().label} returns no <code>network_reference_id</code>, so PCI vault reuse isn’t available. Pick a credential that returns it — <b>SC2</b> or <b>SC3</b> via the Sandbox picker — or save a <b>Rapyd token</b>.</div>` : ''}`;
+      ${!nridOk ? `<div class="se-warn">${activeProfile().label} returns no <code>network_reference_id</code>, so PCI vault reuse isn’t available. Pick a credential that returns it — <b>SC2</b> or <b>SC3</b> via the Sandbox picker — or save a <b>Rapyd token</b>.</div>` : ''}
+      ${!avail.token ? `<div class="se-warn">Guest checkout has no <code>cus_***</code>, so a Rapyd <code>card_***</code> token can’t be stored. Switch to <b>Create an account</b> for the token route — the merchant vault needs no customer.</div>` : ''}`;
   }
   const cred = activeCredential();
   if (!cred) return '';
@@ -470,8 +528,11 @@ export function refreshRightPanel() {
     the body's ewallet change — repaint without resetting the flow. */
 export function refreshProfile() {
   // A profile with no network_reference_id can't back a customer-absent vault
-  // reuse — never leave the strategy sitting on the now-disabled vault option.
-  if (storage === 'vault' && !nridAvailable()) storage = 'token';
+  // reuse — never leave the strategy sitting on a withdrawn route.
+  ensureStorageValid();
+  // The new bucket may hold no cards (withdrawing "Returning") and its NRID
+  // support changes which storage routes exist.
+  refreshIdentityChooser();
   const region = $('#pay-region');
   if (region && state.model === 'own-fields') rerenderPayRegion();
   else renderRequest();
@@ -529,6 +590,9 @@ function harvestCredentials(ev) {
     }
     customers.refreshTokens(); // silent backfill — the webhook harvest is primary
   }
+  // A card is now on file, so the natural next state is "Returning customer" —
+  // the arc's concluding phase (and what the view used to do implicitly).
+  promoteToReturning();
 }
 
 /* ── Submit ──────────────────────────────────────────────── */
@@ -588,10 +652,12 @@ async function pay() {
   btn.textContent = 'Processing…';
   setStatus('Processing…', 'processing');
 
-  // Beat 1 (only when a token save/charge needs a customer that doesn't exist
-  // yet — vault-only saves and inline-AFT calls skip it entirely).
-  const needsCustomer = !customers.getCustomerId() &&
-    !returning && effectiveSave() && storage !== 'vault';
+  // Beat 1 — create the cus_*** when it doesn't exist yet and this payment
+  // needs one: either the token route requires it, or the SE chose "Create an
+  // account" (which promises an account even for a vault-only or save-less
+  // run). A guest never creates one.
+  const needsCustomer = !customers.getCustomerId() && !returning && usesCustomer()
+    && (identityMode() === 'account' || (effectiveSave() && storage !== 'vault'));
   if (needsCustomer) {
     const ok = await createSessionCustomer();
     if (!ok) { btn.disabled = false; btn.textContent = btnLabel; return; }
@@ -870,6 +936,7 @@ document.addEventListener('keydown', e => {
 // refresh the popover and the chips if they're on screen.
 customers.subscribeCustomers(() => {
   if (state.model !== 'own-fields' || state.leftView !== 'client') return;
+  refreshIdentityChooser(); // a new card can unlock "Returning" (or a re-key withdraw it)
   renderScPopover();
   if ($('#cof-returning')) rerenderPayRegion(); // NRI badges / new tokens
 });

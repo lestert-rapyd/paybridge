@@ -30,6 +30,7 @@ import { renderProcessing, render3DS, renderSuccess, renderError } from '../scre
 import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
 import * as ledger from '../ledger.js';
 import * as customers from '../customers.js';
+import { identityChooserHTML, identityMode, usesCustomer, promoteToReturning, refreshIdentityChooser } from '../identity.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -58,8 +59,10 @@ let lastSession = null;
 
 /* Card on file (non-PCI): the HCP saves the card_*** against the session
    cus_*** — a customer is a PREREQUISITE for saving through this route.
-   Subscription products force it on (subscribing inherently stores the card). */
-let cof = false;            // "Attach customer" → `customer` on the checkout body
+   Whether a customer is attached is now the CUSTOMER's choice, made in the
+   shared identity chooser (js/identity.js) rather than by an SE switch here —
+   two controls for one decision could contradict each other. The config row
+   below reflects it read-only. */
 let saveDefault = true;     // custom_elements.save_card_default
 let requireCvv = false;     // require_card_cvv (CVV re-entry on saved-card reuse)
 let pendingCof = null;      // snapshot between launch and PAYMENT_COMPLETED
@@ -67,7 +70,9 @@ let lastExpress = null;     // persisted express S2S request/response for refres
 
 const isSubscription = () => activeProduct().billing === 'subscription';
 const recurrence = () => (isSubscription() ? 'recurring' : 'unscheduled');
-const effectiveCof = () => cof || isSubscription();
+// Guest → no customer on the session; account/returning → attach one.
+// (identityMode() already coerces a subscription off guest.)
+const effectiveCof = () => usesCustomer();
 
 const AP_TYPES = ['add-money', 'book', 'buy', 'check-out', 'contribute', 'donate', 'order', 'plain', 'reload', 'rent', 'subscribe', 'support', 'tip', 'top-up'];
 const GP_TYPES = ['book', 'buy', 'checkout', 'donate', 'order', 'pay', 'subscribe'];
@@ -202,6 +207,7 @@ function tkTotalsHTML() {
 function expressHTML() {
   const p = activeProduct();
   if (p.billing !== 'one_time') return '';
+  if (identityMode() !== 'returning') return ''; // express IS the returning path
   const creds = customers.credentialsFor('unscheduled').filter(c => c.kind === 'token');
   if (!creds.length) return '';
   const c = creds[creds.length - 1];
@@ -231,6 +237,7 @@ function summaryHTML() {
         <span class="tk-brand-mark" style="background:linear-gradient(135deg,${c1},${c2})">${v.merchant[0]}</span>
         <span>${v.merchant}</span>
       </div>
+      ${identityChooserHTML()}
       <div class="tk-sum-label">Your order</div>
       ${productSelectorHTML()}
       <div class="co-order">
@@ -315,7 +322,9 @@ function configPanelHTML() {
       <div class="tkc-sec" id="tkc-cof">
         <div class="tkc-sec-label">Card on file</div>
         ${row('Attach customer', 'customer',
-          `<label class="tkc-switch-wrap"><input type="checkbox" class="tkc-switch" id="tk-cof" ${effectiveCof() ? 'checked' : ''} ${isSubscription() ? 'disabled' : ''} /></label>`)}
+          `<span class="tkc-fixed"><code>${effectiveCof() ? 'attached' : 'none'}</code></span>`)}
+        ${row('Identity', 'chosen on the checkout',
+          `<span class="tkc-fixed"><code>${identityMode()}</code></span>`)}
         ${row('Save box pre-ticked', 'custom_elements.save_card_default',
           `<label class="tkc-switch-wrap"><input type="checkbox" class="tkc-switch" id="tk-savedef" ${saveDefault ? 'checked' : ''} /></label>`, `id="tkc-row-savedef" ${effectiveCof() ? '' : 'hidden'}`)}
         ${row('CVV on reuse', 'require_card_cvv',
@@ -447,6 +456,7 @@ export function refreshRightPanel() {
 /** Profile switch (SC1/SC2/SC3): the express slot and body signing identity
     change; repaint without resetting the page. */
 export function refreshProfile() {
+  refreshIdentityChooser(); // the new bucket may hold no cards → "Returning" withdraws
   const slot = $('#tk-express-slot');
   if (slot) slot.innerHTML = expressHTML();
   refreshRightPanel();
@@ -521,6 +531,8 @@ function harvestCofToken(ev) {
   }
   logEvent('GET /v1/customers/{id}/payment_methods', 'syncing saved cards', 'api');
   customers.refreshTokens();
+  // A card is now on file — the arc's next phase is the returning customer.
+  promoteToReturning();
 }
 
 /* ── Toolkit script + render ─────────────────────────────── */
@@ -812,12 +824,8 @@ export function mount() {
     syncControlVisibility();
     renderRequest();
   });
-  // Card on file — the customer/save controls mirror straight into the body.
-  $('#tk-cof')?.addEventListener('change', e => {
-    cof = e.target.checked;
-    ['tkc-row-savedef', 'tkc-row-reqcvv', 'tkc-row-rec'].forEach(id => $(`#${id}`)?.toggleAttribute('hidden', !effectiveCof()));
-    renderRequest();
-  });
+  // Card on file — "attach customer" is no longer a switch here (the identity
+  // chooser owns it); these two still mirror straight into the body.
   $('#tk-savedef')?.addEventListener('change', e => { saveDefault = e.target.checked; renderRequest(); });
   $('#tk-reqcvv')?.addEventListener('change', e => { requireCvv = e.target.checked; renderRequest(); });
   // Express S2S — delegated on the page root (the express slot repaints as
@@ -863,6 +871,7 @@ export function mount() {
 // the express block without disturbing the rest of the page.
 customers.subscribeCustomers(() => {
   if (state.model !== 'toolkit' || state.leftView !== 'client') return;
+  refreshIdentityChooser(); // a new card can unlock "Returning" (or a re-key withdraw it)
   const slot = $('#tk-express-slot');
   if (slot) slot.innerHTML = expressHTML();
 });

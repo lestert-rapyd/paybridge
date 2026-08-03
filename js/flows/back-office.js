@@ -368,7 +368,9 @@ export function render() {
   const el = $('#backoffice');
   if (!el) return;
   const entries = getLedger();
-  if (!entries.length && !customers.hasCredentials()) {
+  // An account created with no cards yet is real state worth showing, so the
+  // customer id counts as content here just like credentials do.
+  if (!entries.length && !customers.hasCredentials() && !customers.getCustomerId()) {
     el.innerHTML = `<div class="eng-empty"><div class="ee-ico">🗂️</div><div class="ee-text">Payments made this session will show up here, live, whichever flow made them.</div></div>`;
     return;
   }
@@ -387,8 +389,10 @@ export function render() {
 function renderCof() {
   const el = $('#bo-cof');
   if (!el) return;
-  if (view !== 'list' || !customers.hasCredentials()) { el.innerHTML = ''; return; }
   const cus = customers.getCustomerId();
+  // Show the card for a customer that exists OR for vault credentials held
+  // without one — an account whose cards are still to come is a real state.
+  if (view !== 'list' || (!customers.hasCredentials() && !cus)) { el.innerHTML = ''; return; }
   const creds = customers.credentials();
   el.innerHTML = `
     <div class="bo-section-label">Customer on file</div>
@@ -400,7 +404,9 @@ function renderCof() {
         </div>
         ${cus ? `<button class="bo-cof-sync" id="bo-cof-sync" ${chargeFiring ? 'disabled' : ''}>↻ Sync from Rapyd</button>` : ''}
       </div>
-      <div class="bo-cof-creds">${creds.map(credRowHTML).join('')}</div>
+      <div class="bo-cof-creds">${creds.length
+        ? creds.map(credRowHTML).join('')
+        : `<div class="bo-cof-empty">No cards saved yet — the account is created; a card lands here the first time one is stored.</div>`}</div>
     </div>`;
 }
 

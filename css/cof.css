@@ -197,6 +197,43 @@
 .cof-dp button + button { border-left: 1px solid var(--line-2); }
 .cof-dp button.active { background: var(--accent-soft); color: var(--ink); }
 
+/* ── Checkout identity chooser (customer-facing, top of checkout) ──
+   Same joined segmented control as .cof-dp; three options share the width.
+   Carries a :disabled rule because guest/returning can each be unavailable
+   (subscription product / no saved card yet) — the title says why. */
+.id-block { margin: 2px 0 14px; }
+.id-label {
+  font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-3); margin-bottom: 6px;
+}
+.id-select {
+  display: flex;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.id-select button {
+  flex: 1;
+  padding: 8px 8px;
+  border: 0;
+  background: var(--surface);
+  color: var(--ink-2);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.id-select button + button { border-left: 1px solid var(--line-2); }
+.id-select button:hover:not(:disabled):not(.active) { background: var(--surface-2); }
+.id-select button.active { background: var(--accent-soft); color: var(--ink); }
+.id-select button:disabled { opacity: .45; cursor: not-allowed; }
+.id-caption { font-size: 10.5px; line-height: 1.5; color: var(--ink-3); margin-top: 5px; }
+.id-caption code { font-family: var(--font-mono); font-size: 9.5px; color: var(--accent); }
+/* the toolkit hosts the chooser in its narrower summary column */
+.tk-summary .id-block { margin: 2px 0 12px; }
+.tk-summary .id-select button { font-size: 10.5px; padding: 7px 5px; }
+
 /* ── SE strategy deck (#demo-controls) ───────────────────── */
 .se-deck {
   border: 1px dashed var(--line-2);
@@ -334,6 +371,7 @@
 .bo-cof-sync:hover { border-color: var(--ink-4); }
 .bo-cof-sync:disabled { opacity: .5; cursor: not-allowed; }
 .bo-cof-creds { display: flex; flex-direction: column; gap: 8px; }
+.bo-cof-empty { font-size: 11.5px; line-height: 1.5; color: var(--ink-3); }
 .bo-cof-cred {
   border: 1px solid var(--line);
   border-radius: var(--r-md);
