@@ -69,8 +69,13 @@ function captionHTML() {
   switch (identityMode()) {
     case 'guest':
       return `No account — this payment carries no <code>cus_***</code>. Cards can still be vaulted by the merchant.`;
-    case 'account':
-      return `<code>POST /v1/customers</code> runs first, then the card saves under the new <code>cus_***</code>.`;
+    case 'account': {
+      const cus = customers.getCustomerId();
+      // Once the beat has run, the promise is a fact — don't keep announcing it.
+      return cus
+        ? `Account created — <code>${cus}</code> is attached to this payment, and a saved card lands under it.`
+        : `<code>POST /v1/customers</code> runs first, then the card saves under the new <code>cus_***</code>.`;
+    }
     default: {
       const cus = customers.getCustomerId();
       return `Reusing ${cus ? `<code>${cus}</code>` : 'the saved customer'} and its cards on file.`;

@@ -68,6 +68,19 @@ export async function createCustomer(body) {
   return { ok: res.ok, httpStatus: res.status, data };
 }
 
+/** GET /api/retrieve-customer?id=cus_xxx&env=…&profile=… → Rapyd GET
+    /v1/customers/{id}. The back office's customer view reads the object back
+    from Rapyd (payment_methods, created_at) rather than narrating local state.
+    `profile` = the sandbox MID that minted the cus_*** — no other one sees it. */
+export async function retrieveCustomer(id, env, profile) {
+  const qs = new URLSearchParams({ id, env });
+  if (profile) qs.set('profile', profile);
+  const res = await fetch(`${BACKEND_URL}/api/retrieve-customer?${qs.toString()}`);
+  let data = null;
+  try { data = await res.json(); } catch { /* non-JSON */ }
+  return { ok: res.ok, httpStatus: res.status, data };
+}
+
 /** GET /api/list-customer-payment-methods → Rapyd GET
     /v1/customers/{id}/payment_methods?category=card. Card objects carry
     id (card_***), last4, expiry and network_reference_id. */

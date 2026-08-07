@@ -20,7 +20,7 @@
 
 import { state } from '../state.js';
 import { VERTICALS, activeProduct, customerCharge, chargeText, fxSnapshot, productCta, productSelectorHTML } from '../verticals.js';
-import { createCheckoutSession, createCustomer, createDirectPayment } from '../api.js';
+import { createCheckoutSession, createDirectPayment } from '../api.js';
 import { profileEwallet } from '../profiles.js';
 import { clientDetails } from '../client-details.js';
 import { renderJSONView } from '../json-view.js';
@@ -31,6 +31,10 @@ import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
 import * as ledger from '../ledger.js';
 import * as customers from '../customers.js';
 import { identityChooserHTML, identityMode, usesCustomer, promoteToReturning, refreshIdentityChooser } from '../identity.js';
+import {
+  accountPanelHTML, beatCardHTML, customerRequestCardHTML, customerResponseCardHTML,
+  fillCustomerSignature, fireCreateCustomer, refreshAccountPanel,
+} from '../customer-beat.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -238,6 +242,7 @@ function summaryHTML() {
         <span>${v.merchant}</span>
       </div>
       ${identityChooserHTML()}
+      ${accountPanelHTML()}
       <div class="tk-sum-label">Your order</div>
       ${productSelectorHTML()}
       <div class="co-order">
@@ -386,31 +391,50 @@ function syncControlVisibility() {
   if (launch) launch.textContent = hosted ? 'Create session →' : 'Render toolkit →';
 }
 
-/* ── Right: request / response / console ─────────────────── */
+/* ── Right: request / response / console ─────────────────────
+   Beat 1 (the customer create) stacks above this flow's own card — same shell
+   as own-fields. It used to be a console line only, so the body and response of
+   the call that makes the hosted page's save-card option possible were never
+   visible. The client-side toolkit.config JSON stays OUTSIDE the cards: it
+   isn't an API call. */
 function renderRequest() {
   const el = $('#panel-request');
   if (!el) return;
   const st = newSaltTimestamp();
   const body = displayBody();
+  const cusCard = customerRequestCardHTML();
   const tkSection = mode === 'hosted' ? '' : `
     <div class="req-bodylabel" style="margin-top:18px"><p class="eng-label">Toolkit config · client-side JS</p><span class="hint">updates with toolkit.config on the left</span></div>
     ${renderJSONView(toolkitConfig(lastSession?.data?.id))}`;
-  el.innerHTML = `
-    <div class="req-headline"><span class="method-pill post">POST</span><span class="req-path">/v1/checkout</span></div>
-    ${headersHTML(st)}
-    <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">no card data — collected by the iframe</span></div>
-    ${renderJSONView(body)}
-    ${tkSection}`;
-  fillSignature(el, 'post', '/v1/checkout', st, body); // live — recomputes with the body
+  el.innerHTML = cusCard + beatCardHTML({
+    id: 'beat-checkout', n: cusCard ? 2 : null, method: 'POST', path: '/v1/checkout',
+    badge: lastSession?.data?.id ? 'signed &amp; sent' : '', badgeKind: lastSession?.data?.id ? 'ok' : '',
+    inner: `
+      ${headersHTML(st)}
+      <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">no card data — collected by the iframe</span></div>
+      ${renderJSONView(body)}`,
+  }) + tkSection;
+  fillCustomerSignature();
+  fillSignature($('#beat-checkout'), 'post', '/v1/checkout', st, body); // live — recomputes with the body
 }
 
 function renderResponse() {
   const el = $('#panel-response');
-  if (!el || !lastSession) return;
-  const ok = !lastSession.error;
-  el.innerHTML = `
-    <div class="eng-pillrow"><span class="wh-pill ${ok ? 'success' : 'failure'}">HTTP ${ok ? 200 : 400}</span><span class="wh-pill ${ok ? 'success' : 'failure'}">${ok ? 'CHECKOUT CREATED' : 'ERROR'}</span></div>
-    ${renderJSONView(lastSession)}`;
+  if (!el) return;
+  const cusCard = customerResponseCardHTML();
+  let card = '';
+  if (lastSession) {
+    const ok = !lastSession.error;
+    card = beatCardHTML({
+      id: 'beat-checkout-res', n: cusCard ? 2 : null, method: 'POST', path: '/v1/checkout',
+      badge: ok ? 'CHECKOUT CREATED' : 'ERROR', badgeKind: ok ? 'ok' : 'err',
+      inner: `
+        <div class="eng-pillrow"><span class="wh-pill ${ok ? 'success' : 'failure'}">HTTP ${ok ? 200 : 400}</span><span class="wh-pill ${ok ? 'success' : 'failure'}">${ok ? 'CHECKOUT CREATED' : 'ERROR'}</span></div>
+        ${renderJSONView(lastSession)}`,
+    });
+  }
+  if (!cusCard && !card) return; // nothing sent yet — leave app.js's empty state
+  el.innerHTML = cusCard + card;
 }
 
 /* Express S2S request/response paints — the right panel flips from
@@ -419,12 +443,17 @@ function paintExpressRequest(body) {
   const el = $('#panel-request');
   if (!el) return;
   const st = newSaltTimestamp();
-  el.innerHTML = `
-    <div class="req-headline"><span class="method-pill post">POST</span><span class="req-path">/v1/payments</span></div>
-    ${headersHTML(st)}
-    <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">express · saved card_*** token — no card data</span></div>
-    ${renderJSONView(body)}`;
-  fillSignature(el, 'post', '/v1/payments', st, body);
+  const cusCard = customerRequestCardHTML();
+  el.innerHTML = cusCard + beatCardHTML({
+    id: 'beat-express', n: cusCard ? 2 : null, method: 'POST', path: '/v1/payments',
+    badge: 'express', badgeKind: '',
+    inner: `
+      ${headersHTML(st)}
+      <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">express · saved card_*** token — no card data</span></div>
+      ${renderJSONView(body)}`,
+  });
+  fillCustomerSignature();
+  fillSignature($('#beat-express'), 'post', '/v1/payments', st, body);
 }
 function paintExpressResponse(httpStatus, data) {
   const el = $('#panel-response');
@@ -432,12 +461,17 @@ function paintExpressResponse(httpStatus, data) {
   const d = data?.data;
   const ok = httpStatus < 400 && !data?.error;
   const badge = d?.status === 'CLO' && d?.paid ? 'PAID · CLO' : d?.status === 'ACT' ? 'ACTION · ACT' : ok ? (d?.status || 'OK') : String(data?.error || 'ERROR');
-  el.innerHTML = `
-    <div class="eng-pillrow">
-      <span class="wh-pill ${ok ? 'success' : 'failure'}">HTTP ${httpStatus}</span>
-      <span class="wh-pill ${ok ? (d?.status === 'ACT' ? 'pending' : 'success') : 'failure'}">${badge}</span>
-    </div>
-    ${renderJSONView(data ?? { error: 'no response body' })}`;
+  const cusCard = customerResponseCardHTML();
+  el.innerHTML = cusCard + beatCardHTML({
+    id: 'beat-express-res', n: cusCard ? 2 : null, method: 'POST', path: '/v1/payments',
+    badge, badgeKind: ok ? (d?.status === 'ACT' ? 'live' : 'ok') : 'err',
+    inner: `
+      <div class="eng-pillrow">
+        <span class="wh-pill ${ok ? 'success' : 'failure'}">HTTP ${httpStatus}</span>
+        <span class="wh-pill ${ok ? (d?.status === 'ACT' ? 'pending' : 'success') : 'failure'}">${badge}</span>
+      </div>
+      ${renderJSONView(data ?? { error: 'no response body' })}`,
+  });
 }
 
 /** See own-fields.js's refreshRightPanel — same reasoning. renderResponse()
@@ -457,6 +491,7 @@ export function refreshRightPanel() {
     change; repaint without resetting the page. */
 export function refreshProfile() {
   refreshIdentityChooser(); // the new bucket may hold no cards → "Returning" withdraws
+  refreshAccountPanel();    // …and no customer → the account step's create form returns
   const slot = $('#tk-express-slot');
   if (slot) slot.innerHTML = expressHTML();
   refreshRightPanel();
@@ -617,31 +652,21 @@ async function launch() {
 
   // Card on file: a cus_*** is a PREREQUISITE for saving a card through the
   // hosted route — create it first (two-beat). Fails → STOP, nothing recorded.
+  // The shared beat paints its own request/response cards (it used to be this
+  // console line only); the account step on the left fires the same call
+  // explicitly, in which case this short-circuits.
   if (effectiveCof() && !customers.getCustomerId()) {
     logEvent('POST /v1/customers', 'card on file needs a customer first', 'api');
-    try {
-      const { httpStatus, data } = await createCustomer({ ...customers.enrichedCustomerBody(), env: state.env, profile: state.profile });
-      const id = data?.data?.id;
-      if (httpStatus >= 400 || data?.error || !id) {
-        lastSession = { error: 'error', message: data?.message || data?.error || 'Customer creation failed' };
-        renderResponse();
-        setStatus('Error', 'error');
-        logEvent('POST /v1/customers', data?.message || 'failed', 'api', 'err');
-        renderError({ status: 'ERR', message: data?.message || 'Customer creation failed.' });
-        btn.disabled = false;
-        btn.textContent = mode === 'hosted' ? 'Create session →' : 'Render toolkit →';
-        return;
-      }
-      customers.setCustomerId(id);
-      logEvent('POST /v1/customers', `${id} · created (enriched)`, 'api', 'ok');
-    } catch (err) {
+    const ok = await fireCreateCustomer();
+    if (!ok) {
       setStatus('Error', 'error');
-      logEvent('POST /v1/customers', err.message, 'api', 'err');
-      renderError({ status: 'ERR', message: err.message });
+      logEvent('POST /v1/customers', 'failed', 'api', 'err');
+      renderError({ status: 'ERR', message: 'Customer creation failed — see the Response tab.' });
       btn.disabled = false;
       btn.textContent = mode === 'hosted' ? 'Create session →' : 'Render toolkit →';
       return;
     }
+    logEvent('POST /v1/customers', `${customers.getCustomerId()} · created (enriched)`, 'api', 'ok');
   }
 
   state.reference = `pb_${state.vertical}_tk_${Date.now()}`;

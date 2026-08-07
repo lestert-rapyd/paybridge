@@ -538,6 +538,48 @@ code { font-family: var(--font-mono); }
 .req-bodylabel { display: flex; align-items: baseline; gap: 8px; }
 .req-bodylabel .hint { font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--eng-faint); font-style: italic; }
 
+/* ── Stacked beat cards (Request + Response) ──────────────────
+   One <details> per API call in the sequence, so beat 1 (POST /v1/customers)
+   stays readable after beat 2 (the payment) has been drafted and sent — they
+   used to overwrite each other in the same panel. Open state is owned by
+   customer-beat.js: these panels are rebuilt on every keystroke, which would
+   otherwise reset a native `open`. */
+.beat-card {
+  border: 1px solid var(--eng-line); border-radius: var(--r-sm);
+  background: var(--eng-surface); margin-bottom: 12px; overflow: hidden;
+}
+.beat-head {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px;
+  padding: 11px 13px; flex-wrap: wrap;
+}
+.beat-head::-webkit-details-marker { display: none; }
+.beat-head:hover { background: var(--eng-surface-2); }
+.beat-chev { color: var(--eng-faint); font-size: 10px; transition: transform .15s ease; }
+details[open] > .beat-head > .beat-chev { transform: rotate(90deg); }
+.beat-n {
+  flex: none; width: 17px; height: 17px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  background: var(--eng-surface-2); color: var(--eng-muted);
+}
+.beat-head .req-path { font-size: 12.5px; }
+.beat-state {
+  margin-left: auto; font-family: var(--font-mono); font-size: 9.5px; font-weight: 700;
+  letter-spacing: .03em; padding: 2px 8px; border-radius: 999px;
+  background: var(--eng-surface-2); color: var(--eng-faint); white-space: nowrap;
+}
+.beat-state.ok   { background: rgba(18,183,106,.16); color: var(--eng-ok); }
+.beat-state.err  { background: rgba(239,68,68,.16);  color: var(--eng-err); }
+.beat-state.live { background: rgba(59,130,246,.16); color: var(--eng-info); }
+/* the body carries the panel's own padding, so headers/JSON sit as before */
+.beat-body { padding: 4px 13px 13px; }
+.beat-foot {
+  margin-top: 11px; font-size: 11px; line-height: 1.5; color: var(--eng-muted);
+  padding: 9px 11px; border-radius: var(--r-sm);
+  border: 1px dashed var(--eng-line); background: var(--eng-bg);
+}
+.beat-foot code { color: var(--syn-num); }
+
 /* ── JSON viewer (line-numbered) ─────────────────────────── */
 .tok-key  { color: var(--syn-key); }
 .tok-str  { color: var(--syn-str); }
@@ -762,6 +804,33 @@ code { font-family: var(--font-mono); }
 .wh-waiting { font-size: 12px; color: var(--eng-faint); padding: 18px 0; text-align: center; font-style: italic; }
 .wh-waiting code { color: var(--eng-muted); font-style: normal; }
 
+/* Beat sections — the customer's CUSTOMER_* events above the payment's, in the
+   order the calls happen. The number matches the request/response beat cards. */
+.wh-beat-label {
+  display: flex; align-items: center; gap: 8px; margin: 0 0 10px;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  letter-spacing: .13em; text-transform: uppercase; color: var(--eng-faint);
+}
+.wh-beat-label + .wh-beat-label, .wh-card + .wh-beat-label,
+.wh-note + .wh-beat-label, .wh-waiting + .wh-beat-label,
+.wh-expect-note + .wh-beat-label { margin-top: 22px; }
+.wh-beat-label code { letter-spacing: 0; text-transform: none; color: var(--eng-muted); }
+.wh-beat-n {
+  flex: none; width: 17px; height: 17px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; letter-spacing: 0;
+  background: var(--eng-surface-2); color: var(--eng-muted);
+}
+/* "these are the events this beat will fire" — greyed until they actually do */
+.wh-expect-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 9px; }
+.wh-expect {
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 700; letter-spacing: .03em;
+  padding: 4px 10px; border-radius: var(--r-xs);
+  border: 1px dashed var(--eng-line); background: transparent; color: var(--eng-faint);
+}
+.wh-expect-note { font-size: 11.5px; line-height: 1.55; color: var(--eng-faint); margin-bottom: 14px; }
+.wh-expect-note code { color: var(--eng-muted); }
+
 /* pill row — response + webhook parity */
 .eng-pillrow { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 .wh-pill { font-family: var(--font-mono); font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: var(--r-xs); letter-spacing: .03em; background: var(--eng-surface-2); color: var(--eng-muted); }
@@ -917,6 +986,31 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .id-select button:hover:not(:disabled):not(.active) { background: var(--c-soft-2); color: var(--c-ink-3); }
 .id-select button.active { background: color-mix(in srgb, var(--accent) 10%, #fff); color: var(--accent); }
 .id-caption { font-size: 11px; color: var(--c-ink-6); margin-top: 6px; }
+/* account step — same warm-card treatment as .co-order, so the beat reads as
+   part of the page rather than an SE panel bolted on */
+.acct-block {
+  margin: 18px 0 0; padding: 15px 17px;
+  background: var(--c-soft); border: 1px solid var(--c-line); border-radius: 14px;
+}
+.acct-title { font-size: 14px; color: var(--c-ink-2); }
+.acct-beat { font-size: 11px; color: var(--c-ink-7); }
+.acct-field > span { font-size: 12px; color: var(--c-ink-3); }
+.acct-field .co-input { height: 46px; background: #fff; }
+.acct-field input { font-family: inherit; font-size: 14px; color: var(--c-ink-2); }
+.acct-note, .acct-foot { font-size: 11.5px; color: var(--c-ink-6); }
+.acct-chip { background: #fff; border-color: var(--c-line-3); color: var(--c-ink-5); font-size: 10px; }
+.acct-kyc-label { color: var(--c-ink-7); }
+.acct-btn {
+  height: 44px; padding: 0 22px; border: 0; border-radius: 12px;
+  background: linear-gradient(100deg, var(--accent), var(--accent-2)); color: var(--on-accent);
+  font-family: inherit; font-size: 14px; font-weight: 700;
+  box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.acct-btn:hover:not(:disabled) { filter: none; transform: translateY(-1px); }
+.acct-block.created { padding: 13px 16px; }
+.acct-row-name { font-size: 14px; color: var(--c-ink-2); }
+.acct-row-mail { font-size: 12px; color: var(--c-ink-6); }
+.acct-row-id { font-size: 11.5px; color: var(--c-ink-6); }
 .co-order { gap: 14px; margin: 22px 0 0; padding: 14px 16px; background: var(--c-soft); border: 1px solid var(--c-line); border-radius: 14px; }
 .co-thumb { width: 48px; height: 48px; border-radius: var(--r-md); font-size: 22px; }
 .co-order-name { font-size: 15.5px; font-weight: 700; color: var(--c-ink-2); }
@@ -1179,6 +1273,17 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .bo-refund-currency { color: var(--c-ink-3); }
 .bo-refund-btn { border: 1.5px solid var(--c-line-3); background: #fff; color: var(--c-ink-4); border-radius: var(--r-md); }
 .bo-refund-btn.cancel:hover { background: var(--c-soft); }
+/* customer-on-file card + the customer view it opens */
+.bo-cof-card { border-color: var(--c-line); background: #fff; box-shadow: var(--shadow-tile); }
+.bo-cof-name { color: var(--c-ink); }
+.bo-cof-id, .bo-cof-empty { color: var(--c-ink-6); }
+.bo-cof-sync { border: 1.5px solid var(--c-line-3); background: #fff; color: var(--c-ink-4); border-radius: var(--r-sm); }
+.bo-cof-sync:hover:not(:disabled) { background: var(--c-soft); border-color: var(--c-line-4); }
+.bo-cof-cred { border-color: var(--c-line); background: var(--c-soft); }
+.bo-cust-kyc-label { color: var(--c-ink-7); }
+.bo-cust-actions .bo-cof-sync { font-family: var(--font-mono); font-size: 10.5px; }
+/* the customer view reuses the checkout's KYC chips */
+.backoffice .acct-chip { background: var(--c-soft); border-color: var(--c-line-3); color: var(--c-ink-5); }
 
 /* light-tuned status pills (engine-room .wh-pill is dark-themed) */
 .backoffice .wh-pill { background: var(--c-line); color: var(--c-ink-8); }

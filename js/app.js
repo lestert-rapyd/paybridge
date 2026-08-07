@@ -5,9 +5,10 @@
 import { VERTICALS, VERTICAL_ORDER, activeProduct, customerCharge, fxQuoteKey, chargeText, productCta, productSelectorHTML } from './verticals.js';
 import { PROFILES, PROFILE_ORDER } from './profiles.js';
 import { identityChooserHTML, identityMode, setIdentityMode } from './identity.js';
+import { accountPanelHTML, syncCustomerBeat, setPanelRepainter, setHighlightHook } from './customer-beat.js';
 import { state, setState, subscribe } from './state.js';
 import { setActiveTab, setStatus } from './ui.js';
-import { stopWebhookWatch } from './webhooks.js';
+import { clearPaymentWatch, repaintWebhooks } from './webhooks.js';
 import { formatAmount } from './sync.js';
 import { getFxRate } from './api.js';
 import * as ownFields from './flows/own-fields.js';
@@ -330,6 +331,7 @@ function renderCheckout() {
       <div class="co-tagline"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#a8a297" stroke-width="2.6"><rect x="4" y="10" width="16" height="11" rx="2.5"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>${v.headline.toUpperCase()}</div>
 
       ${identityChooserHTML()}
+      ${accountPanelHTML()}
 
       ${productSelectorHTML()}
 
@@ -369,6 +371,9 @@ function renderCheckout() {
   browser.classList.remove('wide-3ds');
 
   flow.mount();
+  // The webhook panel's customer section tracks the identity mode (guest has no
+  // beat) and the active MID — a mode switch re-renders through here.
+  syncCustomerBeat();
   // Resolve the customer charge now (fetches a quote if FX is already on from a
   // prior flow/session) so the freshly-rendered totals aren't left stale.
   syncFx();
@@ -616,15 +621,26 @@ function renderAll(_state, patch) {
     return;
   }
 
-  stopWebhookWatch();
+  clearPaymentWatch(); // the customer's webhook section survives; this payment's doesn't
   syncControlStates();
   setActiveTab('request');
   setStatus('Awaiting input', 'idle');
   renderBackend();
   renderCheckout();
+  // renderBackend() wipes #panel-webhooks back to its empty state, but the
+  // customer (and its beat) survives a flow reset — put its section back.
+  repaintWebhooks();
 }
 
 subscribe(renderAll);
+
+// The customer beat can be fired from the account step (outside any flow), and
+// it has to repaint whichever flow owns the right panel. This module is the
+// only one that knows the flow registry, so it supplies the repainter.
+setPanelRepainter(() => FLOWS[state.model].refreshRightPanel?.());
+// Same reasoning for the field↔JSON highlight: rebuilding the customer card
+// drops its .sync-hit classes, and only the flow knows what's focused.
+setHighlightHook(() => FLOWS[state.model].applyHighlight?.());
 
 document.documentElement.dataset.vertical = state.vertical;
 renderVerticalPills();

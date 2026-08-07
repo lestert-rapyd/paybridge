@@ -26,7 +26,7 @@
 
 import { state } from '../state.js';
 import { VERTICALS, activeProduct, customerCharge, chargeText, fxSnapshot, productCta } from '../verticals.js';
-import { createDirectPayment, createCustomer } from '../api.js';
+import { createDirectPayment } from '../api.js';
 import { profileEwallet, nridAvailable, activeProfile } from '../profiles.js';
 import { clientDetails } from '../client-details.js';
 import { renderJSONView, highlightPaths } from '../json-view.js';
@@ -42,6 +42,10 @@ import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
 import * as ledger from '../ledger.js';
 import * as customers from '../customers.js';
 import { identityMode, usesCustomer, reusableCreds, promoteToReturning, refreshIdentityChooser } from '../identity.js';
+import {
+  beatCardHTML, customerRequestCardHTML, customerResponseCardHTML,
+  fillCustomerSignature, fireCreateCustomer, refreshAccountPanel,
+} from '../customer-beat.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -458,60 +462,88 @@ function syncNameInheritance() {
   }
 }
 
-/* ── Request panel ───────────────────────────────────────── */
+/* ── Request panel ───────────────────────────────────────────
+   Two stacked beat cards: the customer create (owned by customer-beat.js,
+   absent for a guest) above this flow's payment. The customer card used to be
+   painted here and then destroyed by the payment one tick later — stacking
+   them keeps beat 1 inspectable for the whole session. */
 function renderRequest() {
   const el = $('#panel-request');
   if (!el) return;
   const st = newSaltTimestamp();
   const body = displayBody();
-  el.innerHTML = `
-    <div class="req-headline"><span class="method-pill post">POST</span><span class="req-path">/v1/payments</span></div>
-    ${headersHTML(st)}
-    <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${sent ? 'signed &amp; sent' : 'updates as you type'}</span></div>
-    <div id="req-json">${renderJSONView(body)}</div>`;
-  fillSignature(el, 'post', '/v1/payments', st, body); // live — recomputes with the body
+  const cusCard = customerRequestCardHTML();
+  el.innerHTML = cusCard + beatCardHTML({
+    id: 'beat-pay', n: cusCard ? 2 : null, method: 'POST', path: '/v1/payments',
+    badge: sent ? 'signed &amp; sent' : '', badgeKind: sent ? 'ok' : '',
+    inner: `
+      ${headersHTML(st)}
+      <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${sent ? 'signed &amp; sent' : 'updates as you type'}</span></div>
+      <div id="req-json">${renderJSONView(body)}</div>`,
+  });
+  fillCustomerSignature();
+  fillSignature($('#beat-pay'), 'post', '/v1/payments', st, body); // live — recomputes with the body
   applyHighlight();
 }
-function applyHighlight() {
-  highlightPaths($('#req-json'), focusedId ? (FIELD_MAP[focusedId] || []) : []);
+/* The account step's fields populate the CUSTOMER body, so they highlight in
+   that card's JSON; everything else is the payment body. */
+export function applyHighlight() {
+  const paths = focusedId ? (FIELD_MAP[focusedId] || []) : [];
+  const onCustomer = !!focusedId?.startsWith('f-cus-');
+  // Both roots every time: highlightPaths only clears inside the container it's
+  // given, so passing [] to the other one is what un-highlights it.
+  highlightPaths($('#req-json'), onCustomer ? [] : paths);
+  highlightPaths($('#req-json-cus'), onCustomer ? paths : []);
 }
 
-/* Step 1 of a two-beat token save: the enriched customer create. */
-function paintCustomerRequest(body) {
-  const el = $('#panel-request');
-  if (!el) return;
-  const st = newSaltTimestamp();
-  el.innerHTML = `
-    <div class="req-headline"><span class="method-pill post">POST</span><span class="req-path">/v1/customers</span></div>
-    ${headersHTML(st)}
-    <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">step 1 of 2 — create the customer (enriched · AFT-ready)</span></div>
-    <div id="req-json">${renderJSONView(body)}</div>`;
-  fillSignature(el, 'post', '/v1/customers', st, body);
-}
-
-/* ── Response panel ──────────────────────────────────────── */
+/* ── Response panel ──────────────────────────────────────────
+   Same two-card stack as the request: the customer create's response (owned by
+   customer-beat.js) above this flow's payment response. */
 function respBadge(httpStatus, data) {
   const d = data?.data;
   if (d?.status === 'CLO' && d?.paid) return ['PAID · CLO', 'success'];
   if (d?.status === 'ACT')           return ['ACTION · ACT', 'pending'];
   if (data?.error)                   return [String(data.error), 'failure'];
-  if (typeof d?.id === 'string' && d.id.startsWith('cus_')) return ['CUSTOMER CREATED', 'success'];
   if (d?.status)                     return [d.status, 'pending'];
   return [`HTTP ${httpStatus}`, httpStatus < 400 ? 'success' : 'failure'];
 }
-function renderResponseSending() {
-  $('#panel-response').innerHTML = `<div class="eng-sending"><span class="spin"></span>Awaiting Rapyd response…</div>`;
+const BADGE_KIND = { success: 'ok', failure: 'err', pending: 'live' };
+let lastResponse = null;      // persisted so switching back from back office can repaint without resetting anything
+let responseSending = false;
+
+function paintResponsePanel() {
+  const el = $('#panel-response');
+  if (!el) return;
+  const cusCard = customerResponseCardHTML();
+  let payCard = '';
+  if (responseSending) {
+    payCard = beatCardHTML({
+      id: 'beat-pay-res', n: cusCard ? 2 : null, method: 'POST', path: '/v1/payments',
+      badge: 'sending…', badgeKind: 'live',
+      inner: `<div class="eng-sending"><span class="spin"></span>Awaiting Rapyd response…</div>`,
+    });
+  } else if (lastResponse) {
+    const { httpStatus, data } = lastResponse;
+    const [badge, kind] = respBadge(httpStatus, data);
+    payCard = beatCardHTML({
+      id: 'beat-pay-res', n: cusCard ? 2 : null, method: 'POST', path: '/v1/payments',
+      badge, badgeKind: BADGE_KIND[kind] || '',
+      inner: `
+        <div class="eng-pillrow">
+          <span class="wh-pill ${httpStatus < 400 ? 'success' : 'failure'}">HTTP ${httpStatus}</span>
+          <span class="wh-pill ${kind}">${badge}</span>
+        </div>
+        ${renderJSONView(data ?? { error: 'no response body' })}`,
+    });
+  }
+  if (!cusCard && !payCard) return; // nothing sent yet — leave app.js's empty state
+  el.innerHTML = cusCard + payCard;
 }
-let lastResponse = null; // persisted so switching back from back office can repaint without resetting anything
+function renderResponseSending() { responseSending = true; paintResponsePanel(); }
 function renderResponse(httpStatus, data) {
+  responseSending = false;
   lastResponse = { httpStatus, data };
-  const [badge, kind] = respBadge(httpStatus, data);
-  $('#panel-response').innerHTML = `
-    <div class="eng-pillrow">
-      <span class="wh-pill ${httpStatus < 400 ? 'success' : 'failure'}">HTTP ${httpStatus}</span>
-      <span class="wh-pill ${kind}">${badge}</span>
-    </div>
-    ${renderJSONView(data ?? { error: 'no response body' })}`;
+  paintResponsePanel();
 }
 
 /** Back office may have repainted #panel-request/#panel-response while this
@@ -521,7 +553,7 @@ function renderResponse(httpStatus, data) {
     need to be explicitly restored when the SE switches back to Client Site). */
 export function refreshRightPanel() {
   renderRequest();
-  if (lastResponse) renderResponse(lastResponse.httpStatus, lastResponse.data);
+  paintResponsePanel();
 }
 
 /** Profile switch (SC1/SC2/SC3): credentials re-key per MID, NRID gating and
@@ -531,8 +563,10 @@ export function refreshProfile() {
   // reuse — never leave the strategy sitting on a withdrawn route.
   ensureStorageValid();
   // The new bucket may hold no cards (withdrawing "Returning") and its NRID
-  // support changes which storage routes exist.
+  // support changes which storage routes exist. The customer re-keys too, so
+  // the account step can flip back to its create form.
   refreshIdentityChooser();
+  refreshAccountPanel();
   const region = $('#pay-region');
   if (region && state.model === 'own-fields') rerenderPayRegion();
   else renderRequest();
@@ -596,33 +630,6 @@ function harvestCredentials(ev) {
 }
 
 /* ── Submit ──────────────────────────────────────────────── */
-async function createSessionCustomer() {
-  // Two-beat choreography: the customer must exist before the payment body
-  // can reference it. If this beat fails we STOP — no payment, no ledger entry.
-  setStatus('Creating customer…', 'processing');
-  const body = customers.enrichedCustomerBody();
-  paintCustomerRequest(body);
-  setActiveTab('request');
-  try {
-    const { httpStatus, data } = await createCustomer({ ...body, env: state.env, profile: state.profile });
-    renderResponse(httpStatus, data);
-    setActiveTab('response');
-    const id = data?.data?.id;
-    if (httpStatus >= 400 || data?.error || !id) {
-      setStatus('Error', 'error');
-      toast(`❌ ${data?.message || data?.error || 'Customer creation failed'}`, 'err');
-      return false;
-    }
-    customers.setCustomerId(id);
-    return true;
-  } catch (err) {
-    renderResponse(0, { error: 'network_error', message: err.message });
-    setStatus('Error', 'error');
-    toast(`❌ ${err.message}`, 'err');
-    return false;
-  }
-}
-
 async function pay() {
   const btn = $('#pay-btn');
   const v = VERTICALS[state.vertical];
@@ -655,11 +662,13 @@ async function pay() {
   // Beat 1 — create the cus_*** when it doesn't exist yet and this payment
   // needs one: either the token route requires it, or the SE chose "Create an
   // account" (which promises an account even for a vault-only or save-less
-  // run). A guest never creates one.
+  // run). A guest never creates one. This is the LAZY fallback — the account
+  // step on the page fires the same beat explicitly, and having already run it
+  // simply short-circuits this. Failure STOPS: no payment, no ledger entry.
   const needsCustomer = !customers.getCustomerId() && !returning && usesCustomer()
     && (identityMode() === 'account' || (effectiveSave() && storage !== 'vault'));
   if (needsCustomer) {
-    const ok = await createSessionCustomer();
+    const ok = await fireCreateCustomer();
     if (!ok) { btn.disabled = false; btn.textContent = btnLabel; return; }
   }
 

@@ -15,6 +15,8 @@
      · click a tile   → fires it, shows the payment object  (Response)
      · open/edit form → prepared  POST /v1/refunds, live    (Request)
      · fire refund    → response + REFUND_COMPLETED card     (Response, Webhooks)
+     · customer view  → GET /v1/customers/{id}, the saved-cards list, and the
+                        original POST /v1/customers beat (customer-beat.js)
 
    Amounts follow the product-wide convention: 3-letter ISO code, no
    currency symbol (matches the API and the checkout tile).
@@ -22,7 +24,7 @@
 
 import { state } from '../state.js';
 import { VERTICALS } from '../verticals.js';
-import { createRefund, createDirectPayment, retrievePayment, fetchWebhooksBatch } from '../api.js';
+import { createRefund, createDirectPayment, retrievePayment, retrieveCustomer, fetchWebhooksBatch } from '../api.js';
 import { profileEwallet } from '../profiles.js';
 import { renderJSONView } from '../json-view.js';
 import { setActiveTab } from '../ui.js';
@@ -33,11 +35,15 @@ import {
   setPaymentId, updateStatus, applyPaymentObject, walletBalances, refundedTotals,
 } from '../ledger.js';
 import * as customers from '../customers.js';
+import {
+  beatRecord, beatCreatedAt, customerRequestCardHTML, customerResponseCardHTML,
+  fillCustomerSignature,
+} from '../customer-beat.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
 /* ── module-local navigation + form state ─────────────────── */
-let view = 'list';        // 'list' | 'detail'
+let view = 'list';        // 'list' | 'detail' | 'customer'
 let detailRef = null;     // reference of the payment open in detail
 let refundOpen = false;   // is the refund form expanded
 let firing = false;       // a refund POST is in flight
@@ -355,12 +361,24 @@ function detailHTML(entry) {
 function renderBody() {
   const el = $('#bo-body');
   if (!el) return;
+  if (view === 'customer') {
+    // A guest session (or a forgotten profile) has nothing to show here.
+    if (customers.getCustomerId() || customers.hasCredentials()) { el.innerHTML = customerViewHTML(); return; }
+    view = 'list';
+  }
   if (view === 'detail' && detailRef) {
     const entry = getEntry(detailRef);
     if (entry) { el.innerHTML = detailHTML(entry); return; }
     view = 'list'; // entry vanished — fall back
   }
   el.innerHTML = listHTML();
+}
+
+/** The credential rows live in #bo-cof on the list view and inside #bo-body on
+    the customer view — repaint whichever is on screen. */
+function renderCredSurfaces() {
+  if (view === 'customer') renderBody();
+  else renderCof();
 }
 
 export function render() {
@@ -402,11 +420,66 @@ function renderCof() {
           <div class="bo-cof-name">${customers.getIdentity().name}</div>
           <div class="bo-cof-id">${cus ? `<code>${cus}</code>` : 'merchant vault only — no Rapyd customer object'}</div>
         </div>
-        ${cus ? `<button class="bo-cof-sync" id="bo-cof-sync" ${chargeFiring ? 'disabled' : ''}>↻ Sync from Rapyd</button>` : ''}
+        <div class="bo-cof-headbtns">
+          ${cus ? `<button class="bo-cof-sync" id="bo-cof-sync" ${chargeFiring ? 'disabled' : ''}>↻ Sync from Rapyd</button>` : ''}
+          <button class="bo-cof-sync" id="bo-cof-open">Customer view ›</button>
+        </div>
       </div>
       <div class="bo-cof-creds">${creds.length
         ? creds.map(credRowHTML).join('')
         : `<div class="bo-cof-empty">No cards saved yet — the account is created; a card lands here the first time one is stored.</div>`}</div>
+    </div>`;
+}
+
+/* ── Customer view ────────────────────────────────────────────
+   The cus_*** as an object rather than a line on a card: what was sent to
+   create it, what Rapyd holds now, and every card stored under it. Mirrors
+   detailHTML()'s shape so the two drill-downs feel like one pattern. */
+function customerViewHTML() {
+  const cus = customers.getCustomerId();
+  const id = customers.getIdentity();
+  const creds = customers.credentials();
+  const rec = beatRecord();
+  const at = beatCreatedAt();
+  const when = at ? new Date(at).toLocaleTimeString('en-GB', { hour12: false }) : null;
+  return `
+    <button class="bo-back" id="bo-back">‹ All payments</button>
+    <div class="bo-detail-card">
+      <div class="bo-detail-head">
+        <div>
+          <span class="bo-model-tag">Customer</span>
+          <span class="bo-detail-vertical">${esc(id.name)}</span>
+        </div>
+        ${cus ? pill('cus_ OBJECT', 'success') : pill('VAULT ONLY', 'field')}
+      </div>
+      <div class="bo-detail-ref">${cus ? esc(cus) : 'no Rapyd customer object — the merchant vaulted the PAN itself'}</div>
+
+      <div class="bo-detail-rows">
+        <div class="bo-detail-row"><span>Email</span><b>${esc(id.email)}</b></div>
+        ${when ? `<div class="bo-detail-row"><span>Created</span><b>${when} · this session</b></div>` : ''}
+        <div class="bo-detail-row"><span>Cards on file</span><b>${creds.length}</b></div>
+      </div>
+
+      ${cus ? `
+      <div class="bo-cust-kyc">
+        <span class="bo-cust-kyc-label">Enriched · AFT-ready</span>
+        <span class="acct-chip">${esc(id.date_of_birth)}</span>
+        <span class="acct-chip">${esc(id.birth_country)}</span>
+        <span class="acct-chip">${esc(id.nationality)}</span>
+        <span class="acct-chip">${esc(id.occupation)}</span>
+        <span class="acct-chip">${esc(id.address.city)}, ${esc(id.address.country)}</span>
+      </div>` : ''}
+
+      <div class="bo-cust-actions">
+        ${cus ? `<button class="bo-cof-sync" id="bo-cus-retrieve">GET /v1/customers/{id}</button>` : ''}
+        ${cus ? `<button class="bo-cof-sync" id="bo-cof-sync" ${chargeFiring ? 'disabled' : ''}>↻ Sync saved cards</button>` : ''}
+        ${rec.body ? `<button class="bo-cof-sync" id="bo-cus-create">View create call</button>` : ''}
+      </div>
+
+      <div class="bo-section-label">Cards on file</div>
+      <div class="bo-cof-creds">${creds.length
+        ? creds.map(credRowHTML).join('')
+        : `<div class="bo-cof-empty">No cards saved yet — the account exists; a card lands here the first time one is stored.</div>`}</div>
     </div>`;
 }
 
@@ -569,6 +642,53 @@ function paintListRequest(prepared) {
     <div class="jsonv"><div class="jsonv-body"><span class="jv-empty">— GET has no request body —</span></div></div>`;
   fillSignature(el, 'get', path, st, null);
 }
+/* GET /v1/customers/{id} — prepared on hover, fired from the customer view. */
+function paintCustomerGetRequest(prepared) {
+  const el = $('#panel-request');
+  const cus = customers.getCustomerId();
+  if (!el || !cus || state.leftView !== 'backoffice') return;
+  const path = `/v1/customers/${cus}`;
+  const st = newSaltTimestamp();
+  el.innerHTML = `
+    <div class="req-headline"><span class="method-pill get">GET</span><span class="req-path">${path}</span></div>
+    ${headersHTML(st)}
+    <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${prepared ? 'back office · retrieve customer (prepared)' : 'back office · retrieve customer'}</span></div>
+    <div class="jsonv"><div class="jsonv-body"><span class="jv-empty">— GET has no request body —</span></div></div>`;
+  fillSignature(el, 'get', path, st, null);
+}
+
+/* Re-open the original POST /v1/customers beat — the whole point of giving it
+   its own card is that it stays readable long after the payment moved on. */
+function paintCreateBeat() {
+  if (state.leftView !== 'backoffice') return;
+  const req = $('#panel-request');
+  const res = $('#panel-response');
+  if (req) { req.innerHTML = customerRequestCardHTML(); fillCustomerSignature(); }
+  const card = customerResponseCardHTML();
+  if (res && card) res.innerHTML = card;
+  setActiveTab('request');
+}
+
+async function fireRetrieveCustomer() {
+  const cus = customers.getCustomerId();
+  if (!cus) return;
+  const mySeq = ++actionSeq;
+  paintCustomerGetRequest(false);
+  setActiveTab('response');
+  paintResponse(null, true, 'RETRIEVING…');
+  try {
+    const { httpStatus, data } = await retrieveCustomer(cus, state.env, state.profile);
+    if (mySeq !== actionSeq) return; // superseded — leave the panel alone
+    const ok = httpStatus < 400 && !data?.error;
+    paintResponse(data, ok, ok ? 'CUSTOMER RETRIEVED' : 'ERROR');
+  } catch (err) {
+    // A route that isn't deployed yet answers with Vercel's CORS-less 404, which
+    // surfaces as "Failed to fetch" — say so instead of spinning forever.
+    if (mySeq !== actionSeq) return;
+    paintResponse({ error: 'network_error', message: err.message }, false, 'NETWORK ERROR');
+  }
+}
+
 function paintWebhookCard(events, label = 'back office · refund') {
   const el = $('#panel-webhooks');
   if (!el || state.leftView !== 'backoffice') return;
@@ -835,13 +955,13 @@ function openChargeForm(credRef) {
   ++actionSeq; // supersede any in-flight GET
   cofChargeRef = credRef;
   chargeForm = { amount: chargeDefaultAmount(cred) };
-  renderCof();
+  renderCredSurfaces();
   paintChargeRequest(mitBody(cred, chargeForm.amount, '(assigned on fire)'), false);
   setActiveTab('request');
 }
 function closeChargeForm() {
   cofChargeRef = null;
-  renderCof();
+  renderCredSurfaces();
 }
 function onChargeAmountInput(raw) {
   // digits + single decimal point (mirrors the refund form's filter)
@@ -873,7 +993,7 @@ async function fireCharge() {
     credential: { kind: cred.kind, label: `${cred.brand || 'Card'} ···${cred.last4 || ''}` },
     aft: cred.aft,
   });
-  renderCof(); // reflect "Processing…" on the button
+  renderCredSurfaces(); // reflect "Processing…" on the button
   paintChargeRequest(body, true); // freeze the signed body view (env/profile are transport-only)
   setActiveTab('request');
 
@@ -899,7 +1019,7 @@ async function fireCharge() {
     updateStatus(ref, { status: 'failed', phase: 'error' });
   } finally {
     chargeFiring = false;
-    renderCof();
+    renderCredSurfaces();
   }
 }
 
@@ -959,13 +1079,14 @@ export function mount() {
     maybeFinalizeCharge();
     if (!refundOpen) renderBody(); // never clobber a form the SE is mid-edit on
     if (!cofChargeRef) renderCof(); // same rule for the charge form (fireCharge repaints itself)
+    // renderBody() above already repainted the customer view's own rows.
   });
 
   // Credentials changing (webhook harvest, sync backfill, profile re-key)
   // repaint the customer-on-file card — but never over an open charge form.
   customers.subscribeCustomers(() => {
     if (state.leftView !== 'backoffice') return;
-    if (!cofChargeRef) renderCof();
+    if (!cofChargeRef) renderCredSurfaces();
   });
 
   const root = $('#backoffice');
@@ -973,7 +1094,17 @@ export function mount() {
   // hover a completed tile → prepared GET preview on the right;
   // hover the customer card → prepared saved-cards GET
   root.addEventListener('mouseover', (e) => {
-    if (view !== 'list' || firing || chargeFiring) return;
+    if (firing || chargeFiring) return;
+    // Customer view: hovering the card previews the retrieve rather than the
+    // saved-cards list — that view's headline action is the customer object.
+    if (view === 'customer') {
+      if (!e.target.closest('.bo-detail-card') || cofChargeRef || lastHoverRef === 'cus') return;
+      lastHoverRef = 'cus';
+      paintCustomerGetRequest(true);
+      setActiveTab('request');
+      return;
+    }
+    if (view !== 'list') return;
     const cof = e.target.closest('.bo-cof-card');
     if (cof && !cofChargeRef && customers.getCustomerId()) {
       if (lastHoverRef === 'cof') return;
@@ -999,6 +1130,13 @@ export function mount() {
     if (tile && view === 'list') { retrieveAndOpen(tile.dataset.ref); renderCof(); return; }
 
     // customer on file
+    if (e.target.closest('#bo-cof-open')) {
+      view = 'customer'; detailRef = null; refundOpen = false; lastHoverRef = null;
+      renderBody(); renderCof(); // renderCof empties itself outside the list view
+      return;
+    }
+    if (e.target.closest('#bo-cus-retrieve')) { fireRetrieveCustomer(); return; }
+    if (e.target.closest('#bo-cus-create')) { paintCreateBeat(); return; }
     if (e.target.closest('#bo-cof-sync')) { fireSync(); return; }
     const chargeBtn = e.target.closest('.bo-cof-charge[data-charge]');
     if (chargeBtn && !chargeBtn.disabled) { openChargeForm(chargeBtn.dataset.charge); return; }

@@ -23,8 +23,10 @@ const buckets = new Map(); // `${env}:${profile}` -> { customer_id, credentials 
 const listeners = new Set();
 let credSeq = 0;
 
-/* One fixed demo identity, ALWAYS enriched (KYC-grade) so the same cus_*** is
-   AFT-ready without a second customer — see PLAN §1.5. Dummy values. */
+/* One demo identity, ALWAYS enriched (KYC-grade) so the same cus_*** is
+   AFT-ready without a second customer — see PLAN §1.5. Dummy values; name and
+   email are editable from the account step until the cus_*** exists (there is
+   no update-customer call, so after that they're frozen). */
 const IDENTITY = {
   name: 'Jordan Taylor',
   email: 'jordan.taylor@example.com',
@@ -49,6 +51,19 @@ export function subscribeCustomers(fn) {
 
 /* ── identity / customer object ──────────────────────────── */
 export function getIdentity() { return IDENTITY; }
+
+/** Edit the demo identity from the account step. Only the two fields the SE
+    actually types are writable; the KYC block stays fixed (it exists to make
+    the customer AFT-ready, not to be demoed as a form). Notifies so the
+    card-name inheritance and the back office follow. */
+export function setIdentity({ name, email }) {
+  if (typeof name === 'string') {
+    IDENTITY.name = name;
+    IDENTITY.address.name = twoWordName(name); // the address name must not drift
+  }
+  if (typeof email === 'string') IDENTITY.email = email;
+  notify();
+}
 
 /** AFT rule: the customer name must be at least two words — a single-word
     name is repeated ("Cher" → "Cher Cher"). */

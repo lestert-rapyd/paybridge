@@ -71,13 +71,23 @@ export function headersHTML(st) {
 }
 
 /** Compute + patch the signature into the freshly rendered panel.
-    Sequenced so rapid re-renders can't write a stale signature. */
-let seq = 0;
-export function fillSignature(panel, method, path, st, body) {
-  const mySeq = ++seq;
+    Sequenced so rapid re-renders can't write a stale signature.
+
+    `root` is scoped, not necessarily the whole panel: one panel can hold
+    several stacked beat cards (POST /v1/customers above POST /v1/payments),
+    each with its own .hv-sig — so pass the CARD element, not the panel, or
+    both fills fight over the first match.
+
+    `key` scopes the staleness counter the same way. A single global counter
+    made beat 2's fill cancel beat 1's, leaving one card stuck on
+    "calculating…"; each key (the path, by default) sequences independently. */
+const seq = new Map();
+export function fillSignature(root, method, path, st, body, key = path) {
+  const mySeq = (seq.get(key) || 0) + 1;
+  seq.set(key, mySeq);
   signDemo(method, path, st.salt, st.timestamp, body).then(sig => {
-    if (mySeq !== seq) return;
-    const el = panel.querySelector('.hv-sig');
+    if (seq.get(key) !== mySeq) return;
+    const el = root.querySelector('.hv-sig');
     if (el) el.textContent = sig; // btoa keeps its own base64 padding
   });
 }

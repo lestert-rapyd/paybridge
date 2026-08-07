@@ -11,6 +11,11 @@ export const FIELD_MAP = {
   'f-name':   ['payment_method.fields.name'],
   // "save my card" adds the whole stored-credential block
   'f-save':   ['save_payment_method', 'customer', 'payment_method.fields.recurrence_type'],
+  // Account step (preceding the cart) — these paths live in the POST
+  // /v1/customers body, so the highlight targets the customer beat card's
+  // JSON (#req-json-cus) rather than the payment body's (#req-json).
+  'f-cus-name':  ['name'],
+  'f-cus-email': ['email'],
   'tile-amount':   ['amount'],
   'tile-currency': ['currency'],
   'fx-currency':   ['requested_currency'],

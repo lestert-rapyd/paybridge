@@ -234,6 +234,87 @@
 .tk-summary .id-block { margin: 2px 0 12px; }
 .tk-summary .id-select button { font-size: 10.5px; padding: 7px 5px; }
 
+/* ── Account step (the customer beat, preceding the cart) ──────
+   Sits directly under the identity chooser: the create form while there's no
+   cus_***, then a single created row (an account that's already been minted
+   shouldn't keep taking the cart's space). */
+.acct-block {
+  margin: 10px 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.acct-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.acct-title { font-size: 12.5px; font-weight: 700; color: var(--ink); }
+.acct-beat { font-size: 10px; color: var(--ink-4); }
+.acct-fields { display: flex; gap: 10px; flex-wrap: wrap; }
+.acct-field { flex: 1 1 140px; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.acct-field > span { font-size: 11px; font-weight: 600; color: var(--ink-3); }
+.acct-field .co-input { height: 40px; }
+.acct-field input { font-size: 13px; }
+.acct-note { font-size: 10.5px; line-height: 1.5; color: var(--ink-3); }
+.acct-note:empty { display: none; }
+.acct-note code, .acct-foot code { font-family: var(--font-mono); font-size: 9.5px; color: var(--accent); }
+.acct-kyc { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.acct-kyc-label { font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-4); margin-right: 2px; }
+.acct-chip {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.acct-btn {
+  align-self: flex-start;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: filter .12s ease;
+}
+.acct-btn:hover:not(:disabled) { filter: brightness(.97); }
+.acct-btn:disabled { opacity: .55; cursor: not-allowed; }
+.acct-foot { font-size: 10.5px; line-height: 1.5; color: var(--ink-4); }
+.acct-err {
+  font-size: 11px; line-height: 1.5; color: var(--err-deep);
+  border: 1px dashed color-mix(in srgb, var(--err) 40%, transparent);
+  border-radius: var(--r-sm);
+  padding: 7px 10px;
+}
+/* created: one row, no form */
+.acct-block.created { flex-direction: row; align-items: center; padding: 10px 14px; }
+.acct-row { display: flex; align-items: center; gap: 10px; width: 100%; }
+.acct-tick {
+  flex: none; width: 20px; height: 20px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700;
+  background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok-deep);
+}
+.acct-row-main { flex: 1 1 auto; min-width: 0; }
+/* the cus_*** and a typed name are both unbroken tokens — let them wrap rather
+   than push the "view in back office" link out of the row */
+.acct-row-name, .acct-row-id { overflow-wrap: anywhere; }
+.acct-row-name { font-size: 12.5px; font-weight: 700; color: var(--ink); }
+.acct-row-mail { font-weight: 500; font-size: 11px; color: var(--ink-3); margin-left: 7px; }
+.acct-row-id { font-size: 10.5px; color: var(--ink-3); margin-top: 1px; }
+.acct-row .cof-link { flex: none; align-self: flex-start; }
+.acct-row-id code { font-family: var(--font-mono); font-size: 10px; color: var(--accent); }
+/* the toolkit hosts the step in its narrower summary column */
+.tk-summary .acct-block { margin: 0 0 12px; padding: 11px 12px; }
+.tk-summary .acct-fields { flex-direction: column; gap: 8px; }
+
 /* ── SE strategy deck (#demo-controls) ───────────────────── */
 .se-deck {
   border: 1px dashed var(--line-2);
@@ -353,6 +434,14 @@
   gap: 10px;
 }
 .bo-cof-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.bo-cof-headbtns { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+/* customer view (view === 'customer'): the cus_*** as an object */
+.bo-cust-kyc { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin: 14px 0 0; }
+.bo-cust-kyc-label {
+  font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--ink-4); margin-right: 2px;
+}
+.bo-cust-actions { display: flex; gap: 7px; flex-wrap: wrap; margin: 16px 0 4px; }
 .bo-cof-name { font-weight: 700; font-size: 13.5px; color: var(--ink); }
 .bo-cof-id { font-size: 11px; color: var(--ink-3); margin-top: 1px; }
 .bo-cof-id code { font-family: var(--font-mono); font-size: 10.5px; }
