@@ -30,7 +30,8 @@ import * as customers from './customers.js';
 import { identityMode, usesCustomer } from './identity.js';
 import { activeProduct } from './verticals.js';
 import { createCustomer } from './api.js';
-import { renderJSONView } from './json-view.js';
+import { renderJSONView, highlightPaths } from './json-view.js';
+import { FIELD_MAP } from './sync.js';
 import { headersHTML, fillSignature, newSaltTimestamp } from './signing.js';
 import { setActiveTab, setStatus } from './ui.js';
 import { setCustomerBeat } from './webhooks.js';
@@ -44,6 +45,11 @@ const key = () => `${state.env}:${state.profile}`;
 function record() {
   if (!records.has(key())) {
     records.set(key(), { state: 'draft', body: null, httpStatus: null, data: null, at: null });
+    // A fired beat folds its card away (its job is done). The fold is per CARD
+    // but the record is per env:profile, so a switch to a MID that has no
+    // customer yet would inherit the fold and hide the draft the SE is about to
+    // author. Anything back at 'draft' gets its card back open.
+    openState.set('beat-cus', true);
   }
   const r = records.get(key());
   // Keep the record and the store in agreement in BOTH directions, so the card
@@ -54,6 +60,7 @@ function record() {
   //   session restored some other way) still has to read as created.
   if (r.state === 'created' && !customers.getCustomerId()) {
     Object.assign(r, { state: 'draft', body: null, httpStatus: null, data: null, at: null });
+    openState.set('beat-cus', true); // back to a draft — same reasoning as above
   } else if (r.state === 'draft' && customers.getCustomerId()) {
     r.state = 'created';
   }
@@ -168,7 +175,8 @@ export function refreshCustomerBeatCard() {
   if (!card) return;
   card.outerHTML = customerRequestCardHTML();
   fillCustomerSignature();
-  reapplyHighlight();
+  applyCustomerHighlight(); // this card's own highlight — rebuilt with the card
+  reapplyHighlight();       // and the flow's, for the payment card beside it
 }
 
 /* ── Response card ───────────────────────────────────────── */
@@ -254,47 +262,50 @@ export async function fireCreateCustomer() {
 /* ── Left panel: the account step ────────────────────────── */
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 
-function twoWordNoteHTML() {
-  const id = customers.getIdentity();
-  const parts = String(id.name || '').trim().split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) return '';
-  if (!parts.length) return `A name is required — the demo identity is used if you leave it blank.`;
-  return `AFT needs at least two words, so this is sent as <code>${esc(customers.twoWordName(id.name))}</code>.`;
-}
+/* The form IS the request body, in the body's own order — one field per row, so
+   the SE can read straight across from a field to the line it writes. Every one
+   is registered in sync.js FIELD_MAP, so focusing it lights that line up.
+   `addresses[0].name` isn't listed: it tracks `name` rather than being typed. */
+const ACCOUNT_FIELDS = [
+  { id: 'f-cus-name',    path: 'name',            label: 'Full name',        autocomplete: 'name' },
+  { id: 'f-cus-email',   path: 'email',           label: 'Email',            autocomplete: 'email', type: 'email' },
+  { id: 'f-cus-dob',     path: 'date_of_birth',   label: 'Date of birth',    autocomplete: 'bday' },
+  { id: 'f-cus-birth',   path: 'birth_country',   label: 'Country of birth', autocomplete: 'off' },
+  { id: 'f-cus-nat',     path: 'nationality',     label: 'Nationality',      autocomplete: 'off' },
+  { id: 'f-cus-occ',     path: 'occupation',      label: 'Occupation',       autocomplete: 'organization-title' },
+  { id: 'f-cus-line1',   path: 'address.line_1',  label: 'Address',          autocomplete: 'address-line1' },
+  { id: 'f-cus-city',    path: 'address.city',    label: 'City',             autocomplete: 'address-level2' },
+  { id: 'f-cus-country', path: 'address.country', label: 'Country',          autocomplete: 'country-name' },
+  { id: 'f-cus-zip',     path: 'address.zip',     label: 'Postcode',         autocomplete: 'postal-code' },
+];
+/** The field a given id writes — used by the input handler. */
+export const accountFieldPath = (id) => ACCOUNT_FIELDS.find((f) => f.id === id)?.path || null;
 
 function accountFormHTML() {
-  const id = customers.getIdentity();
   const st = beatState();
   const sending = st === 'sending';
   const r = record();
+  const field = (f) => `
+    <label class="acct-field">
+      <span>${f.label}</span>
+      <div class="co-input"><input id="${f.id}" ${f.type ? `type="${f.type}"` : ''} autocomplete="${f.autocomplete}" value="${esc(customers.getIdentityField(f.path))}" ${sending ? 'disabled' : ''} /></div>
+    </label>`;
   return `
     <div class="acct-block" id="acct-block">
-      <div class="acct-head">
-        <span class="acct-title">Create your account</span>
-        <span class="acct-beat">runs before the order</span>
-      </div>
-      <div class="acct-fields">
-        <label class="acct-field">
-          <span>Full name</span>
-          <div class="co-input"><input id="f-cus-name" autocomplete="name" value="${esc(id.name)}" ${sending ? 'disabled' : ''} /></div>
-        </label>
-        <label class="acct-field">
-          <span>Email</span>
-          <div class="co-input"><input id="f-cus-email" type="email" autocomplete="email" value="${esc(id.email)}" ${sending ? 'disabled' : ''} /></div>
-        </label>
-      </div>
-      <div class="acct-note" id="acct-twoword">${twoWordNoteHTML()}</div>
-      <div class="acct-kyc">
-        <span class="acct-kyc-label">Also sent</span>
-        <span class="acct-chip">${esc(id.date_of_birth)}</span>
-        <span class="acct-chip">${esc(id.nationality)}</span>
-        <span class="acct-chip">${esc(id.occupation)}</span>
-        <span class="acct-chip">${esc(id.address.city)}, ${esc(id.address.country)}</span>
-      </div>
-      ${st === 'error' ? `<div class="acct-err">${esc(r.data?.message || r.data?.error || 'Customer creation failed')} — see the Response tab.</div>` : ''}
-      <button type="button" class="acct-btn" id="acct-create" ${sending ? 'disabled' : ''}>${sending ? 'Creating…' : st === 'error' ? 'Try again' : 'Create account'}</button>
-      <div class="acct-foot">Fires <code>POST /v1/customers</code> now, on its own — the order below then references the <code>cus_***</code>. Skip it and it runs as beat 1 of the payment instead.</div>
+      <div class="acct-fields">${ACCOUNT_FIELDS.map(field).join('')}</div>
+      ${st === 'error' ? `<div class="acct-err">We couldn't save your details. Please try again.</div>` : ''}
     </div>`;
+}
+
+/** The primary action's label/state. steps.js renders the button — it owns the
+    frame's layout, and this owns the beat — so the two choices can sit on one
+    plane. The real reason for a failure is in the Response tab, not here. */
+export function accountCtaState() {
+  const st = beatState();
+  return {
+    sending: st === 'sending',
+    label: st === 'sending' ? 'Creating…' : st === 'error' ? 'Try again' : 'Create account',
+  };
 }
 
 /** The created account, as a row. Three homes, one template: the account
@@ -330,7 +341,7 @@ function stripHTML() {
           <span class="acct-tick guest">–</span>
           <div class="acct-row-main">
             <div class="acct-row-name">Guest checkout</div>
-            <div class="acct-row-id">No <code>cus_***</code> on this payment.</div>
+            <div class="acct-row-id">Nothing will be saved for next time.</div>
           </div>
         </div>
       </div>`;
@@ -338,10 +349,10 @@ function stripHTML() {
   return `
     <div class="acct-block strip" id="acct-block">
       <div class="acct-row">
-        <span class="acct-tick pending">1</span>
+        <span class="acct-tick pending">·</span>
         <div class="acct-row-main">
           <div class="acct-row-name">Account not created yet</div>
-          <div class="acct-row-id"><code>POST /v1/customers</code> runs as beat 1 of this payment.</div>
+          <div class="acct-row-id">Your account will be created when you place this order.</div>
         </div>
       </div>
     </div>`;
@@ -365,6 +376,7 @@ export function accountPanelHTML() {
 /** Repaint in place. Never called from the panel's own keystrokes — that would
     take the cursor with it. */
 export function refreshAccountPanel() {
+  syncAccountCta();
   const block = $('#acct-block');
   const html = accountPanelHTML();
   if (block) {
@@ -377,17 +389,46 @@ export function refreshAccountPanel() {
   if (html) $('.id-block')?.insertAdjacentHTML('afterend', html);
 }
 
+/* The primary action sits OUTSIDE the block — on one plane with "Skip for now",
+   since they're two answers to the same question — so a beat transition
+   (draft → sending → error) has to reach it separately from the block swap. */
+function syncAccountCta() {
+  const btn = $('#acct-create');
+  if (!btn) return;
+  const cta = accountCtaState();
+  btn.disabled = cta.sending;
+  btn.textContent = cta.label;
+}
+
 /* ── Wiring — document-delegated, once at module load (the blocks' innerHTML
    is rebuilt far more often than any mount() runs). ───────── */
 document.addEventListener('input', (e) => {
-  const el = e.target;
-  if (el.id !== 'f-cus-name' && el.id !== 'f-cus-email') return;
+  const path = accountFieldPath(e.target.id);
+  if (!path) return;
   if (customers.getCustomerId()) return; // frozen — no update-customer call exists
-  customers.setIdentity(el.id === 'f-cus-name' ? { name: el.value } : { email: el.value });
-  const note = $('#acct-twoword');
-  if (note) note.innerHTML = twoWordNoteHTML(); // in place — the inputs are untouched
+  customers.setIdentityField(path, e.target.value);
   setStatus('Drafting request', 'drafting');
   refreshCustomerBeatCard();
+});
+
+/* The customer card's field↔JSON highlight lives HERE, not in a flow: the card
+   is this module's (#req-json-cus), and the account frame renders under both
+   models — the toolkit has no applyHighlight() of its own, so routing it
+   through the flow left the toolkit's account frame dead. own-fields keeps
+   owning the payment body's highlight. */
+let cusFocusedId = null;
+function applyCustomerHighlight() {
+  highlightPaths($('#req-json-cus'), cusFocusedId ? (FIELD_MAP[cusFocusedId] || []) : []);
+}
+document.addEventListener('focusin', (e) => {
+  if (!accountFieldPath(e.target.id)) return;
+  cusFocusedId = e.target.id;
+  applyCustomerHighlight();
+});
+document.addEventListener('focusout', (e) => {
+  if (!accountFieldPath(e.target.id)) return;
+  cusFocusedId = null;
+  applyCustomerHighlight();
 });
 
 document.addEventListener('click', (e) => {

@@ -11,11 +11,20 @@ export const FIELD_MAP = {
   'f-name':   ['payment_method.fields.name'],
   // "save my card" adds the whole stored-credential block
   'f-save':   ['save_payment_method', 'customer', 'payment_method.fields.recurrence_type'],
-  // Account step (preceding the cart) — these paths live in the POST
-  // /v1/customers body, so the highlight targets the customer beat card's
-  // JSON (#req-json-cus) rather than the payment body's (#req-json).
-  'f-cus-name':  ['name'],
-  'f-cus-email': ['email'],
+  // Account frame — these paths live in the POST /v1/customers body, so the
+  // highlight targets the customer beat card's JSON (#req-json-cus) rather than
+  // the payment body's (#req-json). The form lists them in body order, one per
+  // row, so focusing a field lights up the line beside it.
+  'f-cus-name':    ['name', 'addresses.0.name'], // the address name tracks it
+  'f-cus-email':   ['email'],
+  'f-cus-dob':     ['date_of_birth'],
+  'f-cus-birth':   ['birth_country'],
+  'f-cus-nat':     ['nationality'],
+  'f-cus-occ':     ['occupation'],
+  'f-cus-line1':   ['addresses.0.line_1'],
+  'f-cus-city':    ['addresses.0.city'],
+  'f-cus-country': ['addresses.0.country'],
+  'f-cus-zip':     ['addresses.0.zip'],
   'tile-amount':   ['amount'],
   'tile-currency': ['currency'],
   'fx-currency':   ['requested_currency'],

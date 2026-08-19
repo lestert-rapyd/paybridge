@@ -77,9 +77,14 @@
 .frame-sub { font-size: 13px; line-height: 1.5; color: var(--ink-3); margin: 5px 0 14px; }
 .frame .co-cta { margin-top: 14px; }
 .frame .bo-routes { margin-bottom: 0; }
-/* the frame's own question already says it — the panel needn't repeat itself */
-.frame .acct-title { display: none; }
-.frame .acct-head { justify-content: flex-end; }
+/* Two answers to one question sit on ONE plane — same row, same height, the
+   primary carrying the gradient (design system §04.1: one primary per screen). */
+.frame-actions { display: flex; gap: 10px; margin-top: 14px; }
+.frame-actions .co-cta,
+.frame-actions .cs-secondary { flex: 1; min-width: 0; height: 52px; margin-top: 0; }
+/* secondary alternatives, also on one plane */
+.frame-alts { display: flex; gap: 10px; }
+.frame-alts .cs-secondary { flex: 1; min-width: 0; }
 
 /* Guest + subscription with no storage route: state the reason, offer the fix. */
 .frame-block {
@@ -153,28 +158,6 @@
 .cof-chip-brand { font-weight: 700; }
 .cof-chip-num { font-family: var(--font-mono); letter-spacing: .04em; }
 .cof-chip-exp { color: var(--ink-3); font-size: 11px; }
-.cof-chip-kind {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  border: 1px solid var(--line-2);
-  color: var(--ink-3);
-  background: var(--surface-2);
-  white-space: nowrap;
-}
-.cof-chip-kind.token { color: var(--accent); border-color: var(--accent-soft); background: var(--accent-soft); }
-.cof-chip-nri {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  color: var(--ok);
-  border: 1px solid color-mix(in srgb, var(--ok) 30%, transparent);
-  background: color-mix(in srgb, var(--ok) 10%, transparent);
-  white-space: nowrap;
-}
 
 .cof-cvvrow { align-items: flex-end; }
 .cof-cvv { max-width: 130px; }
@@ -235,19 +218,13 @@
   flex-direction: column;
   gap: 9px;
 }
-.acct-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.acct-title { font-size: 12.5px; font-weight: 700; color: var(--ink); }
-.acct-beat { font-size: 10px; color: var(--ink-4); }
-.acct-fields { display: flex; gap: 10px; flex-wrap: wrap; }
-.acct-field { flex: 1 1 140px; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+/* One field per row, in request-body order, so the eye tracks straight across
+   to the line it writes (sync.js FIELD_MAP lights that line on focus). */
+.acct-fields { display: flex; flex-direction: column; gap: 9px; }
+.acct-field { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .acct-field > span { font-size: 11px; font-weight: 600; color: var(--ink-3); }
 .acct-field .co-input { height: 40px; }
 .acct-field input { font-size: 13px; }
-.acct-note { font-size: 10.5px; line-height: 1.5; color: var(--ink-3); }
-.acct-note:empty { display: none; }
-.acct-note code, .acct-foot code { font-family: var(--font-mono); font-size: 9.5px; color: var(--accent); }
-.acct-kyc { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
-.acct-kyc-label { font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-4); margin-right: 2px; }
 .acct-chip {
   font-family: var(--font-mono);
   font-size: 9.5px;
@@ -258,22 +235,6 @@
   color: var(--ink-3);
   white-space: nowrap;
 }
-.acct-btn {
-  align-self: flex-start;
-  border: 1px solid var(--accent);
-  border-radius: var(--r-sm);
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-family: var(--font-sans);
-  font-size: 12px;
-  font-weight: 700;
-  padding: 8px 16px;
-  cursor: pointer;
-  transition: filter .12s ease;
-}
-.acct-btn:hover:not(:disabled) { filter: brightness(.97); }
-.acct-btn:disabled { opacity: .55; cursor: not-allowed; }
-.acct-foot { font-size: 10.5px; line-height: 1.5; color: var(--ink-4); }
 .acct-err {
   font-size: 11px; line-height: 1.5; color: var(--err-deep);
   border: 1px dashed color-mix(in srgb, var(--err) 40%, transparent);
@@ -303,7 +264,6 @@
 .acct-row-id code { font-family: var(--font-mono); font-size: 10px; color: var(--accent); }
 /* the toolkit hosts the step in its narrower summary column */
 .tk-summary .acct-block { margin: 0 0 12px; padding: 11px 12px; }
-.tk-summary .acct-fields { flex-direction: column; gap: 8px; }
 
 /* ── SE strategy deck (#demo-controls) ───────────────────── */
 .se-deck {

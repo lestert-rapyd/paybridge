@@ -52,17 +52,39 @@ export function subscribeCustomers(fn) {
 /* ── identity / customer object ──────────────────────────── */
 export function getIdentity() { return IDENTITY; }
 
-/** Edit the demo identity from the account step. Only the two fields the SE
-    actually types are writable; the KYC block stays fixed (it exists to make
-    the customer AFT-ready, not to be demoed as a form). Notifies so the
+/** Edit the demo identity from the account form. Every field of the customer
+    body is writable now that the form presents them all in body order — the
+    account frame is the one place the customer object is authored, so a field
+    the SE can see should be a field the SE can change. Notifies so the
     card-name inheritance and the back office follow. */
 export function setIdentity({ name, email }) {
-  if (typeof name === 'string') {
-    IDENTITY.name = name;
-    IDENTITY.address.name = twoWordName(name); // the address name must not drift
+  if (typeof name === 'string') setIdentityField('name', name);
+  if (typeof email === 'string') setIdentityField('email', email);
+}
+
+/** Writable paths, mirroring enrichedCustomerBody()'s own shape. `address.*`
+    writes into the single address the body carries as addresses[0]. */
+const WRITABLE = new Set([
+  'name', 'email', 'date_of_birth', 'birth_country', 'nationality', 'occupation',
+  'address.line_1', 'address.city', 'address.country', 'address.zip',
+]);
+
+export function setIdentityField(path, value) {
+  if (!WRITABLE.has(path) || typeof value !== 'string') return;
+  if (path === 'name') {
+    IDENTITY.name = value;
+    IDENTITY.address.name = twoWordName(value); // the address name must not drift
+  } else if (path.startsWith('address.')) {
+    IDENTITY.address[path.slice('address.'.length)] = value;
+  } else {
+    IDENTITY[path] = value;
   }
-  if (typeof email === 'string') IDENTITY.email = email;
   notify();
+}
+
+/** Read one back, for the form's value attributes. */
+export function getIdentityField(path) {
+  return path.startsWith('address.') ? IDENTITY.address[path.slice('address.'.length)] : IDENTITY[path];
 }
 
 /** AFT rule: the customer name must be at least two words — a single-word

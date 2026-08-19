@@ -47,13 +47,14 @@ export const canReturn = () => reusableCreds().length > 0;
     the PAN, so there the hosted page's save-card option IS the `customer` field
     on the checkout session — no account, no subscription. */
 export const canGuestSubscribe = () => state.model === 'own-fields' && nridAvailable();
-/** Why a guest subscription is unavailable right now — the frame states it
-    rather than greying the option out. */
+/** Why a guest subscription is unavailable right now. ENGINE-ROOM copy — the
+    storefront frame only says an account is needed (js/steps.js); this is the
+    truth layer's line, and the SE's. */
 export function guestSubscribeBlocker() {
   if (canGuestSubscribe()) return '';
   return state.model === 'toolkit'
-    ? `The toolkit's iframe collects the card, so the merchant never holds a PAN to vault — the saved card has to live under a <code>cus_***</code>.`
-    : `${activeProfile().label} returns no <code>network_reference_id</code>, so there's no card to bill later without an account. Create one, or switch to <b>SC2</b>/<b>SC3</b>.`;
+    ? `The iframe collects the card, so the merchant never holds a PAN to vault — a saved card has to live under a <code>cus_***</code>.`
+    : `${activeProfile().label} returns no <code>network_reference_id</code>, so there's nothing to bill later without a <code>cus_***</code>. Switch to <b>SC2</b>/<b>SC3</b>, or create the account.`;
 }
 export const canGuest = () => !isSubscription() || canGuestSubscribe();
 
@@ -114,10 +115,10 @@ export function identityChooserHTML(answered = false) {
       <div class="id-label">Would you like an account?</div>
       <div class="bo-routes">
         ${card('account', 'Create an account',
-          `<code>POST /v1/customers</code> runs first — then the card saves under the new <code>cus_***</code>, and later charges can reference it.`,
+          `Save your details for a faster checkout next time.`,
           !!active && active !== 'guest')}
         ${card('guest', 'Continue as guest',
-          `No <code>cus_***</code> on this payment. A PCI merchant can still vault the card itself and bill it later on its <code>network_reference_id</code>.`,
+          `Check out without creating an account.`,
           active === 'guest')}
       </div>
     </div>`;

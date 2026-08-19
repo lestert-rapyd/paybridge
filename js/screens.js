@@ -100,7 +100,7 @@ function paidLabel() {
   return `${p.amount} ${p.currency}`;
 }
 
-export function renderProcessing(title = 'Confirming payment…', sub = 'Waiting for Rapyd to confirm via webhook…') {
+export function renderProcessing(title = 'Confirming payment…', sub = 'This only takes a moment — please don’t close this page.') {
   resetWide();
   setOffstage(null);
   host().innerHTML = `
@@ -108,7 +108,6 @@ export function renderProcessing(title = 'Confirming payment…', sub = 'Waiting
       <div class="screen-spinner"></div>
       <div class="screen-title">${title}</div>
       <div class="screen-sub">${sub}</div>
-      <div class="screen-hint">The webhook is the source of truth — the confirmation lands on the right ▸</div>
     </div>`;
 }
 
@@ -123,7 +122,7 @@ export function render3DS(url) {
         <span class="tds-ico">${LOCK_SVG}</span>
         <div>
           <div class="screen-3ds-title">3-D Secure verification</div>
-          <div class="screen-3ds-sub">Complete the challenge — then we wait for the outcome webhook.</div>
+          <div class="screen-3ds-sub">Your bank needs to confirm it’s you — follow the steps below to finish paying.</div>
         </div>
       </div>
       <iframe class="tds-frame" src="${url}" title="3-D Secure challenge"></iframe>
@@ -172,11 +171,11 @@ export function renderSuccess(event = {}) {
   // Product/AFT-aware copy: the flow picks the note at pay time (e.g. the
   // crypto "wallet funded, buy later" variant when is_direct_purchase=false).
   const note = lp.note || v.successNote;
-  // Stored-credential facts — pulled from the terminal webhook when present.
-  // These rows only render when the payment actually carried them
-  // (factsHTML drops null/empty values).
-  const pmd = pay.payment_method_data || {};
-  const cardToken = typeof pay.payment_method === 'string' && /^card_/.test(pay.payment_method) ? pay.payment_method : null;
+  // A receipt, not a debug dump: the rows below are what a shopper would see —
+  // ids they might quote back, and the payment's own status. The stored-
+  // credential mechanics (card_*** / network_reference_id / initiation_type /
+  // AFT) live in the engine room, and the SE narrates them.
+  // (factsHTML drops null/empty values, so absent rows simply don't render.)
   host().innerHTML = `
     <div class="screen success">
       ${badgeHTML('ok')}
@@ -188,13 +187,8 @@ export function renderSuccess(event = {}) {
         ['Reference', reference],
         ['Card', cardLabel(pay, lp)],
         ['Customer', lp.customer_id],
-        ['Credential', lp.credential_label],
-        ['Card token', cardToken],
-        ['network_reference_id', pmd.network_reference_id],
-        ['initiation_type', lp.initiation_type],
-        ['AFT', lp.aft ? (lp.is_direct_purchase === false ? 'wallet funding' : 'direct purchase') : null],
+        ['Saved card', lp.credential_label],
         ['Status', event.status || 'CLO'],
-        ['Confirmed by', event.type || 'webhook'],
       ])}
       <button class="co-cta rise-5" id="screen-reset">Run another payment</button>
     </div>`;
@@ -226,7 +220,6 @@ export function renderError(event = {}) {
         ['Card', cardLabel(pay, lp)],
         ['Status', event.status || 'ERR', true],
         ['Decline code', declineCode, true],
-        ['Signalled by', event.type || 'webhook'],
       ])}
       <button class="co-cta rise-5" id="screen-reset">Try a different card</button>
       <button class="cs-secondary rise-6" id="screen-back">Back to store</button>

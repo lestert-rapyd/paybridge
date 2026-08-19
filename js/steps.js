@@ -31,7 +31,7 @@ import {
   identityChooserHTML, promoteToReturning,
 } from './identity.js';
 import {
-  accountPanelHTML, customerRowHTML, customerRequestCardHTML,
+  accountPanelHTML, accountCtaState, customerRowHTML, customerRequestCardHTML,
   customerResponseCardHTML, fillCustomerSignature, beatCardHTML,
 } from './customer-beat.js';
 import * as customers from './customers.js';
@@ -112,11 +112,13 @@ function signedInFrameHTML(cus) {
   return `
     <div class="frame">
       <div class="frame-q">Welcome back</div>
-      <div class="frame-sub">You're signed in for this session — the account below is already on Rapyd.</div>
+      <div class="frame-sub">You're signed in. Your saved details are below.</div>
       ${customerRowHTML(cus)}
       <button type="button" class="co-cta" id="step-continue">Continue</button>
-      <button type="button" class="cs-secondary" id="cus-get-send">Re-read this account from Rapyd</button>
-      <button type="button" class="cs-secondary" id="step-guest">Check out as guest instead</button>
+      <div class="frame-alts">
+        <button type="button" class="cs-secondary" id="cus-get-send">Refresh my details</button>
+        <button type="button" class="cs-secondary" id="step-guest">Check out as guest instead</button>
+      </div>
     </div>`;
 }
 
@@ -131,14 +133,18 @@ function accountQFrameHTML() {
 
 function accountFrameHTML() {
   const cus = customers.getCustomerId();
+  const cta = accountCtaState();
   return `
     <div class="frame">
       <div class="frame-q">Create your account</div>
       <div class="frame-sub">Save your details once and check out in two taps next time.</div>
       ${accountPanelHTML()}
       ${cus
-        ? `<button type="button" class="co-cta" id="step-continue">Continue to products →</button>`
-        : `<button type="button" class="cs-secondary" id="step-skip">Skip — create it with the payment</button>`}
+        ? `<button type="button" class="co-cta" id="step-continue">Continue</button>`
+        : `<div class="frame-actions">
+             <button type="button" class="co-cta" id="acct-create" ${cta.sending ? 'disabled' : ''}>${cta.label}</button>
+             <button type="button" class="cs-secondary" id="step-skip">Skip for now</button>
+           </div>`}
     </div>`;
 }
 
@@ -146,10 +152,12 @@ function blockerHTML() {
   if (!blocked) return '';
   const p = VERTICALS[state.vertical].products.find((x) => x.id === blocked);
   if (!p) return '';
+  // Shopper-true only. WHY it can't stay a guest checkout is the SE's line, and
+  // the engine room carries the detail (see renderStepPanels).
   return `
     <div class="frame-block">
-      <div class="frame-block-t">${p.name} bills again later</div>
-      <div class="frame-block-n">${guestSubscribeBlocker()}</div>
+      <div class="frame-block-t">${p.name} needs an account</div>
+      <div class="frame-block-n">So we can charge your card each renewal.</div>
       <button type="button" class="cs-secondary" id="step-makeaccount">Create an account</button>
     </div>`;
 }
@@ -158,7 +166,6 @@ function productFrameHTML() {
   return `
     <div class="frame">
       <div class="frame-q">What would you like to buy?</div>
-      <div class="frame-sub">A subscription authorises later charges on the same card; a one-time purchase doesn't.</div>
       ${productColumnsHTML()}
       ${blockerHTML()}
     </div>`;
@@ -201,7 +208,7 @@ async function fireRetrieve() {
   const cus = customers.getCustomerId();
   if (!cus) return;
   const btn = $('#cus-get-send');
-  if (btn) { btn.disabled = true; btn.textContent = 'Retrieving…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Refreshing…'; }
   setStatus('Retrieving customer…', 'processing');
   let httpStatus = 0, data = null;
   try {
@@ -227,7 +234,7 @@ async function fireRetrieve() {
     });
   }
   setActiveTab('response'); // the SE asked for this call — following it is correct
-  if (btn) { btn.disabled = false; btn.textContent = 'Re-read this account from Rapyd'; }
+  if (btn) { btn.disabled = false; btn.textContent = 'Refresh my details'; }
 }
 
 /** Paint the engine room for frames 1–3. Writes #panel-request always; touches
@@ -258,7 +265,11 @@ export function renderStepPanels() {
   }
 
   // product — choosing calls nothing; beat 1 stays inspectable below the plate.
-  req.innerHTML = plateHTML(`Choosing a product calls nothing. Next: <code>POST /v1/payments</code>, on the checkout.`)
+  // A blocked guest subscription puts its REASON here, in the engine room: the
+  // storefront just says an account is needed, the truth layer says why.
+  req.innerHTML = plateHTML(blocked
+    ? `No storable credential for a guest subscription. ${guestSubscribeBlocker()}`
+    : `Choosing a product calls nothing. Next: <code>POST /v1/payments</code>, on the checkout.`)
     + customerRequestCardHTML();
   fillCustomerSignature();
 }

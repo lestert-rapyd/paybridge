@@ -224,10 +224,9 @@ function expressHTML() {
         <span class="cof-chip-brand">${c.brand || 'Card'}</span>
         <span class="cof-chip-num">···· ${c.last4 || '····'}</span>
         <span class="cof-chip-exp">${exp}</span>
-        <span class="cof-chip-kind token">${c.card_id ? `${c.card_id.slice(0, 9)}…` : 'card_ token'}</span>
       </div>
       <button type="button" class="co-cta tk-express-pay" id="tk-express-pay">${productCta()} with saved card</button>
-      <div class="tk-express-alt">S2S <code>card_***</code> charge — or use the checkout on the right for a new card</div>
+      <div class="tk-express-alt">Or enter a new card on the right.</div>
     </div>`;
 }
 
@@ -607,13 +606,13 @@ function bindToolkitEvents() {
     document.getElementById('tk-own-pay')?.remove(); // payment sent for authorisation
     logEvent('onCheckoutPaymentSuccess', `${e.detail?.status || ''} · paid:${e.detail?.paid}`, 'tk', 'ok');
     setStatus('Confirming…', 'processing');
-    renderProcessing('Payment received', 'Confirming via webhook…');
+    renderProcessing('Payment received', 'Just a moment while we confirm your payment…');
     ledger.updateStatus(state.reference, { phase: 'awaiting_confirmation' });
   });
   window.addEventListener('onCheckoutPaymentFailure', e => {
     logEvent('onCheckoutPaymentFailure', (e.detail?.error && (e.detail.error.message || e.detail.error)) || 'failure', 'tk', 'err');
     setStatus('Failed', 'error');
-    renderError({ status: 'ERR', message: 'The payment failed in the toolkit.' });
+    renderError({ status: 'ERR', message: 'The payment couldn’t be completed. Please try again.' });
   });
   window.addEventListener('onCheckoutPaymentExpired', e => {
     logEvent('onCheckoutPaymentExpired', e.detail?.status || 'checkout page expired', 'tk', 'err');
@@ -663,7 +662,7 @@ async function launch() {
     if (!ok) {
       setStatus('Error', 'error');
       logEvent('POST /v1/customers', 'failed', 'api', 'err');
-      renderError({ status: 'ERR', message: 'Customer creation failed — see the Response tab.' });
+      renderError({ status: 'ERR', message: 'We couldn’t start your payment. Please try again.' });
       btn.disabled = false;
       btn.textContent = mode === 'hosted' ? 'Create session →' : 'Render toolkit →';
       return;
@@ -683,7 +682,7 @@ async function launch() {
     state.lastPayment = {
       descriptor: v.descriptor, amount: charge.amount ?? p.amount, currency: charge.currency, last4: null, fx: fxSnapshot(),
       customer_id: effectiveCof() ? customers.getCustomerId() : null,
-      credential_label: effectiveCof() ? `saving · ${recurrence()}` : null,
+      credential_label: effectiveCof() ? 'Yes' : null,
       initiation_type: 'customer_present',
       note: p.successNote || v.successNote,
     };
@@ -715,7 +714,7 @@ async function launch() {
       area.innerHTML = `
         <div class="tk-redirect">
           <div class="tk-redirect-title">Hosted checkout ready</div>
-          <div class="tk-redirect-desc">In production the customer is redirected to Rapyd's hosted page. Opening in a new tab here keeps the demo alive — the outcome returns via webhook.</div>
+          <div class="tk-redirect-desc">You’ll finish paying on a secure payment page, then come back here.</div>
           <button class="co-cta" id="tk-open">Open hosted checkout ↗</button>
         </div>`;
       $('#tk-open').addEventListener('click', () => window.open(redirect, '_blank', 'noopener'));
@@ -766,7 +765,6 @@ async function expressPay(credRef) {
     descriptor: v.descriptor, amount: charge.amount ?? p.amount, currency: charge.currency,
     last4: cred.last4, network: cred.brand, fx: fxSnapshot(),
     customer_id: customers.getCustomerId(),
-    credential_label: `${cred.brand} ···${cred.last4} (token)`,
     initiation_type: 'customer_present',
     aft: !!p.aft, is_direct_purchase: p.aft ? true : null,
     note: p.successNote || v.successNote,
@@ -784,7 +782,7 @@ async function expressPay(credRef) {
   paintExpressRequest(body);
   setActiveTab('request');
   logEvent('POST /v1/payments', `express · ${cred.card_id}`, 'api');
-  renderProcessing('Charging your saved card…', 'No card entry needed — the token references the stored card.');
+  renderProcessing('Charging your saved card…', 'No card details needed — we’ll use the card you saved.');
 
   try {
     const { httpStatus, data } = await createDirectPayment({ ...body, env: state.env, profile: state.profile });
@@ -807,7 +805,7 @@ async function expressPay(credRef) {
       ledger.updateStatus(state.reference, { phase: 'pending_3ds' });
     } else {
       setStatus('Confirming…', 'processing');
-      renderProcessing('Payment received', 'Confirming via webhook…');
+      renderProcessing('Payment received', 'Just a moment while we confirm your payment…');
       ledger.updateStatus(state.reference, { phase: 'awaiting_confirmation' });
     }
     startWebhookWatch({ reference: state.reference, payment_id: d.id, onTerminal: handleTerminal, onPoll: () => { lastHeartbeat = new Date(); renderConsole(); } });

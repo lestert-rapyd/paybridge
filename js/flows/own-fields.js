@@ -238,18 +238,17 @@ function directPurchaseHTML() {
     </div>`;
 }
 
+/* A shopper's saved-card chip: brand, last four, expiry. WHICH storage route
+   holds it (Rapyd token vs the merchant's own vault) and whether it carries a
+   network_reference_id are engine-room facts — they show in the request body
+   and the back office, not on the storefront. */
 function chipHTML(c, active) {
   const exp = c.expiration_month && c.expiration_year ? `${c.expiration_month}/${c.expiration_year}` : '··/··';
-  const kindLabel = c.kind === 'token'
-    ? (c.card_id ? `${c.card_id.slice(0, 9)}…` : 'card_ token')
-    : 'merchant vault';
   return `
     <button type="button" class="cof-chip ${active ? 'active' : ''}" data-cred="${c.ref}">
       <span class="cof-chip-brand">${c.brand || 'Card'}</span>
       <span class="cof-chip-num">···· ${c.last4 || '····'}</span>
       <span class="cof-chip-exp">${exp}</span>
-      <span class="cof-chip-kind ${c.kind}">${kindLabel}</span>
-      ${c.network_reference_id ? '<span class="cof-chip-nri">NRI ✓</span>' : ''}
     </button>`;
 }
 
@@ -276,8 +275,8 @@ function returningHTML() {
           <div class="cof-cvv-note">Just confirm it’s you — your card is on file.</div>
         </div>` : `
         <div class="cof-nocvv">${mode === 'nrid'
-          ? 'No CVV needed — the card’s original network reference verifies this payment.'
-          : 'No card details needed — your saved card token is charged directly.'}</div>`}
+          ? 'No CVV needed for this card.'
+          : 'No card details needed — we’ll use your saved card.'}</div>`}
       ${p.aft ? directPurchaseHTML() : ''}
       <label class="co-tds">
         <input type="checkbox" id="f-tds" ${tds ? 'checked' : ''} />
@@ -301,7 +300,7 @@ function saveRowHTML() {
           <span>Save card for future purchases</span>
         </label>
       </div>
-      <div class="id-caption">Unavailable here: ${activeProfile().label} returns no <code>network_reference_id</code> (blocks the merchant vault) and guest checkout has no <code>cus_***</code> (blocks the Rapyd token). Create an account, or switch to <b>SC2</b>/<b>SC3</b>.</div>`;
+      <div class="id-caption">Saving a card isn’t available for this order.</div>`;
   }
   return `
     <div class="co-save-row">
@@ -485,15 +484,10 @@ function renderRequest() {
   fillSignature($('#beat-pay'), 'post', '/v1/payments', st, body); // live — recomputes with the body
   applyHighlight();
 }
-/* The account step's fields populate the CUSTOMER body, so they highlight in
-   that card's JSON; everything else is the payment body. */
+/* Only the payment body: the account frame's fields highlight their own card,
+   from customer-beat.js (which owns #req-json-cus and works under both models). */
 export function applyHighlight() {
-  const paths = focusedId ? (FIELD_MAP[focusedId] || []) : [];
-  const onCustomer = !!focusedId?.startsWith('f-cus-');
-  // Both roots every time: highlightPaths only clears inside the container it's
-  // given, so passing [] to the other one is what un-highlights it.
-  highlightPaths($('#req-json'), onCustomer ? [] : paths);
-  highlightPaths($('#req-json-cus'), onCustomer ? paths : []);
+  highlightPaths($('#req-json'), focusedId ? (FIELD_MAP[focusedId] || []) : []);
 }
 
 /* ── Response panel ──────────────────────────────────────────
@@ -687,7 +681,11 @@ async function pay() {
       descriptor: v.descriptor, amount: charge.amount ?? p.amount, currency: charge.currency,
       last4, network, fx: fxSnapshot(),
       customer_id: customers.getCustomerId(),
-      credential_label: cred ? `${cred.brand} ···${cred.last4} (${cred.kind === 'token' ? 'token' : 'vault'})` : (effectiveSave() ? `saving · ${recurrenceType()}` : null),
+      // Receipt copy — the storage route and the scheme's recurrence value are
+      // engine-room facts, not something a shopper's receipt states.
+      // The Card row above already names the card; this row only answers "was it
+      // kept?". Reuse leaves it out — it would just repeat the card.
+      credential_label: !cred && effectiveSave() ? 'Yes' : null,
       initiation_type: 'customer_present',
       aft: !!p.aft, is_direct_purchase: p.aft ? isDirectPurchase() : null,
       note,
@@ -744,7 +742,7 @@ async function pay() {
       ledger.updateStatus(state.reference, { phase: 'pending_3ds' });
     } else if (d.status === 'CLO' && d.paid) {
       setStatus('Authorized · confirming', 'processing');
-      renderProcessing('Payment authorized', 'Waiting for the confirmation webhook…');
+      renderProcessing('Payment authorized', 'Confirming your payment…');
       ledger.updateStatus(state.reference, { phase: 'awaiting_confirmation' });
     } else {
       renderProcessing('Processing…');
@@ -902,13 +900,16 @@ export function mount() {
 // every vertical/model/env reset, the FX popover's fields on every popover
 // re-render (app.js rebuilds #fx-popover's innerHTML far more often than
 // mount() runs — a per-element listener there would silently go stale).
+// f-cus-* belong to the account frame's own card (customer-beat.js owns that
+// highlight) — this flow only tracks fields of the PAYMENT body.
+const ownsField = id => id in FIELD_MAP && !id.startsWith('f-cus-');
 document.addEventListener('focusin', e => {
-  if (!(e.target.id in FIELD_MAP)) return;
+  if (!ownsField(e.target.id)) return;
   focusedId = e.target.id;
   applyHighlight();
 });
 document.addEventListener('focusout', e => {
-  if (!(e.target.id in FIELD_MAP)) return;
+  if (!ownsField(e.target.id)) return;
   focusedId = null;
   applyHighlight();
 });
