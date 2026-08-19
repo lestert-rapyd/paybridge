@@ -151,19 +151,36 @@ export function productCta(verticalId = state.vertical) {
   return activeProduct(verticalId).cta || VERTICALS[verticalId].cta;
 }
 
-/** Customer-facing product chooser (a store's option row, NO API jargon) —
-    shared by the own-fields checkout shell and the toolkit summary column.
-    Rendered only when the vertical actually has a choice. */
-export function productSelectorHTML(verticalId = state.vertical) {
+/** Customer-facing product chooser — the product FRAME (see js/steps.js), two
+    columns grouped by billing nature. Route-card grammar (`.bo-route`, design
+    system §04.4b): each option has a money consequence the SE has to narrate —
+    a subscription authorises later MITs, a one-time purchase doesn't — so the
+    consequence is stated on the card rather than left implicit. */
+export function productColumnsHTML(verticalId = state.vertical) {
   const v = VERTICALS[verticalId];
-  if (v.products.length < 2) return '';
-  const active = activeProduct(verticalId);
+  // Only a product the SE actually PICKED reads as selected. activeProduct()
+  // falls back to the catalog's first entry, which would show an answer under a
+  // question nobody has answered yet.
+  const sel = state.selectedProduct;
+  const chosen = sel && sel.vertical === verticalId ? sel.productId : null;
+  const col = (label, note, products) => `
+    <div class="prod-col">
+      <div class="prod-col-head">${label}<span>${note}</span></div>
+      ${products.length ? products.map((p) => `
+        <button type="button" class="bo-route ${p.id === chosen ? 'active' : ''}" data-product="${p.id}">
+          <div class="bo-route-title">${p.name}${p.billing === 'subscription' ? ' <span class="ps-mo">/mo</span>' : ''}</div>
+          <div class="bo-route-note">${p.desc}</div>
+          <div class="bo-route-legs">
+            <div class="bo-route-leg"><span>Price</span><span><b>${p.amount} ${p.currency}</b></span></div>
+          </div>
+        </button>`).join('')
+        : `<div class="prod-col-none">Nothing ${label.toLowerCase()} in this store.</div>`}
+    </div>`;
+  const of = (billing) => v.products.filter((p) => p.billing === billing);
   return `
-    <div class="prod-select" id="prod-select">
-      ${v.products.map((p) => `
-        <button type="button" data-product="${p.id}" class="${p.id === active.id ? 'active' : ''}">
-          ${p.pill || p.name}${p.billing === 'subscription' ? '<span class="ps-mo">/mo</span>' : ''}
-        </button>`).join('')}
+    <div class="prod-cols">
+      ${col('One-time', 'pay once', of('one_time'))}
+      ${col('Subscription', 'bills again later', of('subscription'))}
     </div>`;
 }
 

@@ -28,6 +28,7 @@
 import { state, setState } from './state.js';
 import * as customers from './customers.js';
 import { identityMode, usesCustomer } from './identity.js';
+import { activeProduct } from './verticals.js';
 import { createCustomer } from './api.js';
 import { renderJSONView } from './json-view.js';
 import { headersHTML, fillSignature, newSaltTimestamp } from './signing.js';
@@ -296,7 +297,11 @@ function accountFormHTML() {
     </div>`;
 }
 
-function accountRowHTML(cus) {
+/** The created account, as a row. Three homes, one template: the account
+    frame after the beat fires, frame 1's signed-in view, and the checkout
+    frame's profile strip. Currency comes from the product being charged —
+    the design system's "Your profile" facts block lists it alongside the id. */
+export function customerRowHTML(cus = customers.getCustomerId()) {
   const id = customers.getIdentity();
   const n = customers.credentials().length;
   return `
@@ -305,23 +310,55 @@ function accountRowHTML(cus) {
         <span class="acct-tick">✓</span>
         <div class="acct-row-main">
           <div class="acct-row-name">${esc(id.name)}<span class="acct-row-mail">${esc(id.email)}</span></div>
-          <div class="acct-row-id"><code>${cus}</code> · ${n ? `${n} card${n > 1 ? 's' : ''} on file` : 'no cards on file yet'}</div>
+          <div class="acct-row-id"><code>${cus}</code> · ${activeProduct().currency} · ${n ? `${n} card${n > 1 ? 's' : ''} on file` : 'no cards on file yet'}</div>
         </div>
         <button type="button" class="cof-link" id="acct-bo">View in back office</button>
       </div>
     </div>`;
 }
 
-/** The step itself. Rendered by app.js's checkout shell and by the toolkit's
-    summary aside, directly under the identity chooser. */
-export function accountPanelHTML() {
-  const mode = identityMode();
-  if (mode === 'guest') return '';
+/* The checkout frame's profile strip — who is paying, stated as fact. A guest
+   says so; an account chosen but never created says the beat still has to run
+   (the lazy fallback), so the strip never implies a cus_*** that doesn't exist. */
+function stripHTML() {
   const cus = customers.getCustomerId();
-  if (cus) return accountRowHTML(cus);
+  if (cus) return customerRowHTML(cus);
+  if (identityMode() === 'guest') {
+    return `
+      <div class="acct-block strip" id="acct-block">
+        <div class="acct-row">
+          <span class="acct-tick guest">–</span>
+          <div class="acct-row-main">
+            <div class="acct-row-name">Guest checkout</div>
+            <div class="acct-row-id">No <code>cus_***</code> on this payment.</div>
+          </div>
+        </div>
+      </div>`;
+  }
+  return `
+    <div class="acct-block strip" id="acct-block">
+      <div class="acct-row">
+        <span class="acct-tick pending">1</span>
+        <div class="acct-row-main">
+          <div class="acct-row-name">Account not created yet</div>
+          <div class="acct-row-id"><code>POST /v1/customers</code> runs as beat 1 of this payment.</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/** Step-aware: the FORM on the account frame, a read-only STRIP on the checkout
+    frame. Both shells render this one call, so neither has to know the step —
+    and refreshAccountPanel() keeps working on either, since every variant
+    carries #acct-block. */
+export function accountPanelHTML() {
+  if (state.step === 'checkout') return stripHTML();
+  if (state.step !== 'account') return '';
+  const cus = customers.getCustomerId();
+  if (cus) return customerRowHTML(cus);
   // Returning against a merchant-vaulted card only: there's no customer object
   // to show, and creating one isn't what that story is about.
-  if (mode === 'returning') return '';
+  if (identityMode() === 'returning') return '';
   return accountFormHTML();
 }
 

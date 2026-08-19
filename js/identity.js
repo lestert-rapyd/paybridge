@@ -8,8 +8,13 @@
                  with NO cards and gains them as purchases save them
      returning · reuse this session's cus_*** and its cards on file
 
-   The customer is still created LAZILY (beat 1 of submit), so picking a
-   mode never fires an API call — it records intent only.
+   The chooser itself (FRAME 1) offers only the first two — answering it never
+   fires a call, it records intent. `returning` is reached by fact, not by
+   choice: once a card is on file, promoteToReturning() sets it and frame 1
+   shows the signed-in view instead of asking again.
+
+   Creation stays LAZY as a fallback (beat 1 of submit) for an SE who skips the
+   account frame entirely.
 
    Session-scoped, like customers.js: "returning" means a credential
    already exists in the active `env:profile` bucket. Nothing persists
@@ -20,6 +25,7 @@
 import { state } from './state.js';
 import * as customers from './customers.js';
 import { activeProduct } from './verticals.js';
+import { nridAvailable, activeProfile } from './profiles.js';
 
 export const IDENTITY_MODES = ['guest', 'account', 'returning'];
 
@@ -33,8 +39,23 @@ export function reusableCreds() {
 
 /** Returning needs a saved card to return TO. */
 export const canReturn = () => reusableCreds().length > 0;
-/** Subscribing inherently stores the card, so a subscription can't be a guest. */
-export const canGuest = () => !isSubscription();
+
+/** A subscription must store the card — but NOT necessarily under a Rapyd
+    customer. A PCI merchant doesn't need our customer object at all: it vaults
+    the PAN itself and bills later on the card's `network_reference_id`, which is
+    the `vault` route in own-fields' storageAvailability(). The toolkit never sees
+    the PAN, so there the hosted page's save-card option IS the `customer` field
+    on the checkout session — no account, no subscription. */
+export const canGuestSubscribe = () => state.model === 'own-fields' && nridAvailable();
+/** Why a guest subscription is unavailable right now — the frame states it
+    rather than greying the option out. */
+export function guestSubscribeBlocker() {
+  if (canGuestSubscribe()) return '';
+  return state.model === 'toolkit'
+    ? `The toolkit's iframe collects the card, so the merchant never holds a PAN to vault — the saved card has to live under a <code>cus_***</code>.`
+    : `${activeProfile().label} returns no <code>network_reference_id</code>, so there's no card to bill later without an account. Create one, or switch to <b>SC2</b>/<b>SC3</b>.`;
+}
+export const canGuest = () => !isSubscription() || canGuestSubscribe();
 
 /** The EFFECTIVE mode. Guards stale selections: an env/profile switch re-keys
     the customer bucket (credentials vanish) and a product switch can outlaw
@@ -48,6 +69,12 @@ export function identityMode() {
 export function setIdentityMode(mode) {
   if (IDENTITY_MODES.includes(mode)) state.identityMode = mode;
 }
+/** The RAW answer, before identityMode()'s degradation. The product frame needs
+    this: picking a subscription is exactly what makes canGuest() false, so the
+    degraded read would already say 'account' and the frame would silently
+    convert the SE's guest into an account instead of explaining why it can't
+    stay one. */
+export const chosenGuest = () => state.identityMode === 'guest';
 
 /** Whether this payment attaches (or creates) a cus_***. */
 export const usesCustomer = () => identityMode() !== 'guest';
@@ -59,55 +86,39 @@ export function promoteToReturning() {
   if (canReturn()) state.identityMode = 'returning';
 }
 
-const LABEL = {
-  guest: 'Guest checkout',
-  account: 'Create an account',
-  returning: 'Returning customer',
-};
-
-function captionHTML() {
-  switch (identityMode()) {
-    case 'guest':
-      return `No account — this payment carries no <code>cus_***</code>. Cards can still be vaulted by the merchant.`;
-    case 'account': {
-      const cus = customers.getCustomerId();
-      // Once the beat has run, the promise is a fact — don't keep announcing it.
-      return cus
-        ? `Account created — <code>${cus}</code> is attached to this payment, and a saved card lands under it.`
-        : `<code>POST /v1/customers</code> runs first, then the card saves under the new <code>cus_***</code>.`;
-    }
-    default: {
-      const cus = customers.getCustomerId();
-      return `Reusing ${cus ? `<code>${cus}</code>` : 'the saved customer'} and its cards on file.`;
-    }
-  }
-}
-
-/** Repaint the chooser in place. Credentials arriving mid-session (a webhook
-    harvest, a list backfill, a profile re-key) can unlock or withdraw
-    "Returning" while the checkout is on screen, and the chooser lives in the
-    shell — outside the surfaces those events already repaint. Safe to swap
-    wholesale: the click handler is delegated on the stable #checkout root. */
+/** Repaint the question in place. Credentials arriving mid-session (a webhook
+    harvest, a list backfill, a profile re-key) change what this frame should
+    say while it's on screen. Safe to swap wholesale: the click handler is
+    delegated on the stable #checkout root (see js/steps.js). */
 export function refreshIdentityChooser() {
   const block = document.querySelector('.id-block');
   if (block) block.outerHTML = identityChooserHTML();
 }
 
-/** Customer-facing 3-way chooser. Rendered by app.js's checkout shell and by
-    the toolkit's own summary aside — hence a shared template here rather than
-    inside either flow. */
-export function identityChooserHTML() {
-  const active = identityMode();
-  const btn = (mode, blockedWhy) => `
-    <button type="button" data-mode="${mode}" class="${mode === active ? 'active' : ''}"${blockedWhy ? ` disabled title="${blockedWhy}"` : ''}>${LABEL[mode]}</button>`;
+/** FRAME 1 — the first question of the checkout, and the only one that decides
+    whether a call happens at all. Two answers, in route-card grammar (design
+    system §04.4b): each carries a money consequence the SE narrates, so the
+    consequence is on the card. `data-answer` is read by js/steps.js.
+
+    `answered` matters: state.identityMode starts at 'guest', so without it the
+    guest card would render selected under a question nobody has answered yet. */
+export function identityChooserHTML(answered = false) {
+  const active = answered ? identityMode() : null;
+  const card = (answer, title, note, on) => `
+    <button type="button" class="bo-route ${on ? 'active' : ''}" data-answer="${answer}">
+      <div class="bo-route-title">${title}</div>
+      <div class="bo-route-note">${note}</div>
+    </button>`;
   return `
     <div class="id-block">
-      <div class="id-label">How would you like to check out?</div>
-      <div class="id-select" id="identity-select">
-        ${btn('guest', canGuest() ? '' : 'A subscription stores the card — it needs an account')}
-        ${btn('account', '')}
-        ${btn('returning', canReturn() ? '' : 'Unlocks once an account has saved a card')}
+      <div class="id-label">Would you like an account?</div>
+      <div class="bo-routes">
+        ${card('account', 'Create an account',
+          `<code>POST /v1/customers</code> runs first — then the card saves under the new <code>cus_***</code>, and later charges can reference it.`,
+          !!active && active !== 'guest')}
+        ${card('guest', 'Continue as guest',
+          `No <code>cus_***</code> on this payment. A PCI merchant can still vault the card itself and bill it later on its <code>network_reference_id</code>.`,
+          active === 'guest')}
       </div>
-      <div class="id-caption">${captionHTML()}</div>
     </div>`;
 }

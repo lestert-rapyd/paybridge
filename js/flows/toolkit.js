@@ -19,7 +19,7 @@
    ───────────────────────────────────────────────────────────── */
 
 import { state } from '../state.js';
-import { VERTICALS, activeProduct, customerCharge, chargeText, fxSnapshot, productCta, productSelectorHTML } from '../verticals.js';
+import { VERTICALS, activeProduct, customerCharge, chargeText, fxSnapshot, productCta } from '../verticals.js';
 import { createCheckoutSession, createDirectPayment } from '../api.js';
 import { profileEwallet } from '../profiles.js';
 import { clientDetails } from '../client-details.js';
@@ -30,7 +30,8 @@ import { renderProcessing, render3DS, renderSuccess, renderError } from '../scre
 import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
 import * as ledger from '../ledger.js';
 import * as customers from '../customers.js';
-import { identityChooserHTML, identityMode, usesCustomer, promoteToReturning, refreshIdentityChooser } from '../identity.js';
+import { identityMode, usesCustomer, promoteToReturning, refreshIdentityChooser } from '../identity.js';
+import { stepRailHTML } from '../steps.js';
 import {
   accountPanelHTML, beatCardHTML, customerRequestCardHTML, customerResponseCardHTML,
   fillCustomerSignature, fireCreateCustomer, refreshAccountPanel,
@@ -241,10 +242,8 @@ function summaryHTML() {
         <span class="tk-brand-mark" style="background:linear-gradient(135deg,${c1},${c2})">${v.merchant[0]}</span>
         <span>${v.merchant}</span>
       </div>
-      ${identityChooserHTML()}
       ${accountPanelHTML()}
       <div class="tk-sum-label">Your order</div>
-      ${productSelectorHTML()}
       <div class="co-order">
         <div class="co-thumb" style="background:linear-gradient(135deg,${c1},${c2})">${glyph}</div>
         <div class="co-order-info">
@@ -365,7 +364,10 @@ function configPanelHTML() {
 }
 
 export function renderPageHTML() {
+  // The rail sits above the two-column stage, not inside the summary — it
+  // belongs to the page (frame 4 of four), not to the order.
   return `
+    ${stepRailHTML()}
     <div class="tk-checkout">
       ${summaryHTML()}
       <div class="tk-paycol" id="tk-area">${configPanelHTML()}</div>

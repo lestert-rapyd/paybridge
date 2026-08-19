@@ -20,6 +20,13 @@ export const state = {
   // the active vertical (same guard pattern as productOverride).
   selectedProduct: null,
 
+  // Which frame of the client page is on screen — see js/steps.js. The customer
+  // beat is separated in TIME, not just in space: one frame per call, so the
+  // engine room only ever shows the call the current frame is about. Mutated
+  // DIRECTLY (never a RESET_KEY): a step change must not reset the flow, and the
+  // frames repaint themselves explicitly.
+  step: 'account-q',        // 'account-q' | 'account' | 'product' | 'checkout'
+
   // How the customer identifies at checkout: 'guest' | 'account' | 'returning'
   // (see js/identity.js). Mutated DIRECTLY — picking a mode repaints the client
   // page explicitly rather than resetting the flow. Read through

@@ -2,10 +2,12 @@
    PayBridge Demo Suite — bootstrap (on-brand redesign)
    ───────────────────────────────────────────────────────────── */
 
-import { VERTICALS, VERTICAL_ORDER, activeProduct, customerCharge, fxQuoteKey, chargeText, productCta, productSelectorHTML } from './verticals.js';
+import { VERTICALS, VERTICAL_ORDER, activeProduct, customerCharge, fxQuoteKey, chargeText, productCta } from './verticals.js';
 import { PROFILES, PROFILE_ORDER } from './profiles.js';
-import { identityChooserHTML, identityMode, setIdentityMode } from './identity.js';
 import { accountPanelHTML, syncCustomerBeat, setPanelRepainter, setHighlightHook } from './customer-beat.js';
+import {
+  frameHTML, stepRailHTML, isCheckout, renderStepPanels, resetSteps, setClientRepainter,
+} from './steps.js';
 import { state, setState, subscribe } from './state.js';
 import { setActiveTab, setStatus } from './ui.js';
 import { clearPaymentWatch, repaintWebhooks } from './webhooks.js';
@@ -303,7 +305,10 @@ function commitTileEdit(currencyOverride) {
   refreshAfterEdit();
 }
 
-/* ── Left: checkout ──────────────────────────────────────── */
+/* ── Left: the client page ────────────────────────────────────
+   Four frames (js/steps.js). Frames 1–3 are model-independent — the identity
+   question, the account step and the product choice belong to the client, not
+   to the integration — so only the checkout frame forks per flow. */
 function renderCheckout() {
   const v = VERTICALS[state.vertical];
   const p = activeProduct();
@@ -313,6 +318,24 @@ function renderCheckout() {
 
   closeFxPopover(); // never lingers open across a vertical/model/env reset
   closeCurDropdown();
+
+  // Clear out-of-window annotations (bank-app view) on any re-render.
+  const off = $('#offstage');
+  off.innerHTML = '';
+  off.hidden = true;
+
+  if (!isCheckout()) {
+    host.innerHTML = frameHTML();
+    $('.browser').classList.remove('wide-tk', 'wide-3ds');
+    $('#demo-controls').innerHTML = '';
+    $('#demo-controls').hidden = true;
+    // No pay region exists on these frames: flow.mount() would wire #pay-btn
+    // (a bare addEventListener) and syncFx() would fetch a quote for a price
+    // that isn't on screen. Neither runs until the checkout frame.
+    renderStepPanels();
+    syncCustomerBeat();
+    return;
+  }
 
   const feeLabel = p.delivery ? 'Delivery' : 'Fees';
   const feeValue = p.delivery ? p.delivery : 'Free';
@@ -329,11 +352,9 @@ function renderCheckout() {
     host.innerHTML = `
       <div class="co-merchant">${v.merchant}</div>
       <div class="co-tagline"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#a8a297" stroke-width="2.6"><rect x="4" y="10" width="16" height="11" rx="2.5"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>${v.headline.toUpperCase()}</div>
+      ${stepRailHTML()}
 
-      ${identityChooserHTML()}
       ${accountPanelHTML()}
-
-      ${productSelectorHTML()}
 
       <div class="co-order">
         <div class="co-thumb" style="background:linear-gradient(135deg,${c1},${c2})">${p.glyph || THUMB_GLYPH[state.vertical]}</div>
@@ -353,11 +374,6 @@ function renderCheckout() {
       ${payLabel}
       <div id="pay-region">${flow.renderPaymentHTML()}</div>`;
   }
-
-  // Clear out-of-window annotations (bank-app view) on any re-render.
-  const off = $('#offstage');
-  off.innerHTML = '';
-  off.hidden = true;
 
   // Optional SE controls deck outside the fake client site (unused by
   // current flows — toolkit config lives inside its page).
@@ -403,9 +419,10 @@ function toggleLeftView() {
   $('#backoffice').hidden = !isBackoffice;
   if (isBackoffice) backOffice.render();
   // Back office may have repainted the right panel's Request/Response while
-  // the SE was away — repaint them from the client flow's own persisted
+  // the SE was away — repaint them from the client page's own persisted
   // state on the way back (webhooks.js already guards its own panel).
-  else FLOWS[state.model].refreshRightPanel?.();
+  else if (isCheckout()) FLOWS[state.model].refreshRightPanel?.();
+  else renderStepPanels();
 }
 
 /* ── Sandbox key-profile switch (subbar, sandbox only) ───────
@@ -542,24 +559,8 @@ function wire() {
       $('#fx-popover').hidden ? openFxPopover() : closeFxPopover();
       return;
     }
-    // Customer-facing product selector (shared by the standard shell and the
-    // toolkit summary — both render inside the stable #checkout root).
-    // Switching product is a context change for the client page: re-render it
-    // fresh (the price override falls away via its productId guard).
-    const prodBtn = e.target.closest('#prod-select button[data-product]');
-    if (prodBtn && prodBtn.dataset.product !== activeProduct().id) {
-      state.selectedProduct = { vertical: state.vertical, productId: prodBtn.dataset.product };
-      renderCheckout();
-      return;
-    }
-    // Identity chooser (guest / account / returning) — same deal: a context
-    // change for the client page, so re-render it rather than setState (which
-    // would count as a flow reset). Both shells render it inside #checkout.
-    const idBtn = e.target.closest('#identity-select button[data-mode]');
-    if (idBtn && !idBtn.disabled && idBtn.dataset.mode !== identityMode()) {
-      setIdentityMode(idBtn.dataset.mode);
-      renderCheckout();
-    }
+    // The identity answer and the product choice are frames now — js/steps.js
+    // owns both, and advancing a frame is what repaints the client page.
   });
   $('#fx-popover').addEventListener('change', e => {
     if (e.target.id === 'fx-enable') { state.fx.enabled = e.target.checked; renderFxPopover(); refreshAfterEdit(); }
@@ -622,6 +623,7 @@ function renderAll(_state, patch) {
   }
 
   clearPaymentWatch(); // the customer's webhook section survives; this payment's doesn't
+  resetSteps();        // back to frame 1 — which shows the signed-in view if the customer survived
   syncControlStates();
   setActiveTab('request');
   setStatus('Awaiting input', 'idle');
@@ -634,10 +636,18 @@ function renderAll(_state, patch) {
 
 subscribe(renderAll);
 
-// The customer beat can be fired from the account step (outside any flow), and
-// it has to repaint whichever flow owns the right panel. This module is the
-// only one that knows the flow registry, so it supplies the repainter.
-setPanelRepainter(() => FLOWS[state.model].refreshRightPanel?.());
+// steps.js advances the frame; only this module knows how to draw the client
+// page (frame 4 is its own shell plus the flow's), so it supplies the repainter.
+setClientRepainter(renderCheckout);
+// The customer beat can be fired from the account frame (outside any flow), and
+// it has to repaint whichever surface owns the right panel. This module is the
+// only one that knows the flow registry, so it supplies the repainter — which
+// has to be step-aware: on the account frame the payment card must NOT appear,
+// or firing beat 1 would immediately undo the separation of the two beats.
+setPanelRepainter(() => {
+  if (isCheckout()) FLOWS[state.model].refreshRightPanel?.();
+  else renderStepPanels();
+});
 // Same reasoning for the field↔JSON highlight: rebuilding the customer card
 // drops its .sync-hit classes, and only the flow knows what's focused.
 setHighlightHook(() => FLOWS[state.model].applyHighlight?.());

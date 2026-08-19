@@ -56,36 +56,52 @@
 .cred-flag.on  { background: rgba(18,183,106,.14); color: var(--ok-deep); }
 .cred-flag.off { background: rgba(239,68,68,.10);  color: var(--err-deep); }
 
-/* ── Client-site product selector (customer-facing) ──────── */
-.prod-select {
-  display: flex;
-  gap: 6px;
-  margin: 10px 0 14px;
-  flex-wrap: wrap;
+/* ── The four frames (js/steps.js) ────────────────────────────
+   The client page is a sequence, so each frame gets a question and the answers
+   are ROUTE CARDS (.bo-route, design system §04.4b) — reused wholesale, since
+   every answer here carries a money consequence the SE narrates. The only new
+   geometry is the two-column product grid. */
+.step-rail {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin: 14px 0 4px;
 }
-.prod-select button {
-  padding: 6px 12px;
-  border: 1px solid var(--line-2);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--ink-2);
-  font-family: var(--font-sans);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: border-color .15s, background .15s, color .15s;
+.step-rail-n { font-size: 12px; color: var(--ink-3); }
+.step-back {
+  border: 0; background: none; padding: 0; cursor: pointer;
+  font-family: var(--font-sans); font-size: 12px; font-weight: 600; color: var(--ink-3);
 }
-.prod-select button:hover { border-color: var(--ink-4); }
-.prod-select button.active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--ink);
-}
-.prod-select .ps-mo { font-weight: 500; font-size: 10px; color: var(--ink-3); margin-left: 2px; }
-.per-mo { font-size: 11px; font-weight: 600; color: var(--ink-3); }
+.step-back:hover { color: var(--ink); text-decoration: underline; }
 
-/* toolkit summary hosts the same selector in a tighter column */
-.tk-summary .prod-select { margin: 2px 0 12px; }
+.frame { margin-top: 16px; }
+.frame-q { font-size: 17px; font-weight: 700; letter-spacing: -.01em; color: var(--ink); }
+.frame-sub { font-size: 13px; line-height: 1.5; color: var(--ink-3); margin: 5px 0 14px; }
+.frame .co-cta { margin-top: 14px; }
+.frame .bo-routes { margin-bottom: 0; }
+/* the frame's own question already says it — the panel needn't repeat itself */
+.frame .acct-title { display: none; }
+.frame .acct-head { justify-content: flex-end; }
+
+/* Guest + subscription with no storage route: state the reason, offer the fix. */
+.frame-block {
+  margin-top: 14px; padding: 12px 14px;
+  border: 1px solid var(--line-2); border-radius: var(--r-md); background: var(--surface-2);
+}
+.frame-block-t { font-size: 13px; font-weight: 700; color: var(--ink); }
+.frame-block-n { font-size: 11.5px; line-height: 1.5; color: var(--ink-3); margin-top: 4px; }
+.frame-block-n code { font-family: var(--font-mono); font-size: 10px; color: var(--accent); }
+.frame-block .cs-secondary { margin-top: 10px; height: 40px; font-size: 13px; }
+
+.prod-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.prod-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.prod-col-head {
+  display: flex; flex-direction: column; gap: 1px;
+  font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
+}
+.prod-col-head span { font-size: 10px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--ink-4); }
+.prod-col-none { font-size: 11.5px; color: var(--ink-4); }
+.prod-col .bo-route { flex: none; }
+.ps-mo { font-weight: 500; font-size: 10px; color: var(--ink-3); margin-left: 2px; }
+.per-mo { font-size: 11px; font-weight: 600; color: var(--ink-3); }
 
 /* ── Saved-card chips + returning view ───────────────────── */
 .cof-returning { display: flex; flex-direction: column; gap: 12px; }
@@ -197,42 +213,13 @@
 .cof-dp button + button { border-left: 1px solid var(--line-2); }
 .cof-dp button.active { background: var(--accent-soft); color: var(--ink); }
 
-/* ── Checkout identity chooser (customer-facing, top of checkout) ──
-   Same joined segmented control as .cof-dp; three options share the width.
-   Carries a :disabled rule because guest/returning can each be unavailable
-   (subscription product / no saved card yet) — the title says why. */
+/* ── Frame 1's question (the identity answer) ──────────────────
+   Was a three-way segmented control inside the checkout; it's a frame of its
+   own now, so the answers are route cards and only the label survives. */
 .id-block { margin: 2px 0 14px; }
-.id-label {
-  font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
-  color: var(--ink-3); margin-bottom: 6px;
-}
-.id-select {
-  display: flex;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-sm);
-  overflow: hidden;
-}
-.id-select button {
-  flex: 1;
-  padding: 8px 8px;
-  border: 0;
-  background: var(--surface);
-  color: var(--ink-2);
-  font-family: var(--font-sans);
-  font-size: 11.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background .15s, color .15s;
-}
-.id-select button + button { border-left: 1px solid var(--line-2); }
-.id-select button:hover:not(:disabled):not(.active) { background: var(--surface-2); }
-.id-select button.active { background: var(--accent-soft); color: var(--ink); }
-.id-select button:disabled { opacity: .45; cursor: not-allowed; }
+.id-label { font-size: 17px; font-weight: 700; letter-spacing: -.01em; color: var(--ink); margin-bottom: 12px; }
 .id-caption { font-size: 10.5px; line-height: 1.5; color: var(--ink-3); margin-top: 5px; }
 .id-caption code { font-family: var(--font-mono); font-size: 9.5px; color: var(--accent); }
-/* the toolkit hosts the chooser in its narrower summary column */
-.tk-summary .id-block { margin: 2px 0 12px; }
-.tk-summary .id-select button { font-size: 10.5px; padding: 7px 5px; }
 
 /* ── Account step (the customer beat, preceding the cart) ──────
    Sits directly under the identity chooser: the create form while there's no
@@ -310,6 +297,9 @@
 .acct-row-mail { font-weight: 500; font-size: 11px; color: var(--ink-3); margin-left: 7px; }
 .acct-row-id { font-size: 10.5px; color: var(--ink-3); margin-top: 1px; }
 .acct-row .cof-link { flex: none; align-self: flex-start; }
+/* the checkout frame's profile strip — read-only: who is paying, as a fact */
+.acct-block.strip { flex-direction: row; align-items: center; padding: 10px 14px; background: var(--surface-2); }
+.acct-tick.guest, .acct-tick.pending { background: var(--line-2); color: var(--ink-3); }
 .acct-row-id code { font-family: var(--font-mono); font-size: 10px; color: var(--accent); }
 /* the toolkit hosts the step in its narrower summary column */
 .tk-summary .acct-block { margin: 0 0 12px; padding: 11px 12px; }
