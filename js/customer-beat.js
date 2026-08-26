@@ -28,7 +28,6 @@
 import { state, setState } from './state.js';
 import * as customers from './customers.js';
 import { identityMode, usesCustomer } from './identity.js';
-import { activeProduct } from './verticals.js';
 import { createCustomer } from './api.js';
 import { renderJSONView, highlightPaths } from './json-view.js';
 import { FIELD_MAP } from './sync.js';
@@ -242,7 +241,6 @@ export async function fireCreateCustomer() {
     refreshAccountPanel();
     repaintPanels();
     setActiveTab('response');
-    toast(`❌ ${data?.message || data?.error || 'Customer creation failed'}`, 'err');
     return false;
   }
 
@@ -255,29 +253,38 @@ export async function fireCreateCustomer() {
   refreshAccountPanel();
   repaintPanels();
   setActiveTab('response');
-  toast(`✅ ${id} created`);
   return true;
 }
 
 /* ── Left panel: the account step ────────────────────────── */
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 
-/* The form IS the request body, in the body's own order — one field per row, so
-   the SE can read straight across from a field to the line it writes. Every one
-   is registered in sync.js FIELD_MAP, so focusing it lights that line up.
-   `addresses[0].name` isn't listed: it tracks `name` rather than being typed. */
+/* The form mirrors the request body, in the body's own order — one field per
+   row, so the SE can read straight across from a field to the line it writes.
+   Every one is registered in sync.js FIELD_MAP, so focusing it lights that line
+   up. `addresses[0].name` isn't listed: it tracks `name` rather than being typed.
+
+   `kyc: true` marks the four enrichment fields. The BODY always carries them
+   (one cus_*** has to be AFT-ready across all three verticals), but only a
+   vertical where a real site would ask SHOWS them: a crypto onramp asks your
+   nationality and occupation, a furniture shop does not. */
 const ACCOUNT_FIELDS = [
   { id: 'f-cus-name',    path: 'name',            label: 'Full name',        autocomplete: 'name' },
   { id: 'f-cus-email',   path: 'email',           label: 'Email',            autocomplete: 'email', type: 'email' },
-  { id: 'f-cus-dob',     path: 'date_of_birth',   label: 'Date of birth',    autocomplete: 'bday' },
-  { id: 'f-cus-birth',   path: 'birth_country',   label: 'Country of birth', autocomplete: 'off' },
-  { id: 'f-cus-nat',     path: 'nationality',     label: 'Nationality',      autocomplete: 'off' },
-  { id: 'f-cus-occ',     path: 'occupation',      label: 'Occupation',       autocomplete: 'organization-title' },
+  { id: 'f-cus-dob',     path: 'date_of_birth',   label: 'Date of birth',    autocomplete: 'bday', kyc: true },
+  { id: 'f-cus-birth',   path: 'birth_country',   label: 'Country of birth', autocomplete: 'off', kyc: true },
+  { id: 'f-cus-nat',     path: 'nationality',     label: 'Nationality',      autocomplete: 'off', kyc: true },
+  { id: 'f-cus-occ',     path: 'occupation',      label: 'Occupation',       autocomplete: 'organization-title', kyc: true },
   { id: 'f-cus-line1',   path: 'address.line_1',  label: 'Address',          autocomplete: 'address-line1' },
   { id: 'f-cus-city',    path: 'address.city',    label: 'City',             autocomplete: 'address-level2' },
   { id: 'f-cus-country', path: 'address.country', label: 'Country',          autocomplete: 'country-name' },
   { id: 'f-cus-zip',     path: 'address.zip',     label: 'Postcode',         autocomplete: 'postal-code' },
 ];
+/** Verticals whose real-world equivalent runs KYC at signup. */
+const KYC_VERTICALS = new Set(['crypto']);
+const visibleAccountFields = () =>
+  ACCOUNT_FIELDS.filter((f) => !f.kyc || KYC_VERTICALS.has(state.vertical));
+
 /** The field a given id writes — used by the input handler. */
 export const accountFieldPath = (id) => ACCOUNT_FIELDS.find((f) => f.id === id)?.path || null;
 
@@ -292,7 +299,7 @@ function accountFormHTML() {
     </label>`;
   return `
     <div class="acct-block" id="acct-block">
-      <div class="acct-fields">${ACCOUNT_FIELDS.map(field).join('')}</div>
+      <div class="acct-fields">${visibleAccountFields().map(field).join('')}</div>
       ${st === 'error' ? `<div class="acct-err">We couldn't save your details. Please try again.</div>` : ''}
     </div>`;
 }
@@ -308,11 +315,16 @@ export function accountCtaState() {
   };
 }
 
-/** The created account, as a row. Three homes, one template: the account
+/** The signed-in account, as a row. Three homes, one template: the account
     frame after the beat fires, frame 1's signed-in view, and the checkout
-    frame's profile strip. Currency comes from the product being charged —
-    the design system's "Your profile" facts block lists it alongside the id. */
-export function customerRowHTML(cus = customers.getCustomerId()) {
+    frame's profile strip.
+
+    A storefront shows you WHO you're signed in as — a name, an email, and what
+    you have saved. Not the customer id it holds for you, not the currency of an
+    order you haven't placed, and not a door into the merchant's own admin. The
+    cus_*** lives in the response, the request bodies and the webhook, one pane
+    to the right. */
+export function customerRowHTML() {
   const id = customers.getIdentity();
   const n = customers.credentials().length;
   return `
@@ -321,9 +333,8 @@ export function customerRowHTML(cus = customers.getCustomerId()) {
         <span class="acct-tick">✓</span>
         <div class="acct-row-main">
           <div class="acct-row-name">${esc(id.name)}<span class="acct-row-mail">${esc(id.email)}</span></div>
-          <div class="acct-row-id"><code>${cus}</code> · ${activeProduct().currency} · ${n ? `${n} card${n > 1 ? 's' : ''} on file` : 'no cards on file yet'}</div>
+          <div class="acct-row-id">${n ? `${n} saved card${n > 1 ? 's' : ''}` : 'No saved cards yet'}</div>
         </div>
-        <button type="button" class="cof-link" id="acct-bo">View in back office</button>
       </div>
     </div>`;
 }
@@ -333,7 +344,7 @@ export function customerRowHTML(cus = customers.getCustomerId()) {
    (the lazy fallback), so the strip never implies a cus_*** that doesn't exist. */
 function stripHTML() {
   const cus = customers.getCustomerId();
-  if (cus) return customerRowHTML(cus);
+  if (cus) return customerRowHTML();
   if (identityMode() === 'guest') {
     return `
       <div class="acct-block strip" id="acct-block">
@@ -365,11 +376,12 @@ function stripHTML() {
 export function accountPanelHTML() {
   if (state.step === 'checkout') return stripHTML();
   if (state.step !== 'account') return '';
-  const cus = customers.getCustomerId();
-  if (cus) return customerRowHTML(cus);
+  if (customers.getCustomerId()) return customerRowHTML();
   // Returning against a merchant-vaulted card only: there's no customer object
-  // to show, and creating one isn't what that story is about.
-  if (identityMode() === 'returning') return '';
+  // to show. This used to return '' — which left the frame rendering the heading
+  // "Create your account" and a Create button with NOTHING between them. The
+  // form is what belongs here: this shopper has a saved card but no account yet,
+  // so offering them one is exactly right.
   return accountFormHTML();
 }
 
@@ -434,7 +446,6 @@ document.addEventListener('focusout', (e) => {
 document.addEventListener('click', (e) => {
   if (e.target.closest('#acct-create')) { fireCreateCustomer(); return; }
   // leftView isn't a RESET_KEY, so the in-flight checkout survives the trip.
-  if (e.target.closest('#acct-bo')) { setState({ leftView: 'backoffice' }); return; }
 });
 
 /* Credentials/customer changing (a save harvest, a profile re-key, forget) —

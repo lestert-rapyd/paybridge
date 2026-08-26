@@ -61,11 +61,8 @@
    are ROUTE CARDS (.bo-route, design system §04.4b) — reused wholesale, since
    every answer here carries a money consequence the SE narrates. The only new
    geometry is the two-column product grid. */
-.step-rail {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  margin: 14px 0 4px;
-}
-.step-rail-n { font-size: 12px; color: var(--ink-3); }
+/* Back only — the frame count came off the storefront. */
+.step-rail { display: flex; justify-content: flex-end; margin: 14px 0 4px; }
 .step-back {
   border: 0; background: none; padding: 0; cursor: pointer;
   font-family: var(--font-sans); font-size: 12px; font-weight: 600; color: var(--ink-3);
@@ -82,9 +79,6 @@
 .frame-actions { display: flex; gap: 10px; margin-top: 14px; }
 .frame-actions .co-cta,
 .frame-actions .cs-secondary { flex: 1; min-width: 0; height: 52px; margin-top: 0; }
-/* secondary alternatives, also on one plane */
-.frame-alts { display: flex; gap: 10px; }
-.frame-alts .cs-secondary { flex: 1; min-width: 0; }
 
 /* Guest + subscription with no storage route: state the reason, offer the fix. */
 .frame-block {

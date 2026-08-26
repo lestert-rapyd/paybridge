@@ -982,7 +982,7 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .id-label { font-size: 17px; letter-spacing: -.01em; color: var(--c-ink); margin-bottom: 12px; }
 .id-caption { font-size: 11px; color: var(--c-ink-6); margin-top: 6px; }
 .step-rail { margin: 18px 0 0; }
-.step-rail-n, .step-back { font-size: 12px; color: var(--c-ink-6); }
+.step-back { font-size: 12px; color: var(--c-ink-6); }
 .step-back:hover { color: var(--c-ink-2); }
 .frame { margin-top: 20px; }
 .frame-q { font-size: 17px; color: var(--c-ink); }

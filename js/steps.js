@@ -27,7 +27,7 @@
 import { state } from './state.js';
 import { VERTICALS, productColumnsHTML } from './verticals.js';
 import {
-  setIdentityMode, chosenGuest, canGuestSubscribe, guestSubscribeBlocker,
+  setIdentityMode, chosenGuest, canGuestSubscribe,
   identityChooserHTML, promoteToReturning,
 } from './identity.js';
 import {
@@ -35,10 +35,7 @@ import {
   customerResponseCardHTML, fillCustomerSignature, beatCardHTML,
 } from './customer-beat.js';
 import * as customers from './customers.js';
-import { retrieveCustomer } from './api.js';
-import { renderJSONView } from './json-view.js';
 import { headersHTML, fillSignature, newSaltTimestamp } from './signing.js';
-import { setActiveTab, setStatus } from './ui.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -99,32 +96,31 @@ export function storeHeadHTML() {
     <div class="co-tagline">${LOCK_SVG}${v.headline.toUpperCase()}</div>`;
 }
 
+/* Back only. A real site has a browser Back button and, inside a checkout, at
+   most a progress caption — it does not number the shop's pages, and the demo's
+   four beats are the SE's structure, not the shopper's. The frame count came off
+   the storefront; a progress token for the checkout itself is Session A's call. */
 function railHTML() {
-  const n = STEPS.indexOf(state.step) + 1;
+  if (!history.length) return '';
   return `
     <div class="step-rail">
-      <span class="step-rail-n">Step ${n} of ${STEPS.length}</span>
-      ${history.length ? `<button type="button" class="step-back" id="step-back">← Back</button>` : ''}
+      <button type="button" class="step-back" id="step-back">← Back</button>
     </div>`;
 }
 
-function signedInFrameHTML(cus) {
+function signedInFrameHTML() {
   return `
     <div class="frame">
       <div class="frame-q">Welcome back</div>
       <div class="frame-sub">You're signed in. Your saved details are below.</div>
-      ${customerRowHTML(cus)}
+      ${customerRowHTML()}
       <button type="button" class="co-cta" id="step-continue">Continue</button>
-      <div class="frame-alts">
-        <button type="button" class="cs-secondary" id="cus-get-send">Refresh my details</button>
-        <button type="button" class="cs-secondary" id="step-guest">Check out as guest instead</button>
-      </div>
+      <button type="button" class="cs-secondary" id="step-guest">Check out as guest instead</button>
     </div>`;
 }
 
 function accountQFrameHTML() {
-  const cus = customers.getCustomerId();
-  if (cus) return signedInFrameHTML(cus);
+  if (customers.getCustomerId()) return signedInFrameHTML();
   return `
     <div class="frame">
       ${identityChooserHTML(answered)}
@@ -183,15 +179,11 @@ export function frameHTML() {
 /** The rail alone, for frame 4 (app.js renders the cart under it). */
 export function stepRailHTML() { return railHTML(); }
 
-/* ── Right pane on the frames that call nothing ───────────── */
-function plateHTML(text) {
-  return `<div class="eng-empty"><div class="ee-ico">◇</div><div class="ee-text">${text}</div></div>`;
-}
-
-/* The signed-in frame's one available call: re-read the customer from Rapyd.
-   Prepared on render, fired from the LEFT — the engine room has no buttons of
-   its own (design system §04.1 allows four variants, none of them Layer B) and
-   §5 puts the firing click on the client surface. */
+/* The signed-in frame PREPARES the retrieve so its shape is inspectable, but
+   nothing on the storefront fires it: a shopper has no "re-read my customer
+   record" button, and the one we had yanked the SE's tab to Response mid-
+   sentence. The back office fires this same call from its customer view, which
+   is where a merchant-side action belongs. */
 let getPainted = null;
 function customerGetCardHTML(cus) {
   const salt = newSaltTimestamp();
@@ -204,40 +196,11 @@ function customerGetCardHTML(cus) {
   });
 }
 
-async function fireRetrieve() {
-  const cus = customers.getCustomerId();
-  if (!cus) return;
-  const btn = $('#cus-get-send');
-  if (btn) { btn.disabled = true; btn.textContent = 'Refreshing…'; }
-  setStatus('Retrieving customer…', 'processing');
-  let httpStatus = 0, data = null;
-  try {
-    ({ httpStatus, data } = await retrieveCustomer(cus, state.env, state.profile));
-  } catch (err) {
-    // An undeployed route answers without CORS headers — fetch rejects, and
-    // leaving the button spinning forever would read as a hung demo.
-    httpStatus = 0;
-    data = { error: 'network_error', message: err.message };
-  }
-  const ok = httpStatus >= 200 && httpStatus < 400 && !data?.error;
-  setStatus(ok ? 'Customer retrieved' : 'Error', ok ? 'ok' : 'error');
-  const res = $('#panel-response');
-  if (res) {
-    res.innerHTML = beatCardHTML({
-      id: 'beat-cus-get-res', method: 'GET', path: `/v1/customers/${cus}`,
-      badge: ok ? 'CUSTOMER' : String(data?.error || 'ERROR'), badgeKind: ok ? 'ok' : 'err',
-      inner: `
-        <div class="eng-pillrow">
-          <span class="wh-pill ${ok ? 'success' : 'failure'}">HTTP ${httpStatus}</span>
-        </div>
-        ${renderJSONView(data ?? { error: 'no response body' })}`,
-    });
-  }
-  setActiveTab('response'); // the SE asked for this call — following it is correct
-  if (btn) { btn.disabled = false; btn.textContent = 'Refresh my details'; }
-}
+/** Paint the engine room for frames 1–3.
 
-/** Paint the engine room for frames 1–3. Writes #panel-request always; touches
+    No prose. A frame that calls nothing shows the empty state the panel already
+    ships with, plus whatever earlier beats are still inspectable — the SE says
+    what the frame is about. Writes #panel-request always; touches
     #panel-response ONLY on the account frame, where beat 1's response IS the
     subject — anywhere else a write could clobber a payment response the SE
     stepped back from. */
@@ -247,8 +210,7 @@ export function renderStepPanels() {
   const cus = customers.getCustomerId();
 
   if (state.step === 'account') {
-    req.innerHTML = customerRequestCardHTML()
-      || plateHTML(`Pick <b>Create an account</b> to draft <code>POST /v1/customers</code>.`);
+    req.innerHTML = customerRequestCardHTML();
     fillCustomerSignature();
     const res = $('#panel-response');
     const resCard = customerResponseCardHTML();
@@ -257,21 +219,19 @@ export function renderStepPanels() {
   }
 
   if (state.step === 'account-q') {
-    req.innerHTML = cus
-      ? plateHTML(`This session already holds <code>${cus}</code>. Nothing needs creating — but you can re-read it.`) + customerGetCardHTML(cus)
-      : plateHTML(`Nothing is called yet. <b>Create an account</b> makes <code>POST /v1/customers</code> beat 1; <b>guest</b> goes straight to <code>POST /v1/payments</code>.`);
+    req.innerHTML = cus ? customerGetCardHTML(cus) : emptyRequestHTML();
     if (cus) fillSignature($('#beat-cus-get'), 'get', getPainted.path, getPainted.salt, null, 'beat-cus-get');
     return;
   }
 
-  // product — choosing calls nothing; beat 1 stays inspectable below the plate.
-  // A blocked guest subscription puts its REASON here, in the engine room: the
-  // storefront just says an account is needed, the truth layer says why.
-  req.innerHTML = plateHTML(blocked
-    ? `No storable credential for a guest subscription. ${guestSubscribeBlocker()}`
-    : `Choosing a product calls nothing. Next: <code>POST /v1/payments</code>, on the checkout.`)
-    + customerRequestCardHTML();
+  // product — choosing calls nothing; earlier beats stay inspectable.
+  req.innerHTML = customerRequestCardHTML() || emptyRequestHTML();
   fillCustomerSignature();
+}
+
+/* The Request tab's own resting state, matching app.js's other empty panels. */
+function emptyRequestHTML() {
+  return `<div class="eng-empty"><div class="ee-ico">◇</div><div class="ee-text">The request body appears here as it's drafted.</div></div>`;
 }
 
 /* The account frame's own footer changes with the beat (Skip → Continue), and
@@ -311,7 +271,6 @@ document.addEventListener('click', (e) => {
     goStep('product');
     return;
   }
-  if (e.target.closest('#cus-get-send')) { fireRetrieve(); return; }
 
   // Frame 3's product cards.
   const prod = e.target.closest('.prod-cols [data-product]');

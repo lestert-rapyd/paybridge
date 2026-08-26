@@ -2,7 +2,7 @@
    PayBridge Demo Suite — bootstrap (on-brand redesign)
    ───────────────────────────────────────────────────────────── */
 
-import { VERTICALS, VERTICAL_ORDER, activeProduct, customerCharge, fxQuoteKey, chargeText, productCta } from './verticals.js';
+import { VERTICALS, VERTICAL_ORDER, activeProduct, customerCharge, fxQuoteKey, chargeText, productCta, setFxBeat } from './verticals.js';
 import { PROFILES, PROFILE_ORDER } from './profiles.js';
 import { accountPanelHTML, syncCustomerBeat, setPanelRepainter, setHighlightHook } from './customer-beat.js';
 import {
@@ -168,6 +168,11 @@ function maybeFetchFxQuote() {
       : { key, error: true };
     renderFxPreview();
     refreshCharge();
+    // This was the one Rapyd call with NO engine-room surface: its whole UI was
+    // the FX popover, on the storefront. Record it so the flows can show it as a
+    // card like every other beat — the SE can point at the rate they quoted.
+    setFxBeat({ params, httpStatus: resp?.httpStatus ?? 0, data: resp?.data ?? null });
+    FLOWS[state.model].refreshRightPanel?.();
   }, 250);
 }
 // Single entry point: repaint the popover preview + the checkout charge from

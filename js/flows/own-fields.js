@@ -25,7 +25,7 @@
    ───────────────────────────────────────────────────────────── */
 
 import { state } from '../state.js';
-import { VERTICALS, activeProduct, customerCharge, chargeText, fxSnapshot, productCta } from '../verticals.js';
+import { VERTICALS, activeProduct, customerCharge, chargeText, fxSnapshot, productCta, getFxBeat, fxBeatPath } from '../verticals.js';
 import { createDirectPayment } from '../api.js';
 import { profileEwallet, nridAvailable, activeProfile } from '../profiles.js';
 import { clientDetails } from '../client-details.js';
@@ -274,16 +274,14 @@ function returningHTML() {
           </div>
           <div class="cof-cvv-note">Just confirm it’s you — your card is on file.</div>
         </div>` : `
-        <div class="cof-nocvv">${mode === 'nrid'
-          ? 'No CVV needed for this card.'
-          : 'No card details needed — we’ll use your saved card.'}</div>`}
+        ${mode === 'nrid' ? '' : `<div class="cof-nocvv">No card details needed — we’ll use your saved card.</div>`}`}
       ${p.aft ? directPurchaseHTML() : ''}
       <label class="co-tds">
         <input type="checkbox" id="f-tds" ${tds ? 'checked' : ''} />
         <span>Require 3-D Secure</span>
       </label>
       <button class="co-cta" id="pay-btn">${productCta()} ${p.amount} ${p.currency}</button>
-      <div class="cof-foot"><button type="button" class="cof-link subtle" id="cof-forget">Not ${first}? Forget this profile</button></div>
+      <div class="cof-foot"><button type="button" class="cof-link subtle" id="cof-forget">Not ${first}? Sign out</button></div>
     </div>`;
 }
 
@@ -385,11 +383,11 @@ function deckHTML() {
       ${needsCustomer ? `
       <div class="sc-cust">
         <div class="sc-cust-head">Rapyd customer<span class="se-deck-hint">prerequisite · created first</span></div>
-        <div class="sc-cust-body">A <code>card_***</code> token is held by a customer, so beat 1 is <code>POST /v1/customers</code> → <code>cus_***</code>; the payment then saves the card under it. <b>Name on card</b> inherits this identity.</div>
+        <div class="sc-cust-body">Saves under <code>${customers.getCustomerId() || 'cus_***'}</code>.</div>
         <div class="sc-cust-id"><code>${id.name}</code><code>${id.email}</code></div>
       </div>` : `
       <div class="sc-cust vault">
-        <div class="sc-cust-body">No Rapyd customer — the merchant vaults the PAN itself; reuse re-sends the stored PAN.</div>
+        <div class="sc-cust-body">Merchant vault — no <code>cus_***</code>.</div>
       </div>`}
       ${!nridOk ? `<div class="se-warn">${activeProfile().label} returns no <code>network_reference_id</code>, so PCI vault reuse isn’t available. Pick a credential that returns it — <b>SC2</b> or <b>SC3</b> via the Sandbox picker — or save a <b>Rapyd token</b>.</div>` : ''}
       ${!avail.token ? `<div class="se-warn">Guest checkout has no <code>cus_***</code>, so a Rapyd <code>card_***</code> token can’t be stored. Switch to <b>Create an account</b> for the token route — the merchant vault needs no customer.</div>` : ''}`;
@@ -461,6 +459,22 @@ function syncNameInheritance() {
   }
 }
 
+/* The fx_rates quote, as a card. Recorded in verticals.js by app.js's debounced
+   fetcher; shown here so the call the FX popover makes is inspectable like any
+   other beat instead of living only on the storefront. */
+function fxCardHTML() {
+  const b = getFxBeat();
+  if (!b) return '';
+  const ok = b.httpStatus >= 200 && b.httpStatus < 400 && !b.data?.error;
+  return beatCardHTML({
+    id: 'beat-fx', method: 'GET', path: fxBeatPath(),
+    badge: ok ? 'quoted' : 'failed', badgeKind: ok ? 'ok' : 'err',
+    inner: `
+      <div class="eng-pillrow"><span class="wh-pill ${ok ? 'success' : 'failure'}">HTTP ${b.httpStatus}</span></div>
+      ${renderJSONView(b.data ?? { error: 'no response body' })}`,
+  });
+}
+
 /* ── Request panel ───────────────────────────────────────────
    Two stacked beat cards: the customer create (owned by customer-beat.js,
    absent for a guest) above this flow's payment. The customer card used to be
@@ -479,7 +493,7 @@ function renderRequest() {
       ${headersHTML(st)}
       <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${sent ? 'signed &amp; sent' : 'updates as you type'}</span></div>
       <div id="req-json">${renderJSONView(body)}</div>`,
-  });
+  }) + fxCardHTML();
   fillCustomerSignature();
   fillSignature($('#beat-pay'), 'post', '/v1/payments', st, body); // live — recomputes with the body
   applyHighlight();
@@ -573,11 +587,11 @@ function handleTerminal(ev) {
   // fallback's status object (CLO+paid) when no webhook was delivered.
   const success = /COMPLETED|CAPTURE/.test((ev.type || '').toUpperCase()) || (ev.status === 'CLO' && ev.paid);
   if (success) {
-    setStatus('Paid · CLO', 'ok'); renderSuccess(ev); toast('✅ Confirmed by webhook');
+    setStatus('Paid · CLO', 'ok'); renderSuccess(ev);
     ledger.updateStatus(state.reference, { status: 'completed', phase: 'completed' });
     harvestCredentials(ev);
   } else {
-    setStatus('Failed', 'error'); renderError(ev); toast('❌ Payment failed', 'err');
+    setStatus('Failed', 'error'); renderError(ev);
     ledger.updateStatus(state.reference, { status: 'failed', phase: 'failed' });
     pendingSave = null; // nothing was authorised for reuse
   }
@@ -727,8 +741,7 @@ async function pay() {
 
     if (!d || data?.error) {
       setStatus('Declined', 'error');
-      toast(`❌ ${data?.message || data?.error || 'Payment failed'}`, 'err');
-      renderError({ status: data?.error || 'ERR', message: data?.message || 'The payment was declined.' });
+      renderError({ status: data?.error || 'ERR' }); // the decline copy is screens.js's, always
       ledger.updateStatus(state.reference, { status: 'failed', phase: 'declined' });
       pendingSave = null;
       return;
@@ -751,7 +764,7 @@ async function pay() {
   } catch (err) {
     renderResponse(0, { error: 'network_error', message: err.message });
     setStatus('Error', 'error');
-    renderError({ status: 'ERR', message: err.message });
+    renderError({ status: 'ERR' });
     ledger.updateStatus(state.reference, { status: 'failed', phase: 'error' });
     pendingSave = null;
   } finally {

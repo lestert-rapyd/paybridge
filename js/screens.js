@@ -129,23 +129,24 @@ export function render3DS(url) {
     </div>`;
 }
 
-/* facts rows: click any value to copy it ("Copied ✓" feedback) */
+/* Receipt rows. Values are set in the UI face, not mono, and are not
+   click-to-copy: a receipt is something a shopper reads, and the mono +
+   "Copied ✓" treatment made it read as a debug dump. The ids the SE needs —
+   payment, reference, customer — are one pane to the right. */
 function factsHTML(rows) {
   return `<div class="screen-facts rise-4">` + rows
     .filter(([, value]) => value != null && value !== '')
-    .map(([label, value, danger]) =>
-      `<div><span>${label}</span><code ${danger ? 'class="danger"' : ''} data-copy="${value}" title="Click to copy">${value}</code></div>`)
+    .map(([label, value]) => `<div><span>${label}</span><b>${value}</b></div>`)
     .join('') + `</div>`;
 }
-function wireCopy() {
-  host().querySelectorAll('[data-copy]').forEach(el => {
-    el.addEventListener('click', () => {
-      try { navigator.clipboard?.writeText(el.dataset.copy); } catch { /* clipboard unavailable */ }
-      const orig = el.textContent;
-      el.textContent = 'Copied ✓';
-      setTimeout(() => { el.textContent = orig; }, 1400);
-    });
-  });
+
+/* A shop's order number. Derived from the demo reference's own timestamp, so it
+   is stable for the run and the SE can still tie it to the pb_* reference in
+   the right pane — but it reads like something a store would print. */
+function orderNumber() {
+  const ref = state.reference || '';
+  const digits = ref.replace(/\D/g, '');
+  return digits ? `#${digits.slice(-4)}` : '#0001';
 }
 
 const CHECK_SVG = `<svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"></path></svg>`;
@@ -167,7 +168,6 @@ export function renderSuccess(event = {}) {
   const v = VERTICALS[state.vertical];
   const pay = event.raw?.data || {};
   const lp = state.lastPayment || {};
-  const reference = pay.merchant_reference_id || state.reference || '—';
   // Product/AFT-aware copy: the flow picks the note at pay time (e.g. the
   // crypto "wallet funded, buy later" variant when is_direct_purchase=false).
   const note = lp.note || v.successNote;
@@ -183,17 +183,14 @@ export function renderSuccess(event = {}) {
       <div class="screen-sub rise-2">${v.merchant} · <strong>${paidLabel()}</strong></div>
       ${note ? `<div class="screen-next rise-3">${note}</div>` : ''}
       ${factsHTML([
-        ['Payment', event.payment_id || '—'],
-        ['Reference', reference],
-        ['Card', cardLabel(pay, lp)],
-        ['Customer', lp.customer_id],
+        ['Order', orderNumber()],
+        ['Paid', paidLabel()],
+        ['Method', cardLabel(pay, lp)],
         ['Saved card', lp.credential_label],
-        ['Status', event.status || 'CLO'],
       ])}
       <button class="co-cta rise-5" id="screen-reset">Run another payment</button>
     </div>`;
   setOffstage(bankViewHTML(event)); // bank-app view lives OUTSIDE the client window
-  wireCopy();
   wireReset();
 }
 
@@ -204,10 +201,10 @@ export function renderError(event = {}) {
   const v = VERTICALS[state.vertical];
   const pay = event.raw?.data || {};
   const lp = state.lastPayment || {};
-  const declineCode = pay.failure_code || event.code || null;
-  const note = event.message && event.message !== 'The payment did not complete.'
-    ? event.message
-    : 'Your card was declined — no charge was made. Try a different card, or contact your bank if it keeps happening.';
+  // One sentence, always ours. The gateway's own message (and any SDK error that
+  // reached this far) is engine-room material — printing it here put strings like
+  // "Failed to fetch" in front of the shopper.
+  const note = 'Your card was declined — no charge was made. Try a different card, or contact your bank if it keeps happening.';
   host().innerHTML = `
     <div class="screen error">
       ${badgeHTML('err')}
@@ -215,16 +212,12 @@ export function renderError(event = {}) {
       <div class="screen-sub rise-2">${v.merchant} · <strong>${paidLabel()}</strong></div>
       <div class="screen-next err rise-3">${note}</div>
       ${factsHTML([
-        ['Payment', event.payment_id || '—'],
-        ['Reference', pay.merchant_reference_id || state.reference || '—'],
-        ['Card', cardLabel(pay, lp)],
-        ['Status', event.status || 'ERR', true],
-        ['Decline code', declineCode, true],
+        ['Order', orderNumber()],
+        ['Method', cardLabel(pay, lp)],
       ])}
       <button class="co-cta rise-5" id="screen-reset">Try a different card</button>
       <button class="cs-secondary rise-6" id="screen-back">Back to store</button>
     </div>`;
-  wireCopy();
   wireReset();
   document.getElementById('screen-back')?.addEventListener('click', () => setState({}));
 }

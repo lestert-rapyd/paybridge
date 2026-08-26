@@ -19,7 +19,7 @@
    ───────────────────────────────────────────────────────────── */
 
 import { state } from '../state.js';
-import { VERTICALS, activeProduct, customerCharge, chargeText, fxSnapshot, productCta } from '../verticals.js';
+import { VERTICALS, activeProduct, customerCharge, chargeText, fxSnapshot, productCta, getFxBeat, fxBeatPath } from '../verticals.js';
 import { createCheckoutSession, createDirectPayment } from '../api.js';
 import { profileEwallet } from '../profiles.js';
 import { clientDetails } from '../client-details.js';
@@ -255,7 +255,7 @@ function summaryHTML() {
       <div id="tk-express-slot">${expressHTML()}</div>
       <div class="tk-secure">
         <div class="tk-secure-head">🔒 Secure checkout</div>
-        <p>Payments are encrypted end-to-end and processed by Rapyd. Card details never touch ${v.merchant}'s servers.</p>
+        <p>Payments are encrypted end-to-end and processed by Rapyd.</p>
         <div class="tk-badges"><span class="b-visa">VISA</span><span class="b-mc">MC</span></div>
       </div>
     </aside>`;
@@ -296,7 +296,7 @@ function row(label, param, control, attrs = '') {
 function configPanelHTML() {
   return `
     <div class="tk-config" id="tk-config">
-      <div class="tkc-head"><span class="tkc-title">Toolkit config</span><span class="tkc-hint">updates the request →</span></div>
+      <div class="tkc-head"><span class="tkc-title">Toolkit config</span></div>
 
       <div class="tkc-sec">
         <div class="tkc-sec-label">Integration mode</div>
@@ -312,7 +312,7 @@ function configPanelHTML() {
             <input type="color" class="tkc-color" id="dc-btn-color" value="${accent()}" />
             <input type="text" class="tkc-input tkc-hex" id="dc-btn-color-hex" maxlength="7" value="${accent()}" placeholder="#5600ef" />
           </div>`, 'id="tkc-row-color"')}
-        ${row('Button label', 'your own button · demo', `<input type="text" class="tkc-input" id="dc-own-text" value="${custom.ownText}" />`, 'id="tkc-row-own" hidden')}
+        ${row('Button label', 'pay_button_text', `<input type="text" class="tkc-input" id="dc-own-text" value="${custom.ownText}" />`, 'id="tkc-row-own" hidden')}
       </div>
 
       <div class="tkc-sec" id="tkc-3ds">
@@ -333,7 +333,6 @@ function configPanelHTML() {
         ${row('CVV on reuse', 'require_card_cvv',
           `<label class="tkc-switch-wrap"><input type="checkbox" class="tkc-switch" id="tk-reqcvv" ${requireCvv ? 'checked' : ''} /></label>`, `id="tkc-row-reqcvv" ${effectiveCof() ? '' : 'hidden'}`)}
         ${row('Purpose', 'recurrence_type', `<span class="tkc-fixed"><code>${recurrence()}</code></span>`, `id="tkc-row-rec" ${effectiveCof() ? '' : 'hidden'}`)}
-        ${isSubscription() ? `<div class="tkc-note">Subscription product — the card must be stored; MIT charges run from the back office.</div>` : ''}
       </div>
 
       <div class="tkc-sec" id="tkc-wallets">
@@ -392,6 +391,22 @@ function syncControlVisibility() {
   if (launch) launch.textContent = hosted ? 'Create session →' : 'Render toolkit →';
 }
 
+/* The fx_rates quote, as a card. Recorded in verticals.js by app.js's debounced
+   fetcher; shown here so the call the FX popover makes is inspectable like any
+   other beat instead of living only on the storefront. */
+function fxCardHTML() {
+  const b = getFxBeat();
+  if (!b) return '';
+  const ok = b.httpStatus >= 200 && b.httpStatus < 400 && !b.data?.error;
+  return beatCardHTML({
+    id: 'beat-fx', method: 'GET', path: fxBeatPath(),
+    badge: ok ? 'quoted' : 'failed', badgeKind: ok ? 'ok' : 'err',
+    inner: `
+      <div class="eng-pillrow"><span class="wh-pill ${ok ? 'success' : 'failure'}">HTTP ${b.httpStatus}</span></div>
+      ${renderJSONView(b.data ?? { error: 'no response body' })}`,
+  });
+}
+
 /* ── Right: request / response / console ─────────────────────
    Beat 1 (the customer create) stacks above this flow's own card — same shell
    as own-fields. It used to be a console line only, so the body and response of
@@ -414,7 +429,7 @@ function renderRequest() {
       ${headersHTML(st)}
       <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">no card data — collected by the iframe</span></div>
       ${renderJSONView(body)}`,
-  }) + tkSection;
+  }) + fxCardHTML() + tkSection;
   fillCustomerSignature();
   fillSignature($('#beat-checkout'), 'post', '/v1/checkout', st, body); // live — recomputes with the body
 }
@@ -708,14 +723,19 @@ async function launch() {
     logEvent('POST /v1/checkout', `${id} · 201`, 'api', 'ok');
     startWebhookWatch({ reference: state.reference, onTerminal: handleTerminal, onPoll: () => { lastHeartbeat = new Date(); renderConsole(); } });
 
+    // Only #tk-area is replaced below, so the summary column survives the
+    // launch — including its profile row. Refresh it, or the row painted before
+    // the session was created sits beside the live iframe for the whole payment.
+    refreshAccountPanel();
+
     const area = $('#tk-area');
     if (mode === 'hosted') {
       setStatus('Redirect ready', 'action');
       area.innerHTML = `
         <div class="tk-redirect">
-          <div class="tk-redirect-title">Hosted checkout ready</div>
+          <div class="tk-redirect-title">Ready to pay</div>
           <div class="tk-redirect-desc">You’ll finish paying on a secure payment page, then come back here.</div>
-          <button class="co-cta" id="tk-open">Open hosted checkout ↗</button>
+          <button class="co-cta" id="tk-open">Continue to payment ↗</button>
         </div>`;
       $('#tk-open').addEventListener('click', () => window.open(redirect, '_blank', 'noopener'));
     } else {
@@ -743,7 +763,7 @@ async function launch() {
     renderResponse();
     setStatus('Error', 'error');
     logEvent('POST /v1/checkout', err.message, 'api', 'err');
-    renderError({ status: 'ERR', message: err.message });
+    renderError({ status: 'ERR' });
     ledger.updateStatus(state.reference, { status: 'failed', phase: 'error' });
   }
 }
@@ -793,7 +813,7 @@ async function expressPay(credRef) {
     if (!d || data?.error) {
       setStatus('Declined', 'error');
       logEvent('POST /v1/payments', data?.message || data?.error || 'declined', 'api', 'err');
-      renderError({ status: data?.error || 'ERR', message: data?.message || 'The payment was declined.' });
+      renderError({ status: data?.error || 'ERR' });
       ledger.updateStatus(state.reference, { status: 'failed', phase: 'declined' });
       return;
     }
@@ -814,7 +834,7 @@ async function expressPay(credRef) {
     paintExpressResponse(0, lastExpress.data);
     setStatus('Error', 'error');
     logEvent('POST /v1/payments', err.message, 'api', 'err');
-    renderError({ status: 'ERR', message: err.message });
+    renderError({ status: 'ERR' });
     ledger.updateStatus(state.reference, { status: 'failed', phase: 'error' });
   }
 }

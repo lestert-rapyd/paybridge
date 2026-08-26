@@ -163,25 +163,46 @@ export function productColumnsHTML(verticalId = state.vertical) {
   // question nobody has answered yet.
   const sel = state.selectedProduct;
   const chosen = sel && sel.vertical === verticalId ? sel.productId : null;
+  // Shopper words for the grouping. "One-time" and "Subscription" are the
+  // billing-model taxonomy the API uses; a shop says buy once or subscribe. The
+  // price stands on its own — a card doesn't label its price "Price".
   const col = (label, note, products) => `
     <div class="prod-col">
       <div class="prod-col-head">${label}<span>${note}</span></div>
-      ${products.length ? products.map((p) => `
+      ${products.map((p) => `
         <button type="button" class="bo-route ${p.id === chosen ? 'active' : ''}" data-product="${p.id}">
           <div class="bo-route-title">${p.name}${p.billing === 'subscription' ? ' <span class="ps-mo">/mo</span>' : ''}</div>
           <div class="bo-route-note">${p.desc}</div>
           <div class="bo-route-legs">
-            <div class="bo-route-leg"><span>Price</span><span><b>${p.amount} ${p.currency}</b></span></div>
+            <div class="bo-route-leg"><span></span><span><b>${p.amount} ${p.currency}</b></span></div>
           </div>
-        </button>`).join('')
-        : `<div class="prod-col-none">Nothing ${label.toLowerCase()} in this store.</div>`}
+        </button>`).join('')}
     </div>`;
   const of = (billing) => v.products.filter((p) => p.billing === billing);
+  const one = of('one_time'), sub = of('subscription');
   return `
     <div class="prod-cols">
-      ${col('One-time', 'pay once', of('one_time'))}
-      ${col('Subscription', 'bills again later', of('subscription'))}
+      ${one.length ? col('Buy once', 'one payment', one) : ''}
+      ${sub.length ? col('Subscribe', 'cancel anytime', sub) : ''}
     </div>`;
+}
+
+/* ── The fx_rates beat ───────────────────────────────────────
+   GET /v1/fx_rates fires from app.js's quote fetcher (debounced, on every FX
+   edit and price keystroke) and used to have NO engine-room surface at all —
+   its entire UI was the FX popover, on the storefront, which is backwards. The
+   exchange is recorded here beside the rest of the FX logic; each flow renders
+   it as a card with its own beatCardHTML, exactly like the calls it makes
+   itself. Data lives here, presentation stays in the flows — no import cycle. */
+let fxBeat = null;
+export function setFxBeat(beat) { fxBeat = beat; }
+export function getFxBeat() { return fxBeat; }
+/** The path as it went on the wire, for the card's headline. */
+export function fxBeatPath() {
+  if (!fxBeat) return '/v1/fx_rates';
+  const p = fxBeat.params;
+  const side = p.fixedSide === 'buy' ? `buy_amount=${p.amount}` : `sell_amount=${p.amount}`;
+  return `/v1/fx_rates?action_type=payment&buy_currency=${p.buyCurrency}&sell_currency=${p.sellCurrency}&${side}`;
 }
 
 /* ── FX-aware customer/merchant amounts ──────────────────────
