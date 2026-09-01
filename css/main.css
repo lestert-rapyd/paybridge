@@ -309,12 +309,6 @@ code { font-family: var(--font-mono); }
   padding: 6px 13px; font-size: 12px; color: var(--ink-2); font-family: var(--font-mono);
 }
 .urlbar .lock { font-size: 10px; }
-.chrome-tag {
-  margin-left: auto;
-  font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
-  color: var(--ink-3); background: var(--surface); border: 1px solid var(--line);
-  padding: 3px 8px; border-radius: 999px;
-}
 .browser-body { padding: 20px 22px 22px; }
 
 /* ── Checkout ────────────────────────────────────────────── */
@@ -480,16 +474,6 @@ code { font-family: var(--font-mono); }
 .co-cta:active { transform: translateY(1px); }
 .co-cta:disabled { opacity: .45; cursor: not-allowed; }
 
-.co-secure { display: flex; align-items: center; justify-content: center; gap: 7px; font-size: 11.5px; color: var(--ink-3); margin-top: 15px; }
-.co-secure b { color: var(--ink-2); }
-
-/* Toolkit placeholder */
-.co-toolkit { border: 1.5px dashed var(--line-2); border-radius: var(--r-md); padding: 26px; text-align: center; background: var(--surface-2); }
-.co-toolkit .tk-ico { font-size: 28px; }
-.co-toolkit .tk-title { font-size: 14px; font-weight: 700; margin-top: 9px; }
-.co-toolkit .tk-desc { font-size: 12px; color: var(--ink-3); margin-top: 6px; line-height: 1.5; }
-.co-toolkit em { color: var(--ink-4); }
-
 /* ── Right: tabs ─────────────────────────────────────────── */
 /* Explicit Hanken Grotesk so this mirrors .left-tabs exactly — .pane-right
    itself stays on --font-sans/--font-mono for the JSON/log content below,
@@ -605,15 +589,14 @@ details[open] > .beat-head > .beat-chev { transform: rotate(90deg); }
 .eng-empty .ee-ico { font-size: 24px; opacity: .5; }
 .eng-empty .ee-text { font-size: 12.5px; color: var(--eng-faint); line-height: 1.55; max-width: 320px; }
 .eng-empty code { font-size: 11.5px; color: var(--eng-muted); }
+/* The same empty state also renders in the BACK OFFICE, which is Layer A warm
+   paper — where the engine-room tokens paint a per-vertical purple/green/pink
+   grey on cream. Re-point it at the client ramp there. */
+.backoffice .eng-empty .ee-text { color: var(--c-ink-5); }
+.backoffice .eng-empty code { color: var(--c-ink-4); }
 .eng-sending { display: flex; align-items: center; justify-content: center; gap: 11px; padding: 44px 20px; font-size: 13px; color: var(--eng-muted); }
 .spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--eng-line); border-top-color: var(--info); animation: spin .7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-
-/* ── Response panel ──────────────────────────────────────── */
-.resp-http { font-family: var(--font-mono); font-size: 12px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 9px; }
-.resp-http .rc { padding: 3px 9px; border-radius: 5px; }
-.resp-http.ok .rc  { background: rgba(18,183,106,.16); color: var(--eng-ok); }
-.resp-http.err .rc { background: rgba(239,68,68,.16); color: var(--eng-err); }
 
 /* ── Webhooks panel ──────────────────────────────────────── */
 .wh-hint { padding: 13px 15px; border-radius: var(--r-sm); border: 1px solid var(--eng-line); background: var(--eng-surface); }
@@ -622,11 +605,7 @@ details[open] > .beat-head > .beat-chev { transform: rotate(90deg); }
 .wh-evt { font-family: var(--font-mono); font-size: 12.5px; font-weight: 700; color: var(--eng-text); }
 .wh-desc { font-size: 11.5px; color: var(--eng-muted); margin-top: 5px; line-height: 1.5; }
 .wh-desc em { color: var(--eng-faint); }
-.wh-desc code, .tds-desc code { font-size: 10.5px; color: var(--syn-num); }
-.tds-prompt { padding: 15px; border-radius: var(--r-sm); border: 1px solid var(--eng-line); border-left: 3px solid var(--warn); background: var(--eng-surface); }
-.tds-title { font-size: 13.5px; font-weight: 700; color: var(--eng-text); }
-.tds-desc { font-size: 12px; color: var(--eng-muted); margin: 6px 0 13px; line-height: 1.55; }
-.mini-cta { border: 0; border-radius: var(--r-sm); background: var(--warn); color: #2a1c05; font-size: 12px; font-weight: 700; padding: 9px 15px; }
+.wh-desc code { font-size: 10.5px; color: var(--syn-num); }
 
 /* ── Toast ───────────────────────────────────────────────── */
 .toast {
@@ -639,8 +618,6 @@ details[open] > .beat-head > .beat-chev { transform: rotate(90deg); }
 @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
 
 /* ── Toolkit flow (left) ─────────────────────────────────── */
-.tk-note { font-size: 12px; color: var(--ink-3); line-height: 1.5; margin-bottom: 14px; }
-.tk-note b { color: var(--ink-2); }
 #rapyd-checkout { min-height: 120px; }
 
 /* Toolkit config — grouped panel in the payment column (row grammar:
@@ -653,7 +630,6 @@ details[open] > .beat-head > .beat-chev { transform: rotate(90deg); }
 }
 .tkc-head { display: flex; align-items: baseline; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--eng-line); }
 .tkc-title { color: var(--eng-muted); font-size: 10px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
-.tkc-hint { margin-left: auto; color: var(--eng-faint); font-size: 10px; font-family: var(--font-mono); }
 .tkc-sec { padding: 13px 0 2px; border-bottom: 1px solid var(--eng-line); }
 .tkc-sec:last-of-type { border-bottom: 0; }
 .tkc-sec[hidden] { display: none; }
@@ -750,12 +726,6 @@ details[open] > .beat-head > .beat-chev { transform: rotate(90deg); }
 }
 
 /* optional SE controls deck below the client site (unused by current flows) */
-.demo-controls {
-  width: 100%; max-width: 980px; margin: 14px auto 0;
-  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-lg);
-  padding: 13px 16px 15px;
-}
-
 .tk-redirect { text-align: center; padding: 8px 0; }
 .tk-redirect-title { font-size: 15px; font-weight: 700; }
 .tk-redirect-desc { font-size: 12px; color: var(--ink-3); line-height: 1.5; margin: 7px 0 15px; }
@@ -862,16 +832,12 @@ details[open] .wh-chev { transform: rotate(90deg); }
 /* ── Left-panel screens: processing / 3DS / success / error ── */
 .screen { text-align: center; padding: 34px 22px 26px; display: flex; flex-direction: column; align-items: center; gap: 9px; }
 .screen-spinner { width: 42px; height: 42px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; margin-bottom: 6px; }
-.screen-badge { width: 66px; height: 66px; border-radius: 50%; display: grid; place-items: center; font-size: 34px; color: #fff; margin-bottom: 4px; }
-.screen-badge.ok { background: linear-gradient(135deg, var(--ok), #0e9f5b); box-shadow: 0 8px 24px rgba(18,183,106,.35); }
-.screen-badge.err { background: linear-gradient(135deg, #f04438, #d92d20); box-shadow: 0 8px 24px rgba(240,68,56,.32); }
 .screen-title { font-family: var(--font-display); font-size: 26px; letter-spacing: .02em; }
 .screen-sub { font-size: 13px; color: var(--ink-3); }
 .screen-facts { width: 100%; margin: 16px 0 4px; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
 .screen-facts > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 13px; font-size: 12px; border-bottom: 1px solid var(--line); }
 .screen-facts > div:last-child { border-bottom: 0; }
 .screen-facts span { color: var(--ink-3); flex: none; }
-.screen-facts code { font-family: var(--font-mono); font-size: 11px; color: var(--ink); background: var(--surface-2); padding: 2px 7px; border-radius: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .screen .co-cta { margin-top: 8px; }
 
 /* next-step callout on the success screen */
@@ -959,10 +925,6 @@ details[open] .wh-chev { transform: rotate(90deg); }
   background: var(--c-soft-2); border: 0; border-radius: 9px;
   font-family: inherit; font-size: 13.5px; color: var(--ink-2);
 }
-.chrome-tag {
-  font-size: 11px; font-weight: 600; letter-spacing: .06em; color: var(--c-ink-8);
-  background: transparent; border: 1px solid var(--c-line-3); border-radius: var(--r-sm); padding: 7px 11px;
-}
 .browser-body { padding: 26px 30px 28px; }
 .browser.wide-tk .browser-body { padding: 0; }
 /* 3DS: the simulator page needs a ≥610px viewport to centre its ~545px card,
@@ -993,7 +955,6 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .frame-actions .cs-secondary { border-color: var(--c-line-3); color: var(--c-ink-4); }
 .prod-col-head { font-size: 11px; letter-spacing: .11em; color: var(--c-ink-7); }
 .prod-col-head span { color: var(--c-ink-7); }
-.prod-col-none { color: var(--c-ink-6); }
 .ps-mo, .per-mo { color: var(--c-ink-6); }
 /* account step — same warm-card treatment as .co-order, so the beat reads as
    part of the page rather than an SE panel bolted on */
@@ -1004,6 +965,13 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .acct-field > span { font-size: 12px; color: var(--c-ink-3); }
 .acct-field .co-input { height: 44px; background: #fff; }
 .acct-field input { font-family: inherit; font-size: 14px; color: var(--c-ink-2); }
+/* In flight: the fields are frozen while POST /v1/customers is out. A frozen
+   field has to LOOK frozen — relabelling the button alone left the form
+   pixel-identical to an editable one. Driven by a class rather than
+   :has(input:disabled), the same way every other state on this surface is
+   (see .browser.wide-tk on :has() invalidation). */
+.acct-block.locked .co-input { background: var(--c-soft-2); border-color: var(--c-line-2); }
+.acct-block.locked input { color: var(--c-ink-5); cursor: not-allowed; }
 .acct-chip { background: #fff; border-color: var(--c-line-3); color: var(--c-ink-5); font-size: 10px; }
 .acct-block.created { padding: 13px 16px; }
 .acct-block.strip { padding: 12px 16px; background: var(--c-soft-2); }
@@ -1083,13 +1051,12 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .screen-facts { margin: 22px 0 0; border: 1px solid var(--c-line-2); border-radius: 14px; overflow: hidden; }
 .screen-facts > div { padding: 14px 16px; background: var(--c-fact); border-bottom: 0; border-top: 1px solid var(--c-line); }
 .screen-facts > div:first-child { border-top: 0; }
-.screen-facts > div:hover { background: var(--c-soft); }
 .screen-facts span { font-size: 13px; color: var(--c-ink-5); }
-.screen-facts code {
-  font-family: var(--font-mono); font-size: 12.5px; color: var(--c-ink-2); background: none; padding: 0;
-  cursor: pointer; line-height: 1.4;
-}
-.screen-facts code.danger { color: #c62828; }
+/* The value cell. UI face, not mono, and set ABOVE its own label — a receipt is
+   something a shopper reads. The click-to-copy era styled `code` here (with a
+   row hover to advertise it); factsHTML() emits <b> and nothing is clickable,
+   so those rules went with it. */
+.screen-facts b { font-size: 13.5px; font-weight: 700; color: var(--c-ink-2); line-height: 1.4; text-align: right; }
 .cs-secondary {
   margin-top: 12px; width: 100%; height: 48px; cursor: pointer;
   border: 1px solid var(--c-line-3); border-radius: 14px; background: #fff; color: var(--c-ink-4);
@@ -1137,7 +1104,6 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .tk-config { background: var(--se-bg); border: 0; border-radius: var(--r-xl); padding: 24px 26px 26px; font-family: inherit; }
 .tkc-head { border-bottom: 0; padding-bottom: 0; }
 .tkc-title { font-family: var(--font-mono); font-size: 12px; font-weight: 600; letter-spacing: .12em; color: var(--se-title); }
-.tkc-hint { font-size: 12px; color: var(--se-faint); }
 .tkc-sec { border-bottom: 0; padding: 22px 0 0; }
 .tkc-sec ~ .tkc-sec { border-top: 1px solid var(--se-line-2); margin-top: 22px; }
 .tkc-sec-label { font-size: 11px; letter-spacing: .11em; color: var(--se-faint); margin-bottom: 13px; }

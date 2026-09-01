@@ -332,8 +332,6 @@ function renderCheckout() {
   if (!isCheckout()) {
     host.innerHTML = frameHTML();
     $('.browser').classList.remove('wide-tk', 'wide-3ds');
-    $('#demo-controls').innerHTML = '';
-    $('#demo-controls').hidden = true;
     // No pay region exists on these frames: flow.mount() would wire #pay-btn
     // (a bare addEventListener) and syncFx() would fetch a quote for a price
     // that isn't on screen. Neither runs until the checkout frame.
@@ -380,12 +378,6 @@ function renderCheckout() {
       <div id="pay-region">${flow.renderPaymentHTML()}</div>`;
   }
 
-  // Optional SE controls deck outside the fake client site (unused by
-  // current flows — toolkit config lives inside its page).
-  const controls = $('#demo-controls');
-  controls.innerHTML = flow.renderControlsHTML ? flow.renderControlsHTML() : '';
-  controls.hidden = !flow.renderControlsHTML;
-
   // width classes (JS-toggled; see main.css note on :has())
   const browser = $('.browser');
   browser.classList.toggle('wide-tk', !!flow.renderPageHTML);
@@ -420,7 +412,6 @@ function toggleLeftView() {
   $$('.left-tab').forEach(b => b.classList.toggle('active', b.dataset.view === state.leftView));
   $('.browser').hidden = isBackoffice;
   $('#offstage').hidden = isBackoffice || !$('#offstage').innerHTML;
-  $('#demo-controls').hidden = isBackoffice || !FLOWS[state.model].renderControlsHTML;
   $('#backoffice').hidden = !isBackoffice;
   if (isBackoffice) backOffice.render();
   // Back office may have repainted the right panel's Request/Response while

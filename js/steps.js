@@ -52,7 +52,6 @@ let blocked = null;
    'guest', which would otherwise render as a choice the SE never made. */
 let answered = false;
 
-export const currentStep = () => state.step;
 export const isCheckout = () => state.step === 'checkout';
 
 /* app.js owns the client page (frame 4 is its shell + the flow's), so it
@@ -148,8 +147,9 @@ function blockerHTML() {
   if (!blocked) return '';
   const p = VERTICALS[state.vertical].products.find((x) => x.id === blocked);
   if (!p) return '';
-  // Shopper-true only. WHY it can't stay a guest checkout is the SE's line, and
-  // the engine room carries the detail (see renderStepPanels).
+  // Shopper-true only, and nothing anywhere elaborates: WHY it can't stay a guest
+  // checkout is the SE's line. (The engine-room variant of this copy was deleted
+  // from js/identity.js — don't reintroduce it here.)
   return `
     <div class="frame-block">
       <div class="frame-block-t">${p.name} needs an account</div>

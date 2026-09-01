@@ -87,7 +87,6 @@
 }
 .frame-block-t { font-size: 13px; font-weight: 700; color: var(--ink); }
 .frame-block-n { font-size: 11.5px; line-height: 1.5; color: var(--ink-3); margin-top: 4px; }
-.frame-block-n code { font-family: var(--font-mono); font-size: 10px; color: var(--accent); }
 .frame-block .cs-secondary { margin-top: 10px; height: 40px; font-size: 13px; }
 
 .prod-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -97,7 +96,6 @@
   font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
 }
 .prod-col-head span { font-size: 10px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--ink-4); }
-.prod-col-none { font-size: 11.5px; color: var(--ink-4); }
 .prod-col .bo-route { flex: none; }
 .ps-mo { font-weight: 500; font-size: 10px; color: var(--ink-3); margin-left: 2px; }
 .per-mo { font-size: 11px; font-weight: 600; color: var(--ink-3); }
@@ -196,7 +194,6 @@
 .id-block { margin: 2px 0 14px; }
 .id-label { font-size: 17px; font-weight: 700; letter-spacing: -.01em; color: var(--ink); margin-bottom: 12px; }
 .id-caption { font-size: 10.5px; line-height: 1.5; color: var(--ink-3); margin-top: 5px; }
-.id-caption code { font-family: var(--font-mono); font-size: 9.5px; color: var(--accent); }
 
 /* ── Account step (the customer beat, preceding the cart) ──────
    Sits directly under the identity chooser: the create form while there's no
@@ -251,37 +248,16 @@
 .acct-row-name { font-size: 12.5px; font-weight: 700; color: var(--ink); }
 .acct-row-mail { font-weight: 500; font-size: 11px; color: var(--ink-3); margin-left: 7px; }
 .acct-row-id { font-size: 10.5px; color: var(--ink-3); margin-top: 1px; }
-.acct-row .cof-link { flex: none; align-self: flex-start; }
 /* the checkout frame's profile strip — read-only: who is paying, as a fact */
 .acct-block.strip { flex-direction: row; align-items: center; padding: 10px 14px; background: var(--surface-2); }
 .acct-tick.guest, .acct-tick.pending { background: var(--line-2); color: var(--ink-3); }
-.acct-row-id code { font-family: var(--font-mono); font-size: 10px; color: var(--accent); }
 /* the toolkit hosts the step in its narrower summary column */
 .tk-summary .acct-block { margin: 0 0 12px; padding: 11px 12px; }
 
-/* ── SE strategy deck (#demo-controls) ───────────────────── */
-.se-deck {
-  border: 1px dashed var(--line-2);
-  border-radius: var(--r-md);
-  background: var(--surface-2);
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  font-family: var(--font-sans);
-}
+/* ── SE strategy deck — now the #sc-popover portal ────────
+   The dashed .se-deck / .se-deck-head panel it used to be went with
+   #demo-controls; only the rows and the two copy classes survive. */
 .se-deck-empty { font-size: 11.5px; color: var(--ink-3); }
-.se-deck-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: var(--ink-2);
-}
 .se-deck-hint { font-size: 9.5px; font-weight: 500; letter-spacing: .02em; text-transform: none; color: var(--ink-4); }
 .se-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .se-lab { display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; font-weight: 600; color: var(--ink-2); }
@@ -357,12 +333,6 @@
   border: 1px solid var(--eng-line);
   padding: 3px 9px;
   border-radius: 999px;
-}
-.tkc-note {
-  font-size: 10.5px;
-  color: var(--eng-muted);
-  padding: 4px 2px 0;
-  line-height: 1.5;
 }
 
 /* ── Back office: customer on file + MIT charge form ─────── */

@@ -11,6 +11,10 @@ export const FIELD_MAP = {
   'f-name':   ['payment_method.fields.name'],
   // "save my card" adds the whole stored-credential block
   'f-save':   ['save_payment_method', 'customer', 'payment_method.fields.recurrence_type'],
+  // "Require 3-D Secure" — the same shell as f-save, and it was the one editable
+  // control on the checkout with no entry here, so focusing it lit nothing while
+  // its sibling lit three rows (§8 law 9).
+  'f-tds':    ['payment_method_options.3d_required'],
   // Account frame — these paths live in the POST /v1/customers body, so the
   // highlight targets the customer beat card's JSON (#req-json-cus) rather than
   // the payment body's (#req-json). The form lists them in body order, one per

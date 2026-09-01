@@ -15,6 +15,11 @@ update this file in the same commit.
 > committed copy with `git show HEAD:css/<file>`, the `$TMPDIR/paybridge-preview/css` mirror, or
 > `document.styleSheets` on the running preview.
 
+> **Specimens.** `design-system.html` renders the **client surface** — every state of every frame
+> component, with the predicate that reaches it — inside the app's own ancestor chain under these same
+> stylesheets. It is the visual half of this document: prose here, stills there. It is hand-authored
+> from the producing functions, so **change a producer, change its specimen in the same commit**.
+
 **How to use.** Before building or restyling any surface: (1) pick the **layer** (§1), (2) reuse an
 existing **component** (§5) rather than inventing one, (3) obey the **voice split** (§6) and the
 **interaction laws** (§8). If nothing fits, compose from **tokens** (§2–4) and add the new class
@@ -42,6 +47,12 @@ Layer C rules (they keep new flows clean): edit values **in place** where they e
 (`.tile-field`); config with no natural home hangs off its element as a **corner bubble**
 (`.fx-trigger`) opening a portalled popover; pre-render developer config is the **dark panel**
 (`.tk-config`, `--se-*`); **always name the real API param** in mono.
+
+> **A control may name its own parameter. It may not teach.** Naming is what makes Layer C credible —
+> `save_payment_method` on the save-card row, `requested_currency` in the FX bubble. What is *not*
+> allowed is the sentence around it: which call the parameter belongs to, what the resulting object is
+> called, why the merchant would want it. That is the SE's line, and printing it takes their line away.
+> Layer C is a **label**, never a lesson.
 
 ---
 
@@ -138,9 +149,10 @@ uppercase body copy.
 **Radii** (`--r-*`): `xs 6px · sm 8px · md 12px · lg 16px · xl 20px · card 24px`. The browser card is
 `--r-card`; inputs/bank card `--r-md`; popovers & wallet/detail cards `--r-lg`; config panel `--r-xl`;
 engine chrome `--r-sm`; chips `--r-xs`. Any radius that lands on a step references its token. A set of
-**in-between radii** (4/5/7/9/10/11/13/14/18px — ~38 uses, incl. the deliberate 14px checkout-card
-corners) are kept as literals on purpose; snap them to the nearest step only as an intentional visual
-change, not silently.
+**in-between radii** (4/5/7/9/10/11/13/14/18px — **41 uses** across `main.css`+`cof.css`, incl. the
+deliberate 14px checkout-card corners) are kept as literals on purpose; snap them to the nearest step
+only as an intentional visual change, not silently. `50%`, `999px` and `0` are not part of that set —
+they are shapes, not steps.
 
 **Shadows** (`--shadow-*`): warm-tinted `--shadow-card` (the browser card), `--shadow-tile`
 (back-office cards), `--shadow-pop` (portals); plus `--shadow-sm/-md/-lg` for the base layer/cof.
@@ -166,9 +178,10 @@ Class prefixes map to areas (§9). Specs below are the *shipped* values.
 - **Text/link button** [both] — `.use-test`, `.cof-link` — no border/bg, accent colour, 12–13px 600
   (`.cof-link.subtle` for the quietest).
 - **Segmented control** [both] — bordered row; `.active` gets `--accent-soft`. Variants `.co-fx-seg`,
-  `.tkc-seg`, `.se-seg`, `.cof-dp`, `.prod-select`. Disabled = `opacity:.45` + `title` explaining why.
+  `.tkc-seg`, `.se-seg`, `.cof-dp`. Disabled = `opacity:.45` + `title` explaining why.
 - **Tab pill / toggle** — `.model-btn` (`--chrome-active` when active), `.env-switch button`
-  (accent fill), `.profile-switch button` (accent-soft).
+  (accent fill). The sandbox key picker is folded into that switch as `.cred-panel` / `.cred-row` /
+  `.cred-radio`; there is no separate profile switch.
 
 ### 5.2 Inputs & editable fields [A]
 - **`.co-input`** — 52px, 1.5px `--c-line-3` border, `--r-md`, optional leading `.field-ico`; inner
@@ -183,8 +196,9 @@ Class prefixes map to areas (§9). Specs below are the *shipped* values.
   `.backoffice .wh-pill` restates these on light ground.)
 - **`.status-ind`** [B] — the header state chip (dot + UPPERCASE label); `kind` = idle/drafting/
   processing/ok/action/error — the demo's heartbeat, driven at every transition via `setStatus()`.
-- **Saved-card chip `.cof-chip`** [A] — brand · masked number (mono) · exp · `.cof-chip-kind` tag ·
-  optional `NRI ✓`. Radio-select via `.active` (accent ring).
+- **Saved-card chip `.cof-chip`** [A] — brand · masked number (mono) · exp. Radio-select via `.active`
+  (accent ring). Nothing else: the credential's `recurrence_type` and whether it carries a
+  `network_reference_id` are engine-room facts, and the shopper's chip stopped carrying them.
 - **Category dot `.vp-dot` / `.eyebrow-dot`** — 8px accent/status dot before a label.
 - **Small tag** — `.bo-fx-badge`, `.bo-mit-badge`, `.mb-tag` — mono micro-caps for tile metadata.
 
@@ -211,7 +225,13 @@ Class prefixes map to areas (§9). Specs below are the *shipped* values.
 - **`.screen`** — centred column; `.screen-title` (37/800), `.screen-sub`, `.screen-next`, `.rise-*`.
 - **Result badge `.cs-badge`** — 78px circle, `cs-pop` overshoot, `.ok` (`--ok-ui`→`--ok-deep`
   gradient) / `.err` (`--err`→`--err-deep`) with ring + drawn check.
-- **Facts `.screen-facts`** — click-to-copy `code` rows; null values auto-drop. `.danger` for declines.
+- **Receipt `.screen-facts`** — label/value rows; null values auto-drop, so an absent fact simply
+  doesn't render. `span` label 13px `--c-ink-5`; `b` value **13.5px / 700 / `--c-ink-2`** — set *above*
+  its own label, in the UI face. **Not mono, no `code`, not click-to-copy, no row hover**: a receipt is
+  something a shopper reads, and the mono + "Copied ✓" treatment made the end of a successful demo read
+  as a debug dump. Success shows Order · Paid · Method · Saved card; a decline shows Order · Method and
+  no status row. The ids the SE needs are one pane to the right; the order number is derived from the
+  same `pb_*` reference so the two can still be tied together out loud.
 - **Bank view `.bank-view`** [A, offstage] — the customer's bank-app statement mock.
 
 ### 5.7 Overlays
@@ -219,7 +239,48 @@ Class prefixes map to areas (§9). Specs below are the *shipped* values.
   restate Layer A styling explicitly (they can't inherit past `.browser`). Outside-click closes via
   `composedPath()`.
 - **Toast `.toast`** — bottom-centre, dark pill (`--ink`), `toastIn`; `.toast-err` = `--err`.
-- **SE deck `.se-deck`** [A, offstage] — dashed panel for controls that sit *outside* the fake client site.
+  **Form validation only** ("Complete the card details first"). It is no longer an API-result channel:
+  announcing `cus_*** created` / `confirmed by webhook` / a raw gateway error over the shop said the SE's
+  line for them, and the status pill plus the response card already carry all three.
+- **SE strategy popover `#sc-popover`** [C, portal] — the stored-credential deck. `.se-row` / `.se-lab` /
+  `.se-seg` / `.se-fixed` rows plus `.se-deck-empty` / `.se-deck-hint` / `.se-warn` copy. It used to be a
+  dashed panel in a `#demo-controls` container below the browser card; both the container and the
+  `.se-deck` wrapper are gone. A `.se-warn` may state **its own control's** disabled reason; it may not
+  tell the SE which other surface to go and click.
+
+### 5.8 Client frames [A] — the four-frame sequence
+
+The client page is a **sequence**, not a page: one frame per beat, so `POST /v1/customers` reads as
+happening *before* the checkout rather than inside it. Frames 1–3 are `js/steps.js`; frame 4 is the
+active flow's. Specimens with every state: `design-system.html`.
+
+- **Frame `.frame`** — the frame body. `.frame-q` (17px/700, the question) + optional `.frame-sub`
+  (13px, `--c-ink-6`). Every frame renders the store head above it (`.co-merchant` + `.co-tagline`),
+  which is what stops a sequence reading as a wizard.
+- **Answers are choice cards** — `.bo-route` (§5.4), reused wholesale. Each answer on this surface
+  carries a money consequence the SE narrates, which is exactly what that card is for. **Nothing is
+  pre-selected**: a default in `state` is not an answer, so the chooser takes an `answered` flag and the
+  product grid keys off `state.selectedProduct`, never `activeProduct()`.
+- **Rail `.step-rail` / `.step-back`** — **Back only.** No step counter, no progress caption, and
+  nothing replaces the one that was removed: the four beats are the SE's structure, not the shopper's,
+  and a shop does not number its own pages. Back walks the frames *actually visited*, not `STEPS` order.
+- **Account block `.acct-block`** — one shell, four states: the **form** (base), `.created` (the
+  profile row), `.strip` (read-only on the checkout frame), `.locked` (frozen while the call is out —
+  fill drops to `--c-soft-2`, text to `--c-ink-5`; relabelling the button alone left a frozen form
+  pixel-identical to an editable one). `.acct-fields` is **one field per row, in request-body order**,
+  so the eye tracks straight across to the JSON line that field writes (§8 law 9). Ten rows is the
+  longest it gets; it stays single-column, because two columns break that alignment.
+- **Profile row `.acct-row`** — tick + name + email + what's saved. A storefront shows you *who you are
+  signed in as*, not the id it holds for you: no `cus_***`, no order currency, no link into the
+  merchant's own admin. `.acct-tick` variants `.guest` / `.pending`.
+- **Product grid `.prod-cols` / `.prod-col` / `.prod-col-head`** — two columns grouped by what the
+  shopper is agreeing to (*Buy once* / *Subscribe*), which is the frame's whole teaching point, so it is
+  a column heading rather than a sentence. Heads are eyebrows (11px/700/uppercase/`.1em`). The price
+  stands alone — a card does not label its price "Price". `.ps-mo` appends "/mo".
+- **Blocker `.frame-block`** — when an answer can't hold (a guest subscription with no storage route),
+  the option is **tried, not greyed out**, and the frame states the shopper-true need. *Why* the
+  merchant has no storage route is printed **nowhere** — it is the SE's line. (An engine-room variant of
+  that copy existed and was deleted; don't reintroduce it.)
 
 ---
 
@@ -228,11 +289,21 @@ Class prefixes map to areas (§9). Specs below are the *shipped* values.
 Two audiences share the screen. Never blur them.
 - **Customer-facing** (inside `.browser`, the storefront screens): plain human copy, **no API jargon**
   — "Save card for future purchases", "Buy BTC now". No field names, no `snake_case`.
-- **SE-facing** (the engine room, the `.se-deck`, toolkit config `.tkc-*`): label every control with
+- **SE-facing** (the engine room, the strategy popover `.se-*`, toolkit config `.tkc-*`): label every control with
   its **real API key** in mono `code` — `save_payment_method`, `initiation_type`, `require_card_cvv`.
 
 If a control affects the request, the SE side names the exact field it writes; the customer side
 describes the *outcome*. This split is the product's core credibility — protect it.
+
+**The storefront's absolute.** Inside `.browser` the left pane is a **website**: the right pane is the
+truth and the SE is the narration. Nothing rendered there may print an identifier (`cus_***`,
+`card_***`, `payment_***`, `pb_*`), name an endpoint or method, use scheme vocabulary in shopper copy
+(vault, token, PAN, MIT/CIT, network reference, status codes like `CLO`/`ACT`/`ERR`), explain a
+mechanism rather than an outcome, pass a raw gateway or SDK error string through to shopper copy, or
+offer a control whose only purpose is to fire a call. Two sanctioned exceptions: a **Layer C control may
+name its own parameter** (§1 — name, don't teach), and **`#offstage`** sits outside the browser card and
+may annotate (the bank-app mock keeps its `statement_descriptor` eyebrow). The back office is a
+*merchant ops* surface, not a storefront — ids, tokens and prepared-call labels are legitimate there.
 
 ---
 
@@ -258,8 +329,10 @@ describes the *outcome*. This split is the product's core credibility — protec
    `≈`; a not-yet-known amount shows `CUR …`.
 4. **Live, honest request bodies** — the Request tab updates as you type with a real recomputing
    signature. Never fake a field; omit what the API would omit.
-5. **Webhook is the source of truth** — terminal screens are driven by real webhooks; optimistic
-   states are labelled ("Waiting for the confirmation webhook…"). No optimistic success screens.
+5. **Webhook is the source of truth** — terminal screens are driven by real webhooks. No optimistic
+   success screens, ever. But the *label* is not the client's job: "waiting for the confirmation
+   webhook…" is engine-room vocabulary, and it belongs to the status pill and the Webhooks tab. The
+   storefront says what a shop says — "This only takes a moment — please don't close this page."
 6. **Redaction** — access keys show `rak_ABC***XYZ`; secrets never appear client-side.
 7. **Surface guards** — a paint fn checks it's the active surface before writing shared DOM
    (`state.leftView`); a monotonic `actionSeq`/`fxSeq` stops a slow response clobbering a newer one.
@@ -276,7 +349,9 @@ Class prefixes are the map — new classes go under the right prefix, beside the
 | prefix | area |
 |---|---|
 | `co-` | checkout / storefront order + fields |
-| `prod-` / `cof-` | product selector · card-on-file surfaces |
+| `frame-` / `step-` / `id-` / `acct-` | the four-frame sequence: frame body, Back rail, the account question, the account block/row (§5.8) |
+| `prod-` / `cof-` | product grid · card-on-file surfaces |
+| `ds-` | `design-system.html` page chrome **only** — never a component |
 | `se-` | sales-engineer strategy deck (offstage) |
 | `fx-` / `cur-` | FX popover + currency dropdown portals |
 | `tk-` / `tkc-` | toolkit page + toolkit config panel |
@@ -284,7 +359,7 @@ Class prefixes are the map — new classes go under the right prefix, beside the
 | `wh-` | webhook cards + pills |
 | `req-` / `eng-` / `jsonv` / `cl-` | engine-room request, labels, JSON view, console |
 | `screen-` / `cs-` / `bank-` | post-payment screens, result badge, bank-app mock |
-| `prof-` / `profile-` | sandbox key-profile switch |
+| `cred-` / `env-` | sandbox credential picker, folded into the env switch |
 | `chrome`-adjacent: `topbar` / `subbar` / `vertical-pills` / `model-` / `env-switch` | the app shell |
 
 IDs mirror prefixes (`#fx-popover`, `#bo-cof-sync`, `#prod-select`). Stable delegation roots
@@ -302,7 +377,59 @@ with accent text. **Only context, copy and colour change — layout never forks 
 
 ---
 
-## 11. Reconciliation history (2026-07-25)
+## 11. Amendment — the storefront/engine-room contract (2026-08-27)
+
+The client page became a four-frame sequence, and API narration came off the left pane. What that
+forced, recorded here so it isn't re-litigated:
+
+1. **§1 / §6 — "a control may name its own parameter; it may not teach."** Layer C stays embedded in the
+   client UI. The labels stay; the paragraphs explaining which call a parameter belongs to came off.
+2. **§5.8 — no progress token on the storefront.** The rail is Back only, and nothing replaced the
+   dropped "Step n of 4".
+3. **§8 law 5 — optimistic states are not labelled client-side.** The webhook is still the only thing
+   that drives a terminal screen; the *words* moved to the status pill and the Webhooks tab.
+4. **§5.6 — the receipt is UI face.** Value 13.5/700/`--c-ink-2` above a 13px label. The click-to-copy
+   `code` rules and the row hover that advertised them are deleted; `factsHTML()` emits `<b>`, and for a
+   while nothing styled it, so every value rendered *smaller* than its own label.
+5. **§5.8 — `.acct-block.locked`.** A form frozen mid-call now looks frozen.
+6. **§5.8 — the pending strip promises rather than reports.** "Account not created yet" was the last
+   system voice on the storefront. It now renders the same row as the created state — name, email,
+   "We'll save these details when you place your order." — so it stays shopper-true without implying a
+   `cus_***` that doesn't exist, and hands the SE a free before/after across the beat.
+7. **`design-system.html`** added as the specimen half of this document.
+
+A read-only audit of the shipped CSS/JS against this file then found seven more of the same species,
+all fixed in the same pass:
+
+- Layer C was still teaching in two places the earlier sweep missed — the strategy popover's
+  `recurrence_type` note ("· MIT charges run from the back office", the exact clause deleted from the
+  toolkit panel) and its `.se-warn` blocks, which stage-directed the SE to the Sandbox picker. Trimmed to
+  the derivation and to each control's own disabled reason.
+- The toolkit config panel printed the prose "chosen on the checkout" in a row's **mono API-param slot**.
+  `row()` now omits the `<code>` when there is no real field — a fake parameter is the one thing that
+  panel can't afford.
+- The success screen's primary read **"Run another payment"** — a demo control on a shopper's receipt.
+  Now "Continue shopping"; it still resets the flow.
+- **§8 law 9 was actually violated:** `#f-tds` ("Require 3-D Secure") writes
+  `payment_method_options.3d_required` and had no `FIELD_MAP` entry, so focusing it highlighted nothing
+  while its sibling `#f-save` lit three rows. Registered.
+- `.eng-empty` renders in the **back office** too, where the engine-room tokens paint a per-vertical
+  purple/green/pink grey on warm paper. Re-pointed at the client ramp under `.backoffice`.
+- **Dead vocabulary deleted** (nothing produced it): `.chrome-tag`, `.resp-http*`, `.screen-badge*`,
+  `.tds-prompt/-title/-desc`, `.mini-cta`, `.co-toolkit*`, `.co-secure*`, `.tk-note*`, `.tkc-hint`,
+  `.tkc-note`, `.se-deck`, `.se-deck-head`, `.prod-col-none`, `.acct-row .cof-link`,
+  `.acct-row-id code`, `.frame-block-n code`, `.id-caption code`, `.screen-facts code*`,
+  `.demo-controls` — plus the `#demo-controls` container itself and its `renderControlsHTML` hook,
+  which no flow ever implemented. In JS: a `toast()` no caller could reach, `currentStep`, and
+  `guestSubscribeBlocker()` — whose deletion is why the blocker's reason is now printed nowhere.
+- Deleting `.screen-badge` and `.mini-cta` also settled §2.6: the four hexes missing from the sanctioned
+  list (`#0e9f5b`, `#f04438`, `#d92d20`, `#2a1c05`) only ever lived in those dead rules.
+
+**Open:** `.acct-block.locked` is defined against the warm client card. The toolkit's config panel is
+`--se-*` near-black, where `--c-soft-2` would be wrong. Nothing renders that combination today, so no
+rule was invented — the first surface that needs one derives it from `--se-surface-2`.
+
+## 12. Reconciliation history (2026-07-25)
 
 This file and `css/tokens.css` were consolidated from four competing vocabularies that had accreted in
 the repo:

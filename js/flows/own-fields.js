@@ -7,7 +7,7 @@
 
    Stored-credential additions (card-on-file / recurring / AFT):
    · First payment — a customer-facing "save my card" checkbox plus an
-     SE strategy deck (#demo-controls): storage vault/token/both and the
+     SE strategy popover (#sc-popover): storage vault/token/both and the
      product-driven recurrence_type (one-time → unscheduled, subscription
      → recurring). Token saves run a TWO-BEAT submit: POST /v1/customers
      (enriched — AFT-ready) then POST /v1/payments with customer +
@@ -377,8 +377,8 @@ function deckHTML() {
       <div class="se-row">
         <div class="se-lab">Purpose<code>payment_method.fields.recurrence_type</code></div>
         <div class="se-fixed"><code>${recurrenceType()}</code><span class="se-note">${isSubscription()
-          ? 'subscription product → recurring · MIT charges run from the back office'
-          : 'one-time product → unscheduled · customer-present reuse on this page'}</span></div>
+          ? 'subscription product → recurring'
+          : 'one-time product → unscheduled'}</span></div>
       </div>
       ${needsCustomer ? `
       <div class="sc-cust">
@@ -389,8 +389,12 @@ function deckHTML() {
       <div class="sc-cust vault">
         <div class="sc-cust-body">Merchant vault — no <code>cus_***</code>.</div>
       </div>`}
-      ${!nridOk ? `<div class="se-warn">${activeProfile().label} returns no <code>network_reference_id</code>, so PCI vault reuse isn’t available. Pick a credential that returns it — <b>SC2</b> or <b>SC3</b> via the Sandbox picker — or save a <b>Rapyd token</b>.</div>` : ''}
-      ${!avail.token ? `<div class="se-warn">Guest checkout has no <code>cus_***</code>, so a Rapyd <code>card_***</code> token can’t be stored. Switch to <b>Create an account</b> for the token route — the merchant vault needs no customer.</div>` : ''}`;
+      ${/* A control may explain its OWN disabled state (design system §5.1: disabled
+            carries a reason). What it may not do is stage-direct the SE to another
+            surface — "pick SC2 via the Sandbox picker", "switch to Create an
+            account" — which is their line, and it was printing it for them. */''}
+      ${!nridOk ? `<div class="se-warn">${activeProfile().label} returns no <code>network_reference_id</code> — vault reuse unavailable.</div>` : ''}
+      ${!avail.token ? `<div class="se-warn">Guest checkout has no <code>cus_***</code> — token route unavailable.</div>` : ''}`;
   }
   const cred = activeCredential();
   if (!cred) return '';

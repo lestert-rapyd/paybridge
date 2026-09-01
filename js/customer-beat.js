@@ -25,7 +25,7 @@
    the call that made it.
    ───────────────────────────────────────────────────────────── */
 
-import { state, setState } from './state.js';
+import { state } from './state.js';
 import * as customers from './customers.js';
 import { identityMode, usesCustomer } from './identity.js';
 import { createCustomer } from './api.js';
@@ -298,7 +298,7 @@ function accountFormHTML() {
       <div class="co-input"><input id="${f.id}" ${f.type ? `type="${f.type}"` : ''} autocomplete="${f.autocomplete}" value="${esc(customers.getIdentityField(f.path))}" ${sending ? 'disabled' : ''} /></div>
     </label>`;
   return `
-    <div class="acct-block" id="acct-block">
+    <div class="acct-block${sending ? ' locked' : ''}" id="acct-block">
       <div class="acct-fields">${visibleAccountFields().map(field).join('')}</div>
       ${st === 'error' ? `<div class="acct-err">We couldn't save your details. Please try again.</div>` : ''}
     </div>`;
@@ -357,13 +357,18 @@ function stripHTML() {
         </div>
       </div>`;
   }
+  // Chose an account but skipped the frame. Same row as the created one — the
+  // details the shopper entered ARE what gets saved — with a sub that promises
+  // rather than reports, so it never implies a cus_*** that doesn't exist yet.
+  // ("Account not created yet" was system voice on a shopper's surface.)
+  const id = customers.getIdentity();
   return `
     <div class="acct-block strip" id="acct-block">
       <div class="acct-row">
-        <span class="acct-tick pending">·</span>
+        <span class="acct-tick pending">+</span>
         <div class="acct-row-main">
-          <div class="acct-row-name">Account not created yet</div>
-          <div class="acct-row-id">Your account will be created when you place this order.</div>
+          <div class="acct-row-name">${esc(id.name)}<span class="acct-row-mail">${esc(id.email)}</span></div>
+          <div class="acct-row-id">We'll save these details when you place your order.</div>
         </div>
       </div>
     </div>`;
@@ -460,15 +465,6 @@ customers.subscribeCustomers(() => {
   refreshAccountPanel();
 });
 
-/* ── Toast (same shape as own-fields') ───────────────────── */
-function toast(msg, type = 'ok') {
-  document.querySelector('.toast')?.remove();
-  const t = document.createElement('div');
-  t.className = `toast toast-${type}`;
-  t.textContent = msg;
-  document.body.appendChild(t);
-  setTimeout(() => t.remove(), 3600);
-}
 
 /** Called by app.js on every flow render: keep the webhook panel's customer
     section in step with the mode (guest ⇄ account) and the active MID. */

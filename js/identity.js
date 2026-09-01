@@ -25,7 +25,7 @@
 import { state } from './state.js';
 import * as customers from './customers.js';
 import { activeProduct } from './verticals.js';
-import { nridAvailable, activeProfile } from './profiles.js';
+import { nridAvailable } from './profiles.js';
 
 export const IDENTITY_MODES = ['guest', 'account', 'returning'];
 
@@ -47,15 +47,10 @@ export const canReturn = () => reusableCreds().length > 0;
     the PAN, so there the hosted page's save-card option IS the `customer` field
     on the checkout session — no account, no subscription. */
 export const canGuestSubscribe = () => state.model === 'own-fields' && nridAvailable();
-/** Why a guest subscription is unavailable right now. ENGINE-ROOM copy — the
-    storefront frame only says an account is needed (js/steps.js); this is the
-    truth layer's line, and the SE's. */
-export function guestSubscribeBlocker() {
-  if (canGuestSubscribe()) return '';
-  return state.model === 'toolkit'
-    ? `The iframe collects the card, so the merchant never holds a PAN to vault — a saved card has to live under a <code>cus_***</code>.`
-    : `${activeProfile().label} returns no <code>network_reference_id</code>, so there's nothing to bill later without a <code>cus_***</code>. Switch to <b>SC2</b>/<b>SC3</b>, or create the account.`;
-}
+/* There is deliberately NO exported "here's why a guest can't subscribe" copy.
+   It existed, rendered on the storefront, then moved to the engine room, and was
+   then dropped along with every other explanation: the frame states the shopper's
+   need, the request body states the truth, and the reason is the SE's line. */
 export const canGuest = () => !isSubscription() || canGuestSubscribe();
 
 /** The EFFECTIVE mode. Guards stale selections: an env/profile switch re-keys

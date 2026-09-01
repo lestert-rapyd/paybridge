@@ -188,7 +188,7 @@ export function renderSuccess(event = {}) {
         ['Method', cardLabel(pay, lp)],
         ['Saved card', lp.credential_label],
       ])}
-      <button class="co-cta rise-5" id="screen-reset">Run another payment</button>
+      <button class="co-cta rise-5" id="screen-reset">Continue shopping</button>
     </div>`;
   setOffstage(bankViewHTML(event)); // bank-app view lives OUTSIDE the client window
   wireReset();
@@ -226,6 +226,9 @@ function successVerb(v) {
   return v.cta === 'Deposit' ? 'Deposit' : v.cta === 'Buy' ? 'Purchase' : 'Payment';
 }
 
+/* Both terminal screens' primary resets the flow. The label has to be the
+   SHOP's word for it, not the demo's: "Run another payment" was a control the
+   SE reads out, printed where a store would say "Continue shopping". */
 function wireReset() {
   document.getElementById('screen-reset')?.addEventListener('click', () => setState({})); // re-render checkout fresh
 }

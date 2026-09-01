@@ -283,7 +283,7 @@ function partialFieldsHTML(entry) {
     <div class="bo-refund-field">
       <label>Amount</label>
       <div class="bo-refund-amtfield">
-        <input type="text" inputmode="decimal" class="bo-refund-input bo-refund-amount" id="bo-refund-amount" value="${esc(form.amount)}" />
+        <input type="text" inputmode="decimal" class="bo-refund-input" id="bo-refund-amount" value="${esc(form.amount)}" />
         ${curControl}
       </div>
     </div>
