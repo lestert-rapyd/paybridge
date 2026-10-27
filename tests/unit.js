@@ -9,7 +9,9 @@
      → http://localhost:8000/tests/
    Covers the pure helpers the audit fixes hang off: ui.esc, json-view's
    escaping, classify/isTrusted, the sync.js amount + brand rules, the
-   api.js reference/idempotency generators and ledger.refundedTotals.
+   api.js reference/idempotency generators and ledger.refundedTotals —
+   plus the merchant site's bag (site/cart.js) and how its total reaches
+   the flows (verticals.js activeProduct).
    ───────────────────────────────────────────────────────────── */
 
 import { esc } from '../js/ui.js';
@@ -20,6 +22,14 @@ import { refundedTotals, settlementOf } from '../js/ledger.js';
 // api.js has no top-level I/O (BACKEND_URL only reads a <meta>); only the
 // two pure generators are exercised — nothing here calls request().
 import { newReference, newIdempotencyKey } from '../js/api.js';
+// The bag rules (pure, catalog passed in) and the one path the flows read it
+// through — verticals.js activeProduct(). Neither touches the DOM or network.
+import {
+  cartLines, addToCart, setLineQty, removeLine, clearCart, cartCount,
+  resolveLines, lineTotal, cartTotal, cartProblem, cartAsProduct, MAX_QTY,
+} from '../js/site/cart.js';
+import { VERTICALS, activeProduct, pricedProduct, orderItems } from '../js/verticals.js';
+import { state } from '../js/state.js';
 
 /* ── Tiny harness ── */
 const cases = [];
@@ -316,6 +326,113 @@ test('refundedTotals: rounding and clamp (thirds sum to zero; over-refund never 
 });
 
 /* ── Must stay last: the tripwire in index.html saw nothing ── */
+/* ── site/cart.js — the bag ──
+   The bag total is what the flows charge (via activeProduct), so the money
+   maths, the single-currency rule and subscription isolation are pinned here. */
+const P = {
+  chair: { id: 'chair', name: 'Chair', billing: 'one_time', amount: '149.00', currency: 'GBP' },
+  riser: { id: 'riser', name: 'Riser', billing: 'one_time', amount: '119.00', currency: 'GBP' },
+  spray: { id: 'spray', name: 'Spray', billing: 'subscription', interval: 'monthly', cta: 'Subscribe', amount: '12.99', currency: 'GBP' },
+  oil:   { id: 'oil', name: 'Oil', billing: 'subscription', amount: '3.99', currency: 'GBP' },
+  usd:   { id: 'usd', name: 'Mug', billing: 'one_time', amount: '10.00', currency: 'USD' },
+  yen:   { id: 'yen', name: 'Tea', billing: 'one_time', amount: '500', currency: 'JPY' },
+  btc:   { id: 'btc', name: 'Bitcoin', billing: 'one_time', amount: '50.00', currency: 'USD', aft: true, purpose_code: 'crypto_currency' },
+};
+const CAT = Object.values(P);
+const L = (...pairs) => resolveLines(pairs.map(([productId, qty]) => ({ productId, qty })), CAT);
+
+/* Run `fn` with state fields swapped in, restoring them after (the tests share
+   the app's one state object). */
+function withState(patch, fn) {
+  const saved = {};
+  for (const k of Object.keys(patch)) saved[k] = state[k];
+  Object.assign(state, patch);
+  try { fn(); } finally { Object.assign(state, saved); }
+}
+
+test('cart: total is summed in minor units (no float drift)', () => {
+  eq(cartTotal(L(['spray', 3])), { amount: '38.97', currency: 'GBP' });
+  eq(cartTotal(L(['chair', 2], ['riser', 1])), { amount: '417.00', currency: 'GBP' });
+  eq(lineTotal(P.spray, 3), '38.97');
+  eq(lineTotal(P.yen, 3), '1500', 'zero-decimal currency keeps no decimals');
+  eq(cartTotal([]), { amount: null, currency: null });
+});
+
+test('cart: one currency per bag', () => {
+  eq(cartTotal(L(['chair', 1], ['usd', 1])), { amount: null, currency: null }, 'no honest single total');
+  eq(cartProblem(L(['chair', 1], ['usd', 1]))?.code, 'currency');
+  eq(cartProblem(L(['chair', 1], ['riser', 3])), null, 'same-currency one-offs are fine');
+});
+
+test('cart: a subscription checks out alone, qty 1', () => {
+  eq(cartProblem([])?.code, 'empty');
+  eq(cartProblem(L(['spray', 1])), null, 'a lone subscription is fine');
+  eq(cartProblem(L(['spray', 1], ['chair', 1]))?.code, 'subscription', 'mixed with a one-off');
+  eq(cartProblem(L(['spray', 1], ['oil', 1]))?.code, 'subscription', 'two subscriptions');
+  eq(cartProblem(L(['spray', 2]))?.code, 'subscription', 'qty > 1');
+  ok(/on its own/.test(cartProblem(L(['spray', 1], ['chair', 1])).message), 'shopper copy names the rule');
+});
+
+test('cart: composite product — id, amount, billing, lines', () => {
+  const one = cartAsProduct(L(['spray', 1]));
+  eq(one.id, 'spray', 'single qty-1 line keeps the product id (override / origin_product / MIT lookup)');
+  eq([one.amount, one.currency, one.billing, one.cta], ['12.99', 'GBP', 'subscription', 'Subscribe']);
+  const multi = cartAsProduct(L(['chair', 2], ['riser', 1]));
+  eq(multi.id, 'cart:chair*2+riser*1');
+  eq([multi.amount, multi.name, multi.billing], ['417.00', '3 items', 'one_time']);
+  eq(multi.lines.map((l) => [l.id, l.qty, l.amount]), [['chair', 2, '298.00'], ['riser', 1, '119.00']]);
+  eq(cartAsProduct(L(['chair', 2])).name, 'Chair × 2');
+  ok(cartAsProduct(L(['btc', 2])).aft === true, 'an all-AFT bag stays AFT');
+  ok(cartAsProduct(L(['btc', 1], ['usd', 1])).aft === false, 'a mixed bag never claims AFT');
+});
+
+test('cart: add / qty / remove / vertical guard', () => {
+  withState({ cart: null, vertical: 'rapydshop' }, () => {
+    addToCart('oak'); addToCart('oak');
+    addToCart('spray', { isSubscription: true }); addToCart('spray', { isSubscription: true });
+    eq(cartLines(), [{ productId: 'oak', qty: 2 }, { productId: 'spray', qty: 1 }], 'a subscription never doubles');
+    eq(cartCount(), 3);
+    setLineQty('oak', 99);
+    eq(cartLines()[0].qty, MAX_QTY, 'clamped');
+    setLineQty('oak', 0);
+    eq(cartLines().map((l) => l.productId), ['spray'], 'qty 0 removes');
+    removeLine('spray');
+    eq(cartLines(), []);
+    addToCart('oak');
+    eq(cartLines('ecommerce'), [], 'a bag captured for another vertical reads as empty');
+    clearCart();
+    eq(cartCount(), 0);
+  });
+});
+
+test('activeProduct: a valid bag is what the flows charge', () => {
+  const base = { cart: null, vertical: 'rapydshop', env: 'sandbox', productOverride: null, selectedProduct: null };
+  withState({ ...base, cart: { vertical: 'rapydshop', lines: [{ productId: 'oak', qty: 2 }, { productId: 'riser', qty: 1 }] } }, () => {
+    const p = activeProduct();
+    eq([p.amount, p.currency, p.billing], ['417.00', 'GBP', 'one_time']);
+    eq(orderItems(p).map((i) => i.id), ['oak', 'riser'], 'ledger items = the bag lines');
+    // Live clamps the bag total like any price; the override path is untouched.
+    withState({ env: 'live' }, () => eq(activeProduct().amount, '0.01'));
+    eq(pricedProduct().amount, '417.00', 'pre-clamp price stays the bag total');
+    // The SE's price override binds to THIS bag's id …
+    withState({ productOverride: { vertical: 'rapydshop', productId: p.id, amount: '400.00', currency: 'GBP' } }, () => {
+      eq(activeProduct().amount, '400.00');
+      // … and falls away once the bag changes.
+      withState({ cart: { vertical: 'rapydshop', lines: [{ productId: 'oak', qty: 1 }] } }, () => eq(activeProduct().amount, '149.00'));
+    });
+  });
+});
+
+test('activeProduct: an invalid or empty bag charges nothing from it', () => {
+  const first = VERTICALS.rapydshop.products[0];
+  withState({ cart: { vertical: 'rapydshop', lines: [{ productId: 'oak', qty: 1 }, { productId: 'spray', qty: 1 }] }, vertical: 'rapydshop', env: 'sandbox', productOverride: null, selectedProduct: null }, () => {
+    eq(activeProduct().id, first.id, 'mixed sub + one-off composes nothing (the bag blocks checkout)');
+  });
+  withState({ cart: null, vertical: 'ecommerce', env: 'sandbox', productOverride: null, selectedProduct: { vertical: 'ecommerce', productId: 'coffee-sub' } }, () => {
+    eq(activeProduct().id, 'coffee-sub', 'no bag → the selected product, as before');
+  });
+});
+
 test('no network calls were made', () => {
   const calls = window.__NETWORK_CALLS__;
   ok(Array.isArray(calls), 'tripwire not installed — open tests/index.html, not unit.js');

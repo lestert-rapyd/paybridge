@@ -346,7 +346,7 @@ export function accountCtaState() {
 }
 
 /** The signed-in account, as a row. Three homes, one template: the account
-    frame after the beat fires, frame 1's signed-in view, and the checkout
+    page after the beat fires, the sign-in page's signed-in view, and the checkout
     frame's profile strip.
 
     A storefront shows you WHO you're signed in as — a name, an email, and what
@@ -374,7 +374,9 @@ export function customerRowHTML() {
    (the lazy fallback), so the strip never implies a cus_*** that doesn't exist. */
 function stripHTML() {
   const cus = customers.getCustomerId();
-  if (cus) return customerRowHTML();
+  // Guest first: a shopper who signed out (or chose "check out as guest
+  // instead") pays as a guest even though this tab still holds a cus_***.
+  if (identityMode() !== 'guest' && cus) return customerRowHTML();
   if (identityMode() === 'guest') {
     return `
       <div class="acct-block strip" id="acct-block">

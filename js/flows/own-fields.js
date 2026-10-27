@@ -31,7 +31,7 @@
    ───────────────────────────────────────────────────────────── */
 
 import { state } from '../state.js';
-import { VERTICALS, activeProduct, customerCharge, chargeText, fxSnapshot, productCta } from '../verticals.js';
+import { VERTICALS, activeProduct, customerCharge, chargeText, fxSnapshot, productCta, orderItems } from '../verticals.js';
 import { createDirectPayment, newReference } from '../api.js';
 import { profileEwallet, nridAvailable, activeProfile } from '../profiles.js';
 import { clientDetails } from '../client-details.js';
@@ -720,6 +720,7 @@ async function pay() {
       origin: 'client', initiation_type: 'customer_present', profile: state.profile,
       credential: cred ? { kind: cred.kind, label: `${cred.brand} ···${cred.last4}` } : null,
       aft: !!p.aft,
+      items: orderItems(p),
     });
     // Armed now, synchronously before the POST — so it captures THIS payment's
     // reference and customer bucket (env:profile), whatever the SE switches to

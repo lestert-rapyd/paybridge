@@ -15,6 +15,7 @@
 import { state } from './state.js';
 import { SKINS } from './skins.js';
 import { PACKS } from './packs.js';
+import { cartLines, resolveLines, cartProblem, cartAsProduct } from './site/cart.js';
 
 const compose = (skin) => {
   const pack = PACKS[skin.pack];
@@ -32,9 +33,12 @@ const compose = (skin) => {
 
 export const VERTICALS = Object.fromEntries(Object.values(SKINS).map((s) => [s.id, compose(s)]));
 
-export const VERTICAL_ORDER = ['ecommerce', 'crypto', 'gaming'];
+export const VERTICAL_ORDER = ['ecommerce', 'crypto', 'gaming', 'rapydshop'];
 
-/* The active vertical's SELECTED product for the current environment.
+/* The active vertical's product for the current environment — what the flows
+   charge. A valid BAG (js/site/cart.js) wins: its lines fold into one composite
+   product whose amount is the bag total, so every flow, the price tile, FX and
+   the live clamp below keep reading this one path. With no (valid) bag,
    state.selectedProduct picks from the vertical's catalog (falling back to
    the first product — the classic one-time default — when unset or pointing
    at another vertical). An SE-edited amount/currency (the price tile) then
@@ -55,7 +59,9 @@ export function activeProduct(verticalId = state.vertical) {
 export function pricedProduct(verticalId = state.vertical) {
   const v = VERTICALS[verticalId];
   const sel = state.selectedProduct;
-  let p = (sel && sel.vertical === verticalId && v.products.find((x) => x.id === sel.productId)) || v.products[0];
+  let p = cartProduct(verticalId)
+    || (sel && sel.vertical === verticalId && v.products.find((x) => x.id === sel.productId))
+    || v.products[0];
   const override = state.productOverride;
   if (override && override.vertical === verticalId && override.productId === p.id) {
     p = { ...p, amount: override.amount, currency: override.currency };
@@ -63,45 +69,27 @@ export function pricedProduct(verticalId = state.vertical) {
   return p;
 }
 
+/** The bag's lines joined to this vertical's catalog: [{ product, qty }]. */
+export function bagLines(verticalId = state.vertical) {
+  return resolveLines(cartLines(verticalId), VERTICALS[verticalId].products);
+}
+
+/** The bag as one product, or null when it's empty or can't check out
+    (cart.js cartProblem — mixed currencies, a subscription not on its own). */
+export function cartProduct(verticalId = state.vertical) {
+  const lines = bagLines(verticalId);
+  return lines.length && !cartProblem(lines) ? cartAsProduct(lines) : null;
+}
+
+/** What a payment bought, for the ledger and the shopper's Orders page:
+    the bag's lines, or the single product as one line. Text only. */
+export function orderItems(p = activeProduct()) {
+  return p.lines || [{ id: p.id, name: p.name, qty: 1, amount: p.amount, currency: p.currency, billing: p.billing }];
+}
+
 /** The pay-button verb for the active product ("Pay" / "Subscribe" / "Start DCA"…). */
 export function productCta(verticalId = state.vertical) {
   return activeProduct(verticalId).cta || VERTICALS[verticalId].cta;
-}
-
-/** Customer-facing product chooser — the product FRAME (see js/steps.js), two
-    columns grouped by billing nature. Route-card grammar (`.bo-route`, design
-    system §04.4b): each option has a money consequence the SE has to narrate —
-    a subscription authorises later MITs, a one-time purchase doesn't — so the
-    consequence is stated on the card rather than left implicit. */
-export function productColumnsHTML(verticalId = state.vertical) {
-  const v = VERTICALS[verticalId];
-  // Only a product the SE actually PICKED reads as selected. activeProduct()
-  // falls back to the catalog's first entry, which would show an answer under a
-  // question nobody has answered yet.
-  const sel = state.selectedProduct;
-  const chosen = sel && sel.vertical === verticalId ? sel.productId : null;
-  // Shopper words for the grouping. "One-time" and "Subscription" are the
-  // billing-model taxonomy the API uses; a shop says buy once or subscribe. The
-  // price stands on its own — a card doesn't label its price "Price".
-  const col = (label, note, products) => `
-    <div class="prod-col">
-      <div class="prod-col-head">${label}<span>${note}</span></div>
-      ${products.map((p) => `
-        <button type="button" class="bo-route ${p.id === chosen ? 'active' : ''}" data-product="${p.id}">
-          <div class="bo-route-title">${p.name}${p.billing === 'subscription' ? ' <span class="ps-mo">/mo</span>' : ''}</div>
-          <div class="bo-route-note">${p.desc}</div>
-          <div class="bo-route-legs">
-            <div class="bo-route-leg"><span></span><span><b>${p.amount} ${p.currency}</b></span></div>
-          </div>
-        </button>`).join('')}
-    </div>`;
-  const of = (billing) => v.products.filter((p) => p.billing === billing);
-  const one = of('one_time'), sub = of('subscription');
-  return `
-    <div class="prod-cols">
-      ${one.length ? col('Buy once', 'one payment', one) : ''}
-      ${sub.length ? col('Subscribe', 'cancel anytime', sub) : ''}
-    </div>`;
 }
 
 /* ── The fx_rates beat ───────────────────────────────────────

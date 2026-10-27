@@ -20,12 +20,20 @@ export const state = {
   // the active vertical (same guard pattern as productOverride).
   selectedProduct: null,
 
-  // Which frame of the client page is on screen — see js/steps.js. The customer
-  // beat is separated in TIME, not just in space: one frame per call, so the
-  // engine room only ever shows the call the current frame is about. Mutated
+  // The shopper's bag: { vertical, lines: [{ productId, qty }] } | null — see
+  // js/site/cart.js. Mutated DIRECTLY; a bag captured for another vertical reads
+  // as empty (same guard pattern as productOverride). A valid bag is what
+  // verticals.js activeProduct() charges.
+  cart: null,
+
+  // Which page of the merchant site is on screen — see js/steps.js. The customer
+  // beat is separated in TIME, not just in space: one page per call, so the
+  // engine room only ever shows the call the current page is about. Mutated
   // DIRECTLY (never a RESET_KEY): a step change must not reset the flow, and the
-  // frames repaint themselves explicitly.
-  step: 'account-q',        // 'account-q' | 'account' | 'product' | 'checkout'
+  // pages repaint themselves explicitly.
+  // 'account-q' (sign in / register / guest) | 'account' (register) | 'shop' |
+  // 'product' (detail) | 'bag' | 'checkout' | 'orders' | 'methods'
+  step: 'account-q',
 
   // How the customer identifies at checkout: 'guest' | 'account' | 'returning'
   // (see js/identity.js). Mutated DIRECTLY — picking a mode repaints the client

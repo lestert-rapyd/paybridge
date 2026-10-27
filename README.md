@@ -121,9 +121,16 @@ shown as declined. Everything rendered into HTML goes through `ui.js esc()`.
 | `index.html` | Shell: top bar, model sub-bar, the two panes, portals (FX popover, currency dropdown, live dialog, banner). |
 | `js/app.js` | Bootstrap: renders the shell, wires controls, price tile + FX popover, sandbox picker, live unlock. |
 | `js/state.js` | Tiny reactive store. `vertical`/`model`/`env` changes reset the client flow; most other fields are mutated directly. |
-| `js/steps.js` | The client page as four frames (account question → account → product → checkout). |
+| `js/steps.js` | Router for the merchant site: sign in / register / guest → shop → product → bag → checkout, plus Orders and Payment methods; paints the engine room per page. |
 | `js/identity.js` | Guest / account / returning checkout identity. |
-| `js/verticals.js` | Vertical + product catalog, `activeProduct()`, FX-aware customer/merchant amounts. |
+| `js/skins.js` | Skins — whose site it is: merchant name, descriptor, domain and tokens (colours, optional site font/neutrals), applied by `applySkin()`. |
+| `js/packs.js` | Industry packs — what the merchant sells: catalog, copy, journey rules (`kycAtSignup`). |
+| `js/verticals.js` | Skin × pack composition (`VERTICALS`), `activeProduct()` (a valid bag folds into one product here), FX-aware customer/merchant amounts. |
+| `js/site/cart.js` | The bag: lines, minor-unit totals, one-currency + subscription-alone rules, the composite product the flows charge. |
+| `js/site/chrome.js` | The site header (wordmark, nav, account, bag) and shared product-tile / money helpers. |
+| `js/site/session.js` | The merchant's own sign-in session over the session `cus_***` (no Rapyd call). |
+| `js/site/shop.js` | Shop (one-off / subscription tabs), product page, bag page and its checkout blockers. |
+| `js/site/account.js` | Signed-in Orders (over the ledger) and Payment methods (over stored credentials + the list-payment-methods sync beat). |
 | `js/profiles.js` | Sandbox MID registry (public identifiers only). |
 | `js/flows/own-fields.js` | Own Card Fields flow. |
 | `js/flows/toolkit.js` | Checkout Toolkit flow. |
@@ -141,8 +148,10 @@ shown as declined. Everything rendered into HTML goes through `ui.js esc()`.
 | `js/sync.js` | Field→request-path map, card brand, amount validation, input formatting. |
 | `js/ui.js` | `esc()`, tab switching, the status pill. |
 | `js/client-details.js` | Browser `client_details` for 3DS. |
-| `css/tokens.css` | Design tokens. |
+| `css/tokens.css` | Design tokens, incl. the merchant-site tokens a skin may set (scoped to the browser frame). |
 | `css/main.css`, `css/cof.css` | Components. |
+| `css/site.css` | The merchant site (header, shop, bag, account pages), token-only; Inter `@font-face`. |
+| `assets/` | Inter TTFs (`fonts/`), the Rapyd design-system icon font (`icons/`), the empty-state illustration. |
 | `complete/`, `cancel/` | Landing pages for the hosted checkout's redirect URLs. |
 | `tests/` | No-network unit tests (`unit.js`), their browser runner (`index.html`) and the `check_modules.py` import/export checker. |
 | `DESIGN-SYSTEM.md`, `design-system.html` | The design system and its specimen page. |

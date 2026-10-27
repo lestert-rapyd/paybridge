@@ -8,9 +8,9 @@
                  with NO cards and gains them as purchases save them
      returning · reuse this session's cus_*** and its cards on file
 
-   The chooser itself (FRAME 1) offers only the first two — answering it never
+   The chooser itself (the site's sign-in page) offers only the first two — answering it never
    fires a call, it records intent. `returning` is reached by fact, not by
-   choice: once a card is on file, promoteToReturning() sets it and frame 1
+   choice: once a card is on file, promoteToReturning() sets it and the sign-in page
    shows the signed-in view instead of asking again.
 
    Creation stays LAZY as a fallback (beat 1 of submit) for an SE who skips the
@@ -29,6 +29,7 @@ import { state } from './state.js';
 import * as customers from './customers.js';
 import { activeProduct } from './verticals.js';
 import { nridAvailable } from './profiles.js';
+import { esc } from './ui.js';
 
 export const IDENTITY_MODES = ['guest', 'account', 'returning'];
 
@@ -68,11 +69,11 @@ export function identityMode() {
 export function setIdentityMode(mode) {
   if (IDENTITY_MODES.includes(mode)) state.identityMode = mode;
 }
-/** The RAW answer, before identityMode()'s degradation. The product frame needs
-    this: picking a subscription is exactly what makes canGuest() false, so the
-    degraded read would already say 'account' and the frame would silently
-    convert the SE's guest into an account instead of explaining why it can't
-    stay one. */
+/** The RAW answer, before identityMode()'s degradation. The bag needs this
+    (site/shop.js bagBlocker): a subscription in the bag is exactly what makes
+    canGuest() false, so the degraded read would already say 'account' and the
+    bag would silently convert the SE's guest into an account instead of
+    explaining why it can't stay one. */
 export const chosenGuest = () => state.identityMode === 'guest';
 
 /** Whether this payment attaches (or creates) a cus_***. */
@@ -91,17 +92,19 @@ export function promoteToReturning() {
     delegated on the stable #checkout root (see js/steps.js). */
 export function refreshIdentityChooser() {
   const block = document.querySelector('.id-block');
-  if (block) block.outerHTML = identityChooserHTML();
+  if (block) block.outerHTML = identityChooserHTML(false, block.querySelector('.id-label')?.textContent || undefined);
 }
 
-/** FRAME 1 — the first question of the checkout, and the only one that decides
+/** The sign-in page's "New here?" — the first question of the checkout, and the only one that decides
     whether a call happens at all. Two answers, in route-card grammar (design
     system §04.4b): each carries a money consequence the SE narrates, so the
     consequence is on the card. `data-answer` is read by js/steps.js.
 
     `answered` matters: state.identityMode starts at 'guest', so without it the
-    guest card would render selected under a question nobody has answered yet. */
-export function identityChooserHTML(answered = false) {
+    guest card would render selected under a question nobody has answered yet.
+    `label` is text (the site's sign-in page says "New here?" under its
+    sign-in form); escaped like any other. */
+export function identityChooserHTML(answered = false, label = 'Would you like an account?') {
   const active = answered ? identityMode() : null;
   const card = (answer, title, note, on) => `
     <button type="button" class="bo-route ${on ? 'active' : ''}" data-answer="${answer}">
@@ -110,7 +113,7 @@ export function identityChooserHTML(answered = false) {
     </button>`;
   return `
     <div class="id-block">
-      <div class="id-label">Would you like an account?</div>
+      <div class="id-label">${esc(label)}</div>
       <div class="bo-routes">
         ${card('account', 'Create an account',
           `Save your details for a faster checkout next time.`,

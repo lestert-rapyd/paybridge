@@ -148,8 +148,11 @@ export function refundedTotals(entry) {
       profile         sandbox MID that created it (retrieval/refunds must reuse it)
       env             'sandbox' | 'live' it was created in — defaults to state.env
                       NOW, so a later env switch can't send its retrieve/refund
-                      to the other environment */
-export function recordPayment(reference, { model, vertical, amount, currency, requested_currency, fixed_side, last4, brand, origin, initiation_type, credential, aft, profile, env }) {
+                      to the other environment
+      items           what was bought — [{ id, name, qty, amount, currency,
+                      billing }] (verticals.js orderItems); the shopper's
+                      Orders page (js/site/account.js) reads it. Text only. */
+export function recordPayment(reference, { model, vertical, amount, currency, requested_currency, fixed_side, last4, brand, origin, initiation_type, credential, aft, profile, env, items }) {
   entries.set(reference, {
     reference,
     kind: 'payment',
@@ -166,6 +169,7 @@ export function recordPayment(reference, { model, vertical, amount, currency, re
     initiation_type: initiation_type || 'customer_present',
     credential: credential || null,
     aft: !!aft,
+    items: Array.isArray(items) ? items.map((i) => ({ ...i })) : null,
     profile: profile || state.profile,
     env: env || state.env,
     status: 'pending',   // 'pending' | 'completed' | 'failed'

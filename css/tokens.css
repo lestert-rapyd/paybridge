@@ -152,6 +152,48 @@
   --eng-faint:  #6b5b80;
 }
 
+/* ── Merchant site (the client pane's browser frame) ────────
+   The storefront in .browser (js/site/) is the ONE surface a skin may
+   re-face beyond its accent: js/skins.js can set --font-site /
+   --font-site-display and the --site-* neutrals below on :root. They are
+   re-scoped here onto .browser only, as the client ramps the site's CSS
+   already reads — so the demo chrome, the engine room, the back office and
+   the SE popovers (portalled outside .browser) never change. Unset, every
+   fallback is the ramp's own :root value above, so the PayBridge skins
+   render exactly as before (the hexes below MUST track the :root ramp). */
+:root {
+  --font-site:         var(--font-client);
+  --font-site-display: var(--font-client);
+  /* Accent as TEXT on the site's white. Defaults to the accent; a skin whose
+     accent fails 4.5:1 on white (crypto green, gaming magenta) sets a darker
+     one — fills, rules and buttons keep the true accent. */
+  --accent-ink:        var(--accent);
+}
+.browser {
+  --ink:      var(--site-ink, #17140f);
+  --c-ink:    var(--site-ink, #191714);
+  --c-ink-2:  var(--site-ink, #211e19);
+  --ink-2:    var(--site-text, #4a463d);
+  --c-ink-3:  var(--site-text, #3f3b34);
+  --c-ink-4:  var(--site-text, #5b564d);
+  --ink-3:    var(--site-muted, #8b8578);
+  --c-ink-5:  var(--site-muted, #94908a);
+  --c-ink-6:  var(--site-muted, #a29d93);
+  --ink-4:    var(--site-faint, #a7a196);
+  --c-ink-7:  var(--site-faint, #a8a297);
+  --c-ink-8:  var(--site-faint, #8a857b);
+  --line:     var(--site-line, #e5e1d8);
+  --c-line:   var(--site-line, #efece5);
+  --c-line-2: var(--site-line, #eeebe4);
+  --line-2:   var(--site-field, #d8d3c7);
+  --c-line-3: var(--site-field, #e6e2da);
+  --c-line-4: var(--site-field, #cfcabf);
+  --surface-2:var(--site-soft, #fbfaf7);
+  --c-soft:   var(--site-soft, #faf8f4);
+  --c-fact:   var(--site-soft, #fdfcfa);
+  --c-soft-2: var(--site-soft-2, #f4f2ee);
+}
+
 /* ── Skins ────────────────────────────────────────────────
    Per-skin accent + engine tints are DATA in js/skins.js (applySkin
    writes them onto :root), so a customer skin needs no CSS edit. The

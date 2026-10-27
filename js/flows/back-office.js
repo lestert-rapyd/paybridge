@@ -1134,6 +1134,8 @@ async function fireCharge() {
       origin: 'backoffice', initiation_type: 'recurring', profile, env,
       credential: { kind: cred.kind, label: `${cred.brand || 'Card'} ···${cred.last4 || ''}` },
       aft: cred.aft,
+      // the shopper's Orders page lists this renewal under its product
+      items: [{ id: p.id, name: p.name, qty: 1, amount: String(body.amount), currency: body.currency, billing: 'subscription' }],
     });
   }
   renderCredSurfaces(); // reflect "Processing…" on the button

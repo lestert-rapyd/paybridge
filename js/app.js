@@ -19,6 +19,7 @@ import * as ownFields from './flows/own-fields.js';
 import * as toolkit from './flows/toolkit.js';
 import * as backOffice from './flows/back-office.js';
 import { totalsHTML } from './flows/shared.js';
+import { thumbHTML } from './site/chrome.js';
 
 // Patch keys that mean "the customer's flow/context actually changed" —
 // only these trigger the full client-flow reset (mount() etc). Everything
@@ -42,8 +43,6 @@ const LIVE_DESC = {
   'own-fields': 'LIVE · restricted — raw card numbers are refused; 0.01 charges only.',
   'toolkit':    'LIVE · restricted — charges a real card; 0.01 charges only.',
 };
-
-const THUMB_GLYPH = { ecommerce: '🪑', crypto: '₿', gaming: '🎲' };
 
 // Own-fields' editable price tile + the FX popover it opens beside — shared
 // curated list for both the tile's charge currency and the popover's
@@ -351,15 +350,16 @@ function setTileValidity(amountEl, valid, currency) {
 const decimalsText = (n) => (n === 0 ? 'no decimals' : n === 1 ? '1 decimal' : `${n} decimals`);
 
 /* ── Left: the client page ────────────────────────────────────
-   Four frames (js/steps.js). Frames 1–3 are model-independent — the identity
-   question, the account step and the product choice belong to the client, not
-   to the integration — so only the checkout frame forks per flow. */
+   The merchant site (js/steps.js routes it, js/site/ draws it). Every page but
+   the checkout is model-independent — signing in, the shop and the bag belong
+   to the client, not to the integration — so only the checkout forks per flow.
+   `.site` on the frame gives the whole site one width and lets its header run
+   edge to edge; the 3DS/toolkit width classes still win where they apply. */
 function renderCheckout() {
   const v = VERTICALS[state.vertical];
   const p = activeProduct();
   const flow = FLOWS[state.model];
   const host = $('#checkout');
-  const [c1, c2] = p.thumb;
 
   closeFxPopover(); // never lingers open across a vertical/model/env reset
   closeCurDropdown();
@@ -375,6 +375,7 @@ function renderCheckout() {
   if (!isCheckout()) {
     host.innerHTML = frameHTML();
     $('.browser').classList.remove('wide-tk', 'wide-3ds');
+    $('.browser').classList.add('site');
     // No pay region exists on these frames: flow.mount() would wire #pay-btn
     // (a bare addEventListener) and syncFx() would fetch a quote for a price
     // that isn't on screen. Neither runs until the checkout frame.
@@ -395,18 +396,22 @@ function renderCheckout() {
   if (flow.renderPageHTML) {
     host.innerHTML = flow.renderPageHTML();
   } else {
+    // The site header + "Back to bag", then the checkout column. The order row
+    // is the BAG folded into one product (verticals.js activeProduct): the item
+    // itself for a single line, "3 items" + their names for more.
     host.innerHTML = `
-      <div class="co-merchant">${v.merchant}</div>
-      <div class="co-tagline"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#a8a297" stroke-width="2.6"><rect x="4" y="10" width="16" height="11" rx="2.5"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>${v.headline.toUpperCase()}</div>
       ${stepRailHTML()}
+      <main class="site-main site-narrow">
+      <h1 class="site-h1 co-h1">Checkout</h1>
+      <div class="co-tagline"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><rect x="4" y="10" width="16" height="11" rx="2.5"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>${esc(v.headline.toUpperCase())}</div>
 
       ${accountPanelHTML()}
 
       <div class="co-order">
-        <div class="co-thumb" style="background:linear-gradient(135deg,${c1},${c2})">${p.glyph || THUMB_GLYPH[state.vertical]}</div>
+        ${thumbHTML(p)}
         <div class="co-order-info">
-          <div class="co-order-name">${p.name}</div>
-          <div class="co-order-desc">${p.desc}</div>
+          <div class="co-order-name">${esc(p.name)}</div>
+          <div class="co-order-desc">${esc(p.desc)}</div>
         </div>
         <div class="co-order-price">
           ${state.env === 'live'
@@ -422,13 +427,15 @@ function renderCheckout() {
       <div class="co-totals" id="order-totals">${totalsHTML(customerCharge(), feeLabel, feeValue, p.billing === 'subscription')}</div>
 
       ${payLabel}
-      <div id="pay-region">${flow.renderPaymentHTML()}</div>`;
+      <div id="pay-region">${flow.renderPaymentHTML()}</div>
+      </main>`;
   }
 
   // width classes (JS-toggled; see main.css note on :has())
   const browser = $('.browser');
   browser.classList.toggle('wide-tk', !!flow.renderPageHTML);
   browser.classList.remove('wide-3ds');
+  browser.classList.add('site');
 
   flow.mount();
   // The webhook panel's customer section tracks the identity mode (guest has no
@@ -521,8 +528,8 @@ function renderCredPanel() {
 function renderVerticalPills() {
   $('#vertical-pills').innerHTML = VERTICAL_ORDER.map(id => {
     const v = VERTICALS[id];
-    return `<button data-vertical="${id}" class="${id === state.vertical ? 'active' : ''}">
-      <span class="vp-dot" style="background:${v.dot}"></span>${v.label}
+    return `<button data-vertical="${esc(id)}" class="${id === state.vertical ? 'active' : ''}">
+      <span class="vp-dot" style="background:${esc(v.dot)}"></span>${esc(v.label)}
     </button>`;
   }).join('');
 }
@@ -785,7 +792,7 @@ function renderAll(_state, patch) {
   }
 
   clearPaymentWatch(); // the customer's webhook section survives; this payment's doesn't
-  resetSteps();        // back to frame 1 — which shows the signed-in view if the customer survived
+  resetSteps();        // back to sign-in (or a requested landing) — signed-in view if the customer survived
   syncControlStates();
   setActiveTab('request');
   setStatus('Awaiting input', 'idle');
@@ -799,7 +806,7 @@ function renderAll(_state, patch) {
 subscribe(renderAll);
 
 // steps.js advances the frame; only this module knows how to draw the client
-// page (frame 4 is its own shell plus the flow's), so it supplies the repainter.
+// page (the checkout is its own shell plus the flow's), so it supplies the repainter.
 setClientRepainter(renderCheckout);
 // The customer beat can be fired from the account frame (outside any flow), and
 // it has to repaint whichever surface owns the right panel. This module is the
