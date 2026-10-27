@@ -20,38 +20,12 @@
    Optional product fields the merchant site (js/site/) reads when present:
    `cat` (shop-card category), `tagline` + `about` (product page copy),
    `specs` ([label, value] rows). `thumb: null` renders the neutral
-   "product shot" placeholder instead of a gradient tile.
+   "product shot" placeholder (every built-in product uses it — product
+   imagery is deliberately a placeholder); `thumb: [c1, c2]` + `glyph`
+   would paint a gradient tile instead, for a customer pack that wants one.
    ───────────────────────────────────────────────────────────── */
 
 export const PACKS = {
-  retail: {
-    id: 'retail',
-    label: 'Retail',
-    headline: 'Secure checkout',
-    cta: 'Pay',
-    successNote: 'Order confirmed — we’re packing it now. Dispatch and tracking details will land in your inbox shortly.',
-    kycAtSignup: false,
-    products: [
-      {
-        id: 'chair', pill: 'Lounge Chair', billing: 'one_time', glyph: '🪑',
-        thumb: ['#5600ef', '#a855f7'],
-        name: 'Oak Lounge Chair',
-        desc: 'Walnut finish',
-        amount: '149.00', currency: 'GBP', symbol: '£', country: 'GB',
-        delivery: 'Free',
-        successNote: 'Order confirmed — we’re packing it now. Dispatch and tracking details will land in your inbox shortly.',
-      },
-      {
-        id: 'coffee-sub', pill: 'Coffee Club', billing: 'subscription', interval: 'monthly', cta: 'Subscribe', glyph: '☕',
-        thumb: ['#7a3f12', '#c9803a'],
-        name: 'Coffee Bean Club',
-        desc: '250g single origin · monthly',
-        amount: '18.00', currency: 'GBP', symbol: '£', country: 'GB',
-        delivery: 'Free',
-        successNote: 'Subscription active — your first bag ships today. Future bags bill to this card automatically each month.',
-      },
-    ],
-  },
   crypto: {
     id: 'crypto',
     label: 'Crypto',
@@ -63,7 +37,7 @@ export const PACKS = {
       {
         id: 'btc', pill: 'Buy BTC', billing: 'one_time', glyph: '₿',
         aft: true, purpose_code: 'crypto_currency', special_condition_indicator: 'cryptocurrency',
-        thumb: ['#00b36b', '#00ff89'],
+        thumb: null, cat: 'Buy crypto',
         name: 'Bitcoin',
         desc: 'You receive ≈ 0.00075 BTC',
         amount: '50.00', currency: 'USD', symbol: '$', country: 'US',
@@ -75,7 +49,7 @@ export const PACKS = {
       {
         id: 'dca', pill: 'DCA Plan', billing: 'subscription', interval: 'monthly', cta: 'Start DCA', glyph: '🔁',
         aft: true, purpose_code: 'crypto_currency', special_condition_indicator: 'cryptocurrency',
-        thumb: ['#0e7490', '#22d3ee'],
+        thumb: null, cat: 'Recurring buy',
         name: 'Bitcoin DCA Plan',
         desc: 'Auto-buy BTC · monthly',
         amount: '25.00', currency: 'USD', symbol: '$', country: 'US',
@@ -84,7 +58,7 @@ export const PACKS = {
       },
       {
         id: 'coinplus', pill: 'Coin+', billing: 'subscription', interval: 'monthly', cta: 'Subscribe', glyph: '⭐',
-        thumb: ['#4338ca', '#818cf8'],
+        thumb: null, cat: 'Membership',
         name: 'Coin+ Platform Fee',
         desc: 'Pro trading tier · monthly',
         amount: '9.99', currency: 'USD', symbol: '$', country: 'US',
@@ -95,7 +69,7 @@ export const PACKS = {
   },
   igaming: {
     id: 'igaming',
-    label: 'iGaming',
+    label: 'Gambling',
     headline: 'Add funds to your wallet',
     cta: 'Deposit',
     successNote: 'Funds added — your new balance is available to play right away. Withdrawals return to this card.',
@@ -103,7 +77,7 @@ export const PACKS = {
     products: [
       {
         id: 'spins', pill: '50 Spins', billing: 'one_time', cta: 'Buy', glyph: '🎲',
-        thumb: ['#c4005f', '#ff007a'],
+        thumb: null, cat: 'Casino',
         name: '50 Spins Pack',
         desc: 'Credited instantly',
         amount: '50.00', currency: 'EUR', symbol: '€', country: 'MT',
@@ -112,7 +86,7 @@ export const PACKS = {
       },
       {
         id: 'adfree', pill: 'Ad-free', billing: 'subscription', interval: 'monthly', cta: 'Subscribe', glyph: '✨',
-        thumb: ['#7f1d1d', '#ef4444'],
+        thumb: null, cat: 'Membership',
         name: 'Ad-free Play',
         desc: 'No interruptions · monthly',
         amount: '12.00', currency: 'EUR', symbol: '€', country: 'MT',

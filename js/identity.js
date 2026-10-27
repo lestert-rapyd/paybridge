@@ -17,12 +17,10 @@
    account frame entirely.
 
    Session-scoped, like customers.js: "returning" means a credential
-   already exists in the active `env:profile` bucket. Nothing persists
-   across reloads, so this is the only honest meaning available. (The
-   backend does proxy GET /v1/customers/{id} — api.js retrieveCustomer —
-   but that re-reads a cus_*** this tab already holds; it can't find a
-   shopper's account from nothing, which is what "returning" would need
-   across sessions.)
+   already exists in the active `env:profile` bucket. A sandbox customer
+   is remembered across reloads (customers.js), and the sign-in page can
+   adopt an existing cus_*** by id (site/lookup.js, GET /v1/customers/{id})
+   — either way "returning" still means: this bucket holds a card to reuse.
    ───────────────────────────────────────────────────────────── */
 
 import { state } from './state.js';

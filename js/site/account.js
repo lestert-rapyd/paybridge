@@ -3,14 +3,18 @@
    stores the demo already keeps for the merchant:
 
      · Orders           ← js/ledger.js (this tab's payments, the same
-                          entries the back office lists). Read-only and
-                          local: no call. Status comes from the ledger's
-                          own settlement (trusted webhook / Retrieve).
-     · Payment methods  ← js/customers.js stored credentials, refreshed on
-                          entry with the real GET /v1/customers/{id}/
-                          payment_methods (customers.refreshTokens — the
-                          back office's "Sync from Rapyd" call), shown in
-                          the engine room like any other beat.
+                          entries the back office lists), in two groups:
+                          the signed-in customer's (entries recorded under
+                          their cus_***) and this tab's guest checkouts
+                          (ledger.ordersFor). Read-only and local: no call.
+                          Status comes from the ledger's own settlement
+                          (trusted webhook / Retrieve).
+     · Payment methods  ← js/customers.js stored credentials, synced ONCE
+                          per page visit with the real GET /v1/customers/
+                          {id}/payment_methods (customers.refreshTokens —
+                          the back office's "Sync from Rapyd" call), shown
+                          in the engine room like any other beat; the
+                          page's "Refresh" link re-syncs on demand.
 
    A shopper sees their own words: a card is "Visa •••• 1111", not a
    card_*** or a storage route; an order is what they bought and whether
@@ -22,7 +26,7 @@
 import { state } from '../state.js';
 import { VERTICALS } from '../verticals.js';
 import * as customers from '../customers.js';
-import { getLedger, refundedTotals } from '../ledger.js';
+import { getLedger, refundedTotals, ordersFor } from '../ledger.js';
 import { beatCardHTML } from '../customer-beat.js';
 import { renderJSONView } from '../json-view.js';
 import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
@@ -31,11 +35,11 @@ import { siteHeaderHTML, thumbHTML, moneyText } from './chrome.js';
 
 /* ── Orders ──────────────────────────────────────────────── */
 
-/* The shopper's orders at THIS merchant, in this environment — newest first.
-   (One shopper per demo tab, so every client payment is theirs; the back
-   office's MIT renewals are theirs too and read as such.) */
+/* The shopper's orders at THIS merchant, in this environment — the signed-in
+   customer's payments (client checkouts and the back office's MIT renewals
+   recorded under their cus_***) and this tab's guest checkouts, newest first. */
 function myOrders() {
-  return getLedger().filter((e) => e.kind === 'payment' && e.vertical === state.vertical && e.env === state.env);
+  return ordersFor(getLedger(), { customerId: customers.getCustomerId(), vertical: state.vertical, env: state.env });
 }
 
 /* [label, tone] — tone picks the badge colour (css/site.css .ord-badge). */
@@ -74,17 +78,29 @@ function orderRowHTML(e) {
     </div>`;
 }
 
+function orderGroupHTML(title, list, empty) {
+  return `
+    <section class="ord-group">
+      <div class="ord-group-h">${esc(title)}<span class="ord-group-n">${esc(list.length)}</span></div>
+      ${list.length
+        ? `<div class="ord-list">${list.map(orderRowHTML).join('')}</div>`
+        : `<div class="ord-empty">${esc(empty)}</div>`}
+    </section>`;
+}
+
 export function ordersPageHTML() {
-  const orders = myOrders();
+  const { mine, guest } = myOrders();
+  const any = mine.length + guest.length;
   return `
     ${siteHeaderHTML('orders')}
     <main class="site-main site-mid">
       <div class="site-titles">
         <h1 class="site-h1">Orders</h1>
-        <p class="site-sub">${orders.length ? 'Your recent purchases' : 'Nothing here yet'}</p>
+        <p class="site-sub">${any ? 'Your recent purchases' : 'Nothing here yet'}</p>
       </div>
-      ${orders.length
-        ? `<div class="ord-list">${orders.map(orderRowHTML).join('')}</div>`
+      ${any
+        ? `${orderGroupHTML('Your orders', mine, 'Nothing under your account yet.')}
+           ${guest.length ? orderGroupHTML('Guest checkouts this session', guest, '') : ''}`
         : `<div class="site-empty">
              <img src="assets/no-results.svg" alt="" />
              <div>Your orders will show up here.</div>
@@ -120,6 +136,7 @@ export function methodsPageHTML() {
       <div class="site-titles">
         <h1 class="site-h1">Payment methods</h1>
         <p class="site-sub">${syncing ? 'Checking your saved cards…' : creds.length ? 'Here’s what we have on file' : 'No payment methods so far'}</p>
+        <button type="button" class="site-link-btn accent pm-refresh" id="pm-refresh" ${syncing ? 'disabled' : ''}><i class="icon-refresh"></i>${syncing ? 'Refreshing…' : 'Refresh'}</button>
       </div>
       ${creds.length
         ? `<div class="ord-list">${creds.map(methodRowHTML).join('')}</div>`
@@ -133,8 +150,9 @@ export function methodsPageHTML() {
 /* ── The payment-methods beat (engine room) ──────────────────
    GET /v1/customers/{id}/payment_methods?category=card, fired when the shopper
    opens the page — a merchant's account page reads saved cards from its PSP.
-   The record survives repaints; the steps router paints it. A page entry fires
-   at most once (steps.js), never on a repaint. */
+   The record survives repaints; the steps router paints it. It fires ONCE per
+   page visit (steps.js goStep, on entry — never on a repaint), and again only
+   when the shopper clicks the page's Refresh link. */
 let sync = { status: 'idle', key: null, cus: null, httpStatus: null, data: null, salt: null };
 let syncSeq = 0;
 

@@ -1,9 +1,9 @@
 /* ─────────────────────────────────────────────────────────────
    Verticals — the composed view the flows read: a skin (whose site,
    js/skins.js) laid over an industry pack (what it sells, js/packs.js).
-   Brand stays "PayBridge" for the built-in skins — client-side
-   merchants are PayBridge sub-brands; a customer skin swaps the
-   identity without touching the pack.
+   The built-in skins are Rapyd's own demo merchants (rapyd.shop,
+   rapyd.coin, rapyd.spin); a customer skin swaps the identity without
+   touching the pack.
 
    VERTICALS[id] keeps the shape every caller already reads — label,
    dot, merchant, descriptor, domain from the skin; headline, cta,
@@ -13,7 +13,7 @@
    ───────────────────────────────────────────────────────────── */
 
 import { state } from './state.js';
-import { SKINS } from './skins.js';
+import { SKINS, SKIN_ORDER } from './skins.js';
 import { PACKS } from './packs.js';
 import { cartLines, resolveLines, cartProblem, cartAsProduct } from './site/cart.js';
 
@@ -33,7 +33,7 @@ const compose = (skin) => {
 
 export const VERTICALS = Object.fromEntries(Object.values(SKINS).map((s) => [s.id, compose(s)]));
 
-export const VERTICAL_ORDER = ['ecommerce', 'crypto', 'gaming', 'rapydshop'];
+export const VERTICAL_ORDER = SKIN_ORDER;
 
 /* The active vertical's product for the current environment — what the flows
    charge. A valid BAG (js/site/cart.js) wins: its lines fold into one composite
@@ -95,7 +95,7 @@ export function productCta(verticalId = state.vertical) {
 /* ── The fx_rates beat ───────────────────────────────────────
    GET /v1/fx_rates fires from app.js's quote fetcher (debounced, on every FX
    edit and price keystroke) and used to have NO engine-room surface at all —
-   its entire UI was the FX popover, on the storefront, which is backwards. The
+   its entire UI was the FX controls' preview, which is backwards. The
    exchange is recorded here beside the rest of the FX logic; each flow renders
    it as a card with its own beatCardHTML, exactly like the calls it makes
    itself. Data lives here, presentation stays in the flows — no import cycle. */

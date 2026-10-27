@@ -8,7 +8,8 @@
    is about:
 
      account-q · sign in / create an account / guest → no call (the
-                  merchant's own login never calls Rapyd)
+                  merchant's own login never calls Rapyd) — except
+                  "sign in with a customer ID"   → GET /v1/customers/{id}
      account   · register: the account form          → POST /v1/customers
      shop      · catalog, one-off vs subscriptions    → no call
      product   · a product page                       → no call
@@ -52,6 +53,9 @@ import {
   ordersPageHTML, methodsPageHTML, fireMethodsSync,
   methodsRequestCardHTML, methodsResponseCardHTML, fillMethodsSignature,
 } from './site/account.js';
+import {
+  signInWithCustomerId, lookupStatus, lookupRequestCardHTML, lookupResponseCardHTML, fillLookupSignature,
+} from './site/lookup.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -65,6 +69,10 @@ const MEMBERS_ONLY = new Set(['orders', 'methods']);
 let answered = false;
 /* The sign-in page's last refusal (shopper copy), cleared on any navigation. */
 let signinError = null;
+/* The customer-ID sign-in's last refusal, and what was typed (kept across the
+   repaints the lookup drives). */
+let cusIdError = null;
+let cusIdDraft = '';
 /* A terminal screen (screens.js success/decline) is on show: leaving it must
    reset the flow (new reference, fresh watch), not just swap the page. */
 let resultShown = false;
@@ -78,20 +86,27 @@ export const isCheckout = () => state.step === 'checkout';
    supplies the repainter — same arrangement as customer-beat's panel hook. */
 let repaintClient = () => {};
 export function setClientRepainter(fn) { repaintClient = fn; }
+/** Repaint the whole client page in place (header included) — for a change
+    that reaches beyond one region, e.g. the shopper signing out mid-checkout. */
+export function repaintSite() { if (state.leftView === 'client') repaintClient(); }
 
 export function goStep(step) {
   if (!STEPS.includes(step)) return;
   if (MEMBERS_ONLY.has(step) && !isSignedIn()) step = 'account-q';
   resultShown = false;
   signinError = null;
+  cusIdError = null;
   const same = step === state.step;
   state.step = step;   // direct mutation — a page change is not a flow reset
-  if (step === 'methods' && !same) {
-    // A merchant's account page reads saved cards from its PSP. Fired on
-    // ENTRY only (never on a repaint); the page repaints as it answers.
-    fireMethodsSync(() => { if (state.step === 'methods' && state.leftView === 'client') repaintClient(); });
-  }
+  if (step === 'methods' && !same) syncMethods();
   repaintClient();
+}
+
+/* A merchant's account page reads saved cards from its PSP: ONCE per visit of
+   the payment-methods page (on entry — never on a repaint), or when the
+   shopper hits Refresh. The page repaints as the call answers. */
+function syncMethods() {
+  fireMethodsSync(() => { if (state.step === 'methods' && state.leftView === 'client') repaintClient(); });
 }
 
 /** Leave the current page for `step`. From a terminal screen that's a flow
@@ -165,7 +180,23 @@ function signInHTML() {
       </div>
       <div class="site-or"><span>or</span></div>
       ${identityChooserHTML(answered, 'New here?')}
+      ${cusIdHTML()}
     </div>`;
+}
+
+/* Sign in with a Rapyd customer ID — reaches a customer that exists at Rapyd
+   but not in this tab (an earlier session, another laptop, the dashboard). */
+function cusIdHTML() {
+  const sending = lookupStatus() === 'sending';
+  return `
+    <details class="site-cusid" ${cusIdError || cusIdDraft || sending ? 'open' : ''}>
+      <summary>Sign in with a customer ID</summary>
+      <div class="site-cusid-row">
+        <div class="co-input"><input id="site-cusid" autocomplete="off" spellcheck="false" placeholder="cus_…" value="${esc(cusIdDraft)}" ${sending ? 'disabled' : ''} /></div>
+        <button type="button" class="site-btn-soft" id="site-cusid-go" ${sending ? 'disabled' : ''}>${sending ? 'Looking up…' : 'Sign in'}</button>
+      </div>
+      ${cusIdError ? `<div class="acct-err" role="alert">${esc(cusIdError)}</div>` : ''}
+    </details>`;
 }
 
 function accountQPageHTML() {
@@ -251,6 +282,16 @@ export function renderStepPanels() {
   }
 
   if (state.step === 'account-q') {
+    // A customer-ID sign-in is this page's one real call: it owns the panels
+    // while it's in flight and after it answered (its response IS the subject).
+    const lookupCard = lookupRequestCardHTML();
+    if (lookupCard) {
+      req.innerHTML = lookupCard;
+      fillLookupSignature();
+      const resCard = lookupResponseCardHTML();
+      if (res && resCard) res.innerHTML = resCard;
+      return;
+    }
     const signedIn = isSignedIn();
     req.innerHTML = signedIn ? customerGetCardHTML(cus) : emptyRequestHTML();
     if (signedIn) fillSignature($('#beat-cus-get'), 'get', getPainted.path, getPainted.salt, null, 'beat-cus-get');
@@ -290,9 +331,20 @@ customers.subscribeCustomers(() => {
   const changed = cus !== lastSeenCustomer;
   lastSeenCustomer = cus;
   if (changed && cus) markSignedIn();
-  if (state.leftView !== 'client' || isCheckout()) return;
+  if (state.leftView !== 'client') return;
+  // The checkout page is the flow's — never repainted wholesale from here (a
+  // toolkit iframe or a 3DS challenge may be on it) — but its site header
+  // still has to follow a customer arriving or being forgotten.
+  if (isCheckout()) { if (changed) refreshSiteHeader(); return; }
   if (changed || state.step === 'methods') repaintClient();
 });
+
+/** Swap just the site header in place — the account links and the bag badge
+    follow the session without disturbing the page under them. */
+export function refreshSiteHeader() {
+  const head = $('#checkout .site-head');
+  if (head) head.outerHTML = siteHeaderHTML(state.step);
+}
 
 /* Orders follow the ledger (a payment settling, a refund landing). */
 subscribeLedger(() => {
@@ -310,6 +362,10 @@ document.addEventListener('click', (e) => {
   const nav = t.closest('[data-nav]');
   if (nav) { navigate(nav.dataset.nav); return; }
   if (t.closest('#site-signout')) { signOut(); navigate('account-q'); return; }
+  if (t.closest('#pm-refresh')) { syncMethods(); return; }
+
+  // Sign in with a customer ID.
+  if (t.closest('#site-cusid-go')) { lookupCustomer(); return; }
 
   // Sign-in page.
   if (t.closest('#site-signin')) {
@@ -368,9 +424,31 @@ document.addEventListener('click', (e) => {
   }
 });
 
+async function lookupCustomer() {
+  cusIdDraft = $('#site-cusid')?.value.trim() || '';
+  cusIdError = null;
+  const paint = () => { if (state.step === 'account-q' && state.leftView === 'client') repaintClient(); };
+  const err = await signInWithCustomerId(cusIdDraft, paint);
+  if (err) { cusIdError = err; paint(); return; }
+  // Rapyd knows them: they're this site's signed-in shopper now, with
+  // whatever cards Rapyd holds for them (the list call fills them in).
+  cusIdDraft = '';
+  answered = true;
+  markSignedIn();
+  setIdentityMode('account');
+  customers.markResynced();
+  fireMethodsSync(() => { promoteToReturning(); if (state.leftView === 'client' && !isCheckout()) repaintClient(); });
+  if (state.step === 'account-q') goStep(onward());
+}
+
 // Enter in the sign-in fields signs in (there is no <form>: nothing here is a
 // credential a browser should offer to save).
 document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Enter' || !e.target.closest?.('#checkout .site-form')) return;
+  if (e.key !== 'Enter') return;
+  if (e.target.id === 'site-cusid') { $('#site-cusid-go')?.click(); return; }
+  if (!e.target.closest?.('#checkout .site-form')) return;
   $('#site-signin')?.click();
+});
+document.addEventListener('input', (e) => {
+  if (e.target.id === 'site-cusid') cusIdDraft = e.target.value;
 });

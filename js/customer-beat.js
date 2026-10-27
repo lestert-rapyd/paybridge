@@ -65,6 +65,10 @@ function record() {
     openState.set('beat-cus', true); // back to a draft — same reasoning as above
   } else if (r.state === 'draft' && customers.getCustomerId()) {
     r.state = 'created';
+  } else if (r.state === 'created' && r.data?.data?.id && r.data.data.id !== customers.getCustomerId()) {
+    // A different customer now holds the bucket (signed in with a customer ID,
+    // or restored from a remembered session) — this create call isn't theirs.
+    Object.assign(r, { body: null, httpStatus: null, data: null, at: null });
   }
   return r;
 }
@@ -149,6 +153,9 @@ let painted = null;
 export function customerRequestCardHTML() {
   const st = beatState();
   if (st === 'idle') { painted = null; return ''; }
+  // A customer this tab didn't create (signed in with a customer ID, or
+  // remembered from an earlier session) has no create call to show.
+  if (st === 'created' && !record().body) { painted = null; return ''; }
   const body = record().body || customers.enrichedCustomerBody();
   const salt = newSaltTimestamp();
   painted = { salt, body };
@@ -427,6 +434,12 @@ export function accountPanelHTML() {
 export function refreshAccountPanel() {
   syncAccountCta();
   const block = $('#acct-block');
+  // The sign-in page's signed-in view shows the account row itself (steps.js);
+  // a notify there (cards re-synced, a harvest) refreshes it — never removes it.
+  if (state.step === 'account-q') {
+    if (block && customers.getCustomerId()) block.outerHTML = customerRowHTML();
+    return;
+  }
   const html = accountPanelHTML();
   if (block) {
     if (html) block.outerHTML = html;

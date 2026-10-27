@@ -1,9 +1,16 @@
-# PayBridge
+# Rapyd Demo
 
 A sales-engineering demo of Rapyd card payments. The left pane is a merchant's
-storefront (three verticals: retail, crypto, gaming) plus its back office; the
-right pane is the "engine room" — the real request, signed headers, Rapyd's
-response and the webhooks it fires, updating as the SE clicks through.
+storefront — one of three Rapyd demo merchants: **rapyd.shop** (e-commerce),
+**rapyd.coin** (crypto) and **rapyd.spin** (gambling) — plus its back office;
+the right pane is the "engine room" — the real request, signed headers, Rapyd's
+response and the webhooks it fires, updating as the SE clicks through. Every SE
+control lives in one **demo-controls drawer** (header button, or the `` ` `` key).
+
+The whole UI follows the Rapyd design language (Inter, cool greys, `#7437F5`) —
+see `DESIGN-SYSTEM.md`. (The repo and folder keep their historical `paybridge`
+name, as do the backend contract's `X-PayBridge-Live-Token` header and the
+`paybridge-*` meta tags.)
 
 Every call is real: the page talks to [`rapyd-backend`](../rapyd-backend), a
 small signing proxy that holds the Rapyd keys and forwards to Rapyd's sandbox
@@ -73,12 +80,43 @@ backend's preflight must answer
 `Access-Control-Allow-Headers: Content-Type, X-PayBridge-Live-Token, Idempotency-Key`
 (see `rapyd-backend/README.md`) before this static site ships.
 
-## Sandbox profiles
+## The demo-controls drawer
 
-The Sandbox button opens a picker over three sandbox MIDs (`SC1`–`SC3`,
-`js/profiles.js`) that differ in 3DS provider and whether they return a
-`network_reference_id`. Switching never resets an in-flight checkout; customer
-and stored-credential state is kept per `env:profile` bucket.
+One drawer, toggled by the header button or the `` ` `` key (Esc closes):
+
+- **Customer** — which merchant skin is on screen.
+- **Integration path** — Own Card Fields / Checkout Toolkit, and the toolkit's
+  mode (full toolkit, wallet buttons, hosted page).
+- **Account** — Sandbox / Live (live asks for its token first, see below), the
+  sandbox credential picker over three MIDs (`SC1`–`SC3`, `js/profiles.js`) with
+  their AFT / `network_reference_id` badges, the MID's 3DS provider (Rapyd vs
+  external — read-only; simulating external 3DS is not built yet), and the session
+  customer with **Forget saved customer**.
+- **Payment behaviour** — FX (`requested_currency`, who bears it, the live quote)
+  and the stored-credential strategy.
+
+Switching skin, path or environment resets the client flow; switching credentials
+never resets an in-flight checkout. Customer and stored-credential state is kept
+per `env:profile` bucket.
+
+## Customers across reloads
+
+A **sandbox** session customer is remembered in `localStorage` per `env:profile`
+bucket — the `cus_***`, the shopper's name/email and the token cards' metadata
+(`card_***`, brand, last4, expiry, `network_reference_id`, intent). Never a card
+number or CVV: merchant-vault cards hold the PAN, so they stay in memory and are
+not remembered at all. Live customers are never written. On reload the remembered
+customer is signed in and its cards are re-read once with
+`GET /v1/customers/{id}/payment_methods`. **Forget saved customer** (drawer →
+Account) drops it.
+
+The sign-in page also offers **Sign in with a customer ID**: enter any `cus_***`
+the active MID can see; the demo fetches it with `GET /v1/customers/{id}` (shown
+in the engine room) and adopts it, with its saved cards, as the session customer.
+
+The shopper's **Orders** page lists the signed-in customer's payments ("Your
+orders" — ledger entries recorded under that `cus_***`) and this tab's guest
+checkouts separately. **Payment methods** syncs once per visit, with a Refresh link.
 
 ## Live mode (restricted)
 
@@ -86,8 +124,8 @@ Live charges a real card. The backend refuses every `env: 'live'` call unless
 it has `PAYBRIDGE_LIVE_TOKEN` configured **and** the request carries a matching
 `X-PayBridge-Live-Token` header. In the UI:
 
-- Clicking **Live** asks for the live access token. Cancel (or an empty field)
-  stays in sandbox.
+- Picking **Live** (drawer → Account) asks for the live access token. Cancel (or
+  an empty field) stays in sandbox.
 - The token is kept in `sessionStorage` for this tab only (in memory if storage
   is unavailable). It is never rendered, logged or put in a URL.
 - If the backend rejects it (`401 LIVE_AUTH_REQUIRED` / `403 LIVE_DISABLED`),
@@ -118,27 +156,28 @@ shown as declined. Everything rendered into HTML goes through `ui.js esc()`.
 
 | File | Role |
 | --- | --- |
-| `index.html` | Shell: top bar, model sub-bar, the two panes, portals (FX popover, currency dropdown, live dialog, banner). |
-| `js/app.js` | Bootstrap: renders the shell, wires controls, price tile + FX popover, sandbox picker, live unlock. |
+| `index.html` | Shell: header (wordmark + drawer button), the two panes, the demo-controls drawer, portals (currency picker, live dialog, banner). |
+| `js/app.js` | Bootstrap: renders the shell, the demo-controls drawer (skin, path, env + credentials, FX, strategy), the price tile, live unlock, the remembered-customer re-sync. |
 | `js/state.js` | Tiny reactive store. `vertical`/`model`/`env` changes reset the client flow; most other fields are mutated directly. |
 | `js/steps.js` | Router for the merchant site: sign in / register / guest → shop → product → bag → checkout, plus Orders and Payment methods; paints the engine room per page. |
 | `js/identity.js` | Guest / account / returning checkout identity. |
-| `js/skins.js` | Skins — whose site it is: merchant name, descriptor, domain and tokens (colours, optional site font/neutrals), applied by `applySkin()`. |
+| `js/skins.js` | Skins — whose site it is: merchant name, descriptor, domain and the site tokens, applied by `applySkin()` to the browser frame only. Built-in: `ecommerce` (rapyd.shop), `crypto` (rapyd.coin), `gaming` (rapyd.spin). |
 | `js/packs.js` | Industry packs — what the merchant sells: catalog, copy, journey rules (`kycAtSignup`). |
 | `js/verticals.js` | Skin × pack composition (`VERTICALS`), `activeProduct()` (a valid bag folds into one product here), FX-aware customer/merchant amounts. |
 | `js/site/cart.js` | The bag: lines, minor-unit totals, one-currency + subscription-alone rules, the composite product the flows charge. |
 | `js/site/chrome.js` | The site header (wordmark, nav, account, bag) and shared product-tile / money helpers. |
 | `js/site/session.js` | The merchant's own sign-in session over the session `cus_***` (no Rapyd call). |
+| `js/site/lookup.js` | "Sign in with a customer ID": `GET /v1/customers/{id}` and its engine-room cards; adopts the customer. |
 | `js/site/shop.js` | Shop (one-off / subscription tabs), product page, bag page and its checkout blockers. |
-| `js/site/account.js` | Signed-in Orders (over the ledger) and Payment methods (over stored credentials + the list-payment-methods sync beat). |
+| `js/site/account.js` | Signed-in Orders (the customer's vs this tab's guest checkouts, `ledger.ordersFor`) and Payment methods (stored credentials + the list-payment-methods sync beat, once per visit + Refresh). |
 | `js/profiles.js` | Sandbox MID registry (public identifiers only). |
 | `js/flows/own-fields.js` | Own Card Fields flow. |
 | `js/flows/toolkit.js` | Checkout Toolkit flow. |
 | `js/flows/shared.js` | Pieces shared by the two client flows. |
 | `js/flows/back-office.js` | Merchant back office: session payments, refunds, customer view, MIT charges. |
 | `js/customer-beat.js` | `POST /v1/customers` as its own step. |
-| `js/customers.js` | Session customer + stored credentials, keyed per `env:profile`. |
-| `js/ledger.js` | Session payment ledger + its settlement poller. |
+| `js/customers.js` | Session customer + stored credentials, keyed per `env:profile`; remembers sandbox customers in `localStorage` (no PAN/CVV, never live). |
+| `js/ledger.js` | Session payment ledger (each payment tagged with the `cus_***` it was made under) + its settlement poller. |
 | `js/webhooks.js` | Webhook watcher for the active payment and customer; Retrieve Payment fallback. |
 | `js/classify.js` | Webhook classification and the trust rule. |
 | `js/screens.js` | Post-payment screens (processing, 3DS, success, error). |
@@ -148,9 +187,9 @@ shown as declined. Everything rendered into HTML goes through `ui.js esc()`.
 | `js/sync.js` | Field→request-path map, card brand, amount validation, input formatting. |
 | `js/ui.js` | `esc()`, tab switching, the status pill. |
 | `js/client-details.js` | Browser `client_details` for 3DS. |
-| `css/tokens.css` | Design tokens, incl. the merchant-site tokens a skin may set (scoped to the browser frame). |
-| `css/main.css`, `css/cof.css` | Components. |
-| `css/site.css` | The merchant site (header, shop, bag, account pages), token-only; Inter `@font-face`. |
+| `css/tokens.css` | Design tokens (Rapyd palette, Inter `@font-face`), incl. the site ramp a skin may re-face (scoped to the browser frame). |
+| `css/main.css`, `css/cof.css` | Components: header, drawer, checkout, toolkit stage, result screens, engine room, back office, notices · card-on-file surfaces. |
+| `css/site.css` | The merchant site (header, shop, bag, account pages), token-only. |
 | `assets/` | Inter TTFs (`fonts/`), the Rapyd design-system icon font (`icons/`), the empty-state illustration. |
 | `complete/`, `cancel/` | Landing pages for the hosted checkout's redirect URLs. |
 | `tests/` | No-network unit tests (`unit.js`), their browser runner (`index.html`) and the `check_modules.py` import/export checker. |
@@ -164,9 +203,11 @@ There's no Node toolchain on purpose. The browser test harness lives at
 modules directly (which is why `ui.js`, `api.js`, `sync.js`, `classify.js` and
 `ledger.js` do no DOM work at import time) and reports pass/fail in the page.
 It covers `ui.esc`, `json-view` escaping, `sync.brandLabel` / `currencyDecimals` / `validAmount`,
-`classify.isTrusted` / `isTrustedFor`, `api.newReference` and
-`ledger.refundedTotals`, and makes no network calls. The flows themselves are
-not unit-tested.
+`classify.isTrusted` / `isTrustedFor`, `api.newReference`,
+`ledger.refundedTotals` / `ordersFor`, the bag (`site/cart.js`), the built-in
+skins, and the remembered-customer persistence (`customers.js` serialize /
+restore — never a PAN/CVV, never live — against an in-memory storage stand-in),
+and makes no network calls. The flows themselves are not unit-tested.
 
 The backend has its own `node --test` suite (`rapyd-backend/tests`).
 

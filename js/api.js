@@ -173,7 +173,7 @@ export function listCustomerPaymentMethods(customerId, { env, profile } = {}) {
 }
 
 /** GET /api/get-fx-rate?... → Rapyd GET /v1/fx_rates (action_type=payment).
-    Powers the FX popover's live "customer pays / you receive" preview. buy_ is
+    Powers the FX controls' live "customer pays / you receive" preview. buy_ is
     the side the merchant receives, sell_ the side the customer is charged;
     amount is in the fixed_side currency (see app.js's fxPreviewParams). */
 export function getFxRate({ buyCurrency, sellCurrency, amount, fixedSide, env, profile }) {

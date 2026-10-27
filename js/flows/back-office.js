@@ -1136,6 +1136,8 @@ async function fireCharge() {
       aft: cred.aft,
       // the shopper's Orders page lists this renewal under its product
       items: [{ id: p.id, name: p.name, qty: 1, amount: String(body.amount), currency: body.currency, billing: 'subscription' }],
+      // the card on file belongs to this bucket's customer — the renewal is theirs
+      customer_id: customers.getCustomerId(),
     });
   }
   renderCredSurfaces(); // reflect "Processing…" on the button

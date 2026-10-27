@@ -7,7 +7,8 @@
 
    Stored-credential additions (card-on-file / recurring / AFT):
    · First payment — a customer-facing "save my card" checkbox plus an
-     SE strategy popover (#sc-popover): storage vault/token/both and the
+     SE strategy (the demo-controls drawer's Payment behaviour section,
+     opened from the "Strategy" link): storage vault/token/both and the
      product-driven recurrence_type (one-time → unscheduled, subscription
      → recurring). Token saves run a TWO-BEAT submit: POST /v1/customers
      (enriched — AFT-ready) then POST /v1/payments with customer +
@@ -24,7 +25,7 @@
      NOT here.
 
    Live mode: this flow collects NO card data at all. The PAN and CVV
-   would travel through PayBridge's own (non-PCI) backend, so in live the
+   would travel through this demo's own (non-PCI) backend, so in live the
    form is replaced by a notice pointing at the Checkout Toolkit, whose
    hosted fields keep the card inside Rapyd. The backend refuses raw card
    data in live too (LIVE_RAW_CARD_FORBIDDEN) — this is the front door.
@@ -57,6 +58,8 @@ import {
   LIVE_GATE_ERRORS, failureStatusText, httpsUrl, sendIdempotent, isUnknownOutcome,
   terminalHandler, cardSaveSlot, pendingCardSave,
 } from './shared.js';
+import { signOut } from '../site/session.js';
+import { repaintSite } from '../steps.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -152,7 +155,7 @@ function displayBody() {
   };
   // No-FX flows must omit all three fields entirely — sending any of them
   // without the others errors the call. FX config lives on state.fx —
-  // edited via the popover beside app.js's price tile, not on this page.
+  // edited in the demo-controls drawer (app.js), not on this page.
   const fx = state.fx;
   if (fx.enabled && fx.requestedCurrency) {
     body.requested_currency = fx.requestedCurrency;
@@ -304,7 +307,7 @@ function returningHTML() {
     </div>`;
 }
 
-/* "Save card" + the Strategy popover trigger. When BOTH storage routes are
+/* "Save card" + the Strategy chip (opens the drawer's strategy controls). When BOTH storage routes are
    withdrawn (a guest on a no-NRID MID) there's nothing to configure, so the
    checkbox itself is disabled and names both remedies. */
 function saveRowHTML() {
@@ -379,11 +382,11 @@ export function renderPaymentHTML() {
     <button class="co-cta" id="pay-btn">${esc(productCta())} ${esc(p.amount)} ${esc(p.currency)}</button>`;
 }
 
-/* ── Stored-credential strategy — SE popover (portal #sc-popover) ──
-   Ported from the old #demo-controls deck into an FX-style popover, opened
-   from the "Save card" row (first payment) or beside the saved-card chips
-   (returning). Never part of the customer-facing page. deckHTML() builds the
-   body; scPopoverHTML() wraps it with the head. */
+/* ── Stored-credential strategy — SE controls (demo-controls drawer) ──
+   Rendered in the demo-controls drawer (app.js), which the "Strategy" link
+   beside the "Save card" row (first payment) or the saved-card chips
+   (returning) opens. Never part of the customer-facing page. deckHTML()
+   builds the body; strategyHTML() is the drawer's entry point. */
 function deckHTML() {
   const returning = isReturning();
   if (!returning) {
@@ -452,36 +455,17 @@ function deckHTML() {
       </div>
     </div>`;
 }
-function scPopoverHTML() {
-  return `
-    <div class="fx-popover-head">
-      <span>Stored-credential strategy</span>
-      <button type="button" class="fx-popover-x" id="sc-popover-close" aria-label="Close">×</button>
-    </div>
-    <div class="fx-popover-body">${deckHTML()}</div>`;
+/** The stored-credential strategy, for the demo-controls drawer's Payment
+    behaviour section (app.js). SE-only — never part of the customer's page. */
+export function strategyHTML() {
+  if (isLive()) return `<div class="se-deck-empty">Own card fields are off in live — nothing is stored.</div>`;
+  ensureStorageValid();
+  return `<div class="se-strategy">${deckHTML()}</div>`;
 }
-/* Repaint only when open (like the FX popover); the trigger's own visibility
-   is owned by renderPaymentHTML via effectiveSave()/isReturning(). */
-function renderScPopover() {
-  const el = $('#sc-popover');
-  if (el && !el.hidden) el.innerHTML = scPopoverHTML();
-}
-function openScPopover() {
-  const trigger = $('#sc-trigger');
-  const pop = $('#sc-popover');
-  if (!trigger || !pop) return;
-  pop.innerHTML = scPopoverHTML();
-  pop.hidden = false;
-  trigger.classList.add('active');
-  const rect = trigger.getBoundingClientRect();
-  const top = Math.min(rect.top, window.innerHeight - pop.offsetHeight - 12);
-  pop.style.top = `${Math.max(12, top)}px`;
-  pop.style.left = `${rect.right + 10}px`;
-}
-function closeScPopover() {
-  const pop = $('#sc-popover');
-  if (pop) pop.hidden = true;
-  $('#sc-trigger')?.classList.remove('active');
+/* The drawer repaints itself on this event (app.js) — fired whenever anything
+   the strategy shows changes. */
+function notifyControls() {
+  document.dispatchEvent(new CustomEvent('demo:controls-changed'));
 }
 /* The Name-on-card inherits the customer identity whenever the chosen route
    creates a customer (token/both) and the field hasn't been typed into. */
@@ -587,7 +571,7 @@ export function refreshProfile() {
   const region = $('#pay-region');
   if (region && state.model === 'own-fields') rerenderPayRegion();
   else renderRequest();
-  renderScPopover();
+  notifyControls();
 }
 
 /* ── Terminal (trusted webhook or Retrieve) → left screen ─────
@@ -721,6 +705,9 @@ async function pay() {
       credential: cred ? { kind: cred.kind, label: `${cred.brand} ···${cred.last4}` } : null,
       aft: !!p.aft,
       items: orderItems(p),
+      // whatever the body's `customer` references: the session cus_*** for an
+      // account/returning checkout, nothing for a guest (or an inline AFT customer)
+      customer_id: usesCustomer() ? customers.getCustomerId() : null,
     });
     // Armed now, synchronously before the POST — so it captures THIS payment's
     // reference and customer bucket (env:profile), whatever the SE switches to
@@ -853,7 +840,7 @@ function rerenderPayRegion() {
   if (isReturning()) card.cvv = ''; // CVV is fresh per payment
   region.innerHTML = renderPaymentHTML();
   wirePayRegion();
-  renderScPopover();
+  notifyControls();
   renderRequest();
   const payBtn = $('#pay-btn');
   if (payBtn) payBtn.textContent = payCta();
@@ -878,7 +865,11 @@ function wirePayRegion() {
         return;
       }
       if (e.target.closest('#cof-different')) { useDifferentCard = true; rerenderPayRegion(); return; }
-      if (e.target.closest('#cof-forget')) { customers.forgetCustomer(); useDifferentCard = false; rerenderPayRegion(); return; }
+      // "Not Jordan? Sign out" is the SITE's sign-out: the shopper carries on
+      // as a guest and the cus_*** stays filed (session.js). The whole page
+      // repaints — the site header's account links change too, not just the
+      // payment region.
+      if (e.target.closest('#cof-forget')) { useDifferentCard = false; signOut(); repaintSite(); return; }
       const dp = e.target.closest('#cof-dp button[data-dp]');
       if (dp) { directPurchase = dp.dataset.dp === '1'; rerenderPayRegion(); return; }
     });
@@ -921,7 +912,6 @@ function wirePayRegion() {
 
   $('#f-save')?.addEventListener('change', e => {
     save = e.target.checked;
-    if (!effectiveSave()) closeScPopover();
     rerenderPayRegion(); // show/hide the Strategy trigger, re-inherit the name, re-validate
   });
   $('#f-tds')?.addEventListener('change', e => { tds = e.target.checked; renderRequest(); });
@@ -943,9 +933,8 @@ export function mount() {
   sent = false;
   if (isLive()) wipeCard(); // nothing typed in sandbox survives into live
   useDifferentCard = false; // returning view is the default whenever credentials exist
-  closeScPopover(); // never linger open across a vertical/model/env reset
   wirePayRegion();
-  renderScPopover();
+  notifyControls();
   renderRequest();
 }
 
@@ -953,8 +942,8 @@ export function mount() {
 // unlike focus/blur, bubble) so it's wired exactly ONCE at module load and
 // keeps working regardless of how often the underlying element gets
 // recreated: card fields on every own-fields mount(), the price tile on
-// every vertical/model/env reset, the FX popover's fields on every popover
-// re-render (app.js rebuilds #fx-popover's innerHTML far more often than
+// every vertical/model/env reset, the drawer's FX fields on every drawer
+// re-render (app.js rebuilds the drawer's innerHTML far more often than
 // mount() runs — a per-element listener there would silently go stale).
 // f-cus-* belong to the account frame's own card (customer-beat.js owns that
 // highlight) — this flow only tracks fields of the PAYMENT body.
@@ -970,40 +959,27 @@ document.addEventListener('focusout', e => {
   applyHighlight();
 });
 
-// Strategy popover interactions — once-at-module-load delegation (the popover
-// body's innerHTML is rebuilt far more often than mount() runs).
+// Strategy interactions — the deck renders in the demo-controls drawer, whose
+// body is rebuilt far more often than mount() runs, so it's delegated once.
 document.addEventListener('click', e => {
-  const btn = e.target.closest('#sc-popover .se-seg button[data-val]');
+  const btn = e.target.closest('.se-strategy .se-seg button[data-val]');
   if (!btn || btn.disabled) return;
   const opt = btn.closest('.se-seg').dataset.opt;
-  if (opt === 'storage') { storage = btn.dataset.val; syncNameInheritance(); renderScPopover(); renderRequest(); }
-  if (opt === 'mode') { chargeMode = btn.dataset.val; rerenderPayRegion(); renderScPopover(); }
+  if (opt === 'storage') { storage = btn.dataset.val; syncNameInheritance(); notifyControls(); renderRequest(); }
+  if (opt === 'mode') { chargeMode = btn.dataset.val; rerenderPayRegion(); notifyControls(); }
 });
-
-// Strategy popover open/close — FX-style: toggle from #sc-trigger, close on the
-// ×, an outside click (composedPath, since a re-rendering control detaches
-// e.target mid-dispatch), or Escape.
+// The "Strategy" link beside Save card / the saved cards opens the drawer there.
 document.addEventListener('click', e => {
-  if (e.target.closest('#sc-trigger')) {
-    $('#sc-popover').hidden ? openScPopover() : closeScPopover();
-    return;
-  }
-  if (e.target.closest('#sc-popover-close')) { closeScPopover(); return; }
-  const pop = $('#sc-popover');
-  if (pop && !pop.hidden && !e.composedPath().includes(pop) && !e.target.closest('#sc-trigger')) {
-    closeScPopover();
-  }
-});
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && !$('#sc-popover')?.hidden) closeScPopover();
+  if (!e.target.closest('#sc-trigger')) return;
+  document.dispatchEvent(new CustomEvent('demo:open-controls', { detail: { section: 'behaviour' } }));
 });
 
 // Credentials changing (webhook harvest, list backfill, profile re-key) —
-// refresh the popover and the chips if they're on screen.
+// refresh the drawer's strategy and the chips if they're on screen.
 customers.subscribeCustomers(() => {
   if (state.model !== 'own-fields' || state.leftView !== 'client') return;
   refreshIdentityChooser(); // a new card can unlock "Returning" (or a re-key withdraw it)
-  renderScPopover();
+  notifyControls();
   if ($('#cof-returning')) rerenderPayRegion(); // NRI badges / new tokens
 });
 

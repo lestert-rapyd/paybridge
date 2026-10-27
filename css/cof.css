@@ -1,77 +1,16 @@
 /* ─────────────────────────────────────────────────────────────
-   Card-on-file / recurring / AFT additions.
-   Sits AFTER main.css; uses tokens.css variables only — no new colours.
-   New surfaces: sandbox credential picker (cred-), client-site product
-   selector (prod-), saved-card chips + returning view (cof-), the SE
-   strategy deck (se-), toolkit express block + config extras (tk-/tkc-),
+   Card-on-file / recurring / AFT surfaces.
+   Sits AFTER main.css; tokens.css variables only — no new colours.
+   Saved-card chips + returning view (cof-), the identity question and
+   account step (id-/acct-), the SE strategy deck rendered in the
+   demo-controls drawer (se-), the toolkit express block (tk-express),
    and the back-office customer-on-file card (bo-cof-/bo-charge-).
    ───────────────────────────────────────────────────────────── */
 
-/* ── Sandbox credential picker (folded into the Sandbox/Live toggle) ──
-   Popover under the env switch; light-theme surface so it reads as an
-   extension of the client chrome, not the dark engine room. */
-.cred-panel {
-  position: absolute; top: calc(100% + 8px); right: 0; z-index: 40;
-  width: 300px; padding: 6px;
-  background: var(--surface); border: 1px solid var(--line-2);
-  border-radius: var(--r-md); box-shadow: var(--shadow-pop);
-}
-.cred-panel[hidden] { display: none; }
-.cred-panel-head {
-  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
-  padding: 6px 8px 8px;
-  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
-  color: var(--ink-3);
-}
-.cred-panel-head .cph-note {
-  font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--ink-4);
-}
-.cred-row {
-  display: flex; align-items: center; gap: 10px; width: 100%;
-  padding: 9px 10px; text-align: left; cursor: pointer;
-  border: 1px solid transparent; border-radius: var(--r-sm);
-  background: transparent; color: var(--ink-2);
-  transition: border-color .15s, background .15s;
-}
-.cred-row:hover { background: var(--surface-2); }
-.cred-row.active { border-color: var(--accent); background: var(--accent-soft); }
-.cred-radio {
-  width: 15px; height: 15px; flex: none; position: relative;
-  border: 2px solid var(--line-2); border-radius: 50%;
-}
-.cred-row.active .cred-radio { border-color: var(--accent); }
-.cred-row.active .cred-radio::after {
-  content: ""; position: absolute; inset: 2px; border-radius: 50%; background: var(--accent);
-}
-.cred-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.cred-id { font-family: var(--font-mono); font-weight: 700; font-size: 12px; letter-spacing: .04em; color: var(--ink); }
-.cred-sub { font-size: 10.5px; color: var(--ink-3); }
-.cred-key { font-family: var(--font-mono); font-size: 9.5px; color: var(--ink-4); }
-.cred-flags { flex: none; display: flex; gap: 4px; }
-.cred-flag {
-  font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
-  padding: 2px 5px; border-radius: 4px; white-space: nowrap;
-  background: var(--surface-2); color: var(--ink-3);
-}
-.cred-flag.on  { background: rgba(18,183,106,.14); color: var(--ok-deep); }
-.cred-flag.off { background: rgba(239,68,68,.10);  color: var(--err-deep); }
-
-/* ── The four frames (js/steps.js) ────────────────────────────
-   The client page is a sequence, so each frame gets a question and the answers
-   are ROUTE CARDS (.bo-route, design system §04.4b) — reused wholesale, since
-   every answer here carries a money consequence the SE narrates. The only new
-   geometry is the two-column product grid. */
-/* Back only — the frame count came off the storefront. */
-.step-rail { display: flex; justify-content: flex-end; margin: 14px 0 4px; }
-.step-back {
-  border: 0; background: none; padding: 0; cursor: pointer;
-  font-family: var(--font-sans); font-size: 12px; font-weight: 600; color: var(--ink-3);
-}
-.step-back:hover { color: var(--ink); text-decoration: underline; }
-
+/* ── Site pages' shared frame (js/steps.js) ────────────────────
+   Answers that carry a consequence the SE narrates are ROUTE CARDS
+   (.bo-route, main.css) — reused wholesale on the sign-in page. */
 .frame { margin-top: 16px; }
-.frame-q { font-size: 17px; font-weight: 700; letter-spacing: -.01em; color: var(--ink); }
-.frame-sub { font-size: 13px; line-height: 1.5; color: var(--ink-3); margin: 5px 0 14px; }
 .frame .co-cta { margin-top: 14px; }
 .frame .bo-routes { margin-bottom: 0; }
 /* Two answers to one question sit on ONE plane — same row, same height, the
@@ -79,26 +18,6 @@
 .frame-actions { display: flex; gap: 10px; margin-top: 14px; }
 .frame-actions .co-cta,
 .frame-actions .cs-secondary { flex: 1; min-width: 0; height: 52px; margin-top: 0; }
-
-/* Guest + subscription with no storage route: state the reason, offer the fix. */
-.frame-block {
-  margin-top: 14px; padding: 12px 14px;
-  border: 1px solid var(--line-2); border-radius: var(--r-md); background: var(--surface-2);
-}
-.frame-block-t { font-size: 13px; font-weight: 700; color: var(--ink); }
-.frame-block-n { font-size: 11.5px; line-height: 1.5; color: var(--ink-3); margin-top: 4px; }
-.frame-block .cs-secondary { margin-top: 10px; height: 40px; font-size: 13px; }
-
-.prod-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.prod-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.prod-col-head {
-  display: flex; flex-direction: column; gap: 1px;
-  font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
-}
-.prod-col-head span { font-size: 10px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--ink-4); }
-.prod-col .bo-route { flex: none; }
-.ps-mo { font-weight: 500; font-size: 10px; color: var(--ink-3); margin-left: 2px; }
-.per-mo { font-size: 11px; font-weight: 600; color: var(--ink-3); }
 
 /* ── Saved-card chips + returning view ───────────────────── */
 .cof-returning { display: flex; flex-direction: column; gap: 12px; }
@@ -108,20 +27,20 @@
   justify-content: space-between;
   gap: 10px;
 }
-.cof-welcome { font-weight: 700; font-size: 14px; color: var(--ink); }
+.cof-welcome { font-weight: 600; font-size: 15px; color: var(--ink); }
 .cof-link {
   border: 0;
   background: none;
   padding: 0;
-  font-family: var(--font-sans);
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--accent);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--link);
   cursor: pointer;
 }
-.cof-link:hover { text-decoration: underline; }
-.cof-link.subtle { color: var(--ink-3); font-weight: 500; }
-.cof-foot { text-align: center; margin-top: -4px; }
+.cof-link:hover { color: var(--link-hover); text-decoration: underline; }
+.cof-link.subtle { color: var(--muted); font-weight: 500; }
+.cof-foot { text-align: center; margin-top: 12px; }
 
 .cof-chips { display: flex; flex-direction: column; gap: 8px; }
 .cof-chip {
@@ -129,309 +48,223 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--line-2);
+  padding: 12px 14px;
+  border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--surface);
-  font-family: var(--font-sans);
-  font-size: 12.5px;
-  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  color: var(--text);
   cursor: pointer;
   text-align: left;
   transition: border-color .15s, box-shadow .15s;
 }
-.cof-chip:hover { border-color: var(--ink-4); }
+.cof-chip:hover { border-color: var(--field); }
 .cof-chip.active {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  background: var(--accent-soft);
   color: var(--ink);
 }
 .cof-chip.static { cursor: default; }
-.cof-chip-brand { font-weight: 700; }
+.cof-chip-brand { font-weight: 600; }
 .cof-chip-num { font-family: var(--font-mono); letter-spacing: .04em; }
-.cof-chip-exp { color: var(--ink-3); font-size: 11px; }
+.cof-chip-exp { margin-left: auto; color: var(--muted); font-size: 12.5px; }
 
 .cof-cvvrow { align-items: flex-end; }
 .cof-cvv { max-width: 130px; }
 .cof-cvv-note, .cof-nocvv {
-  font-size: 11.5px;
-  color: var(--ink-3);
+  font-size: 13px;
+  color: var(--muted);
   line-height: 1.45;
   padding-bottom: 10px;
 }
 .cof-nocvv {
   padding: 9px 12px;
-  border: 1px dashed var(--line-2);
-  border-radius: var(--r-sm);
-  background: var(--surface-2);
+  border: 1px dashed var(--field);
+  border-radius: var(--r-md);
+  background: var(--soft);
 }
 
 /* AFT is_direct_purchase fork (customer-facing segmented) */
 .cof-dp {
   display: flex;
   gap: 0;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-sm);
-  overflow: hidden;
+  gap: 2px;
+  margin-top: 16px;
+  padding: 3px;
+  border-radius: var(--r-md);
+  background: var(--soft-2);
 }
 .cof-dp button {
   flex: 1;
-  padding: 8px 10px;
+  min-height: 34px;
+  padding: 0 10px;
   border: 0;
-  background: var(--surface);
-  color: var(--ink-2);
-  font-family: var(--font-sans);
-  font-size: 12px;
-  font-weight: 600;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
 }
-.cof-dp button + button { border-left: 1px solid var(--line-2); }
-.cof-dp button.active { background: var(--accent-soft); color: var(--ink); }
+.cof-dp button.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
 
-/* ── Frame 1's question (the identity answer) ──────────────────
-   Was a three-way segmented control inside the checkout; it's a frame of its
-   own now, so the answers are route cards and only the label survives. */
+/* ── The identity question (sign-in page: "New here?") — route cards. */
 .id-block { margin: 2px 0 14px; }
-.id-label { font-size: 17px; font-weight: 700; letter-spacing: -.01em; color: var(--ink); margin-bottom: 12px; }
-.id-caption { font-size: 10.5px; line-height: 1.5; color: var(--ink-3); margin-top: 5px; }
+.id-label { font-size: 16px; font-weight: 600; color: var(--ink); margin-bottom: 12px; }
+.id-caption { font-size: 12px; line-height: 1.5; color: var(--muted); margin-top: 6px; }
 
 /* ── Account step (the customer beat, preceding the cart) ──────
    Sits directly under the identity chooser: the create form while there's no
    cus_***, then a single created row (an account that's already been minted
    shouldn't keep taking the cart's space). */
 .acct-block {
-  margin: 10px 0 14px;
-  padding: 12px 14px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-md);
-  background: var(--surface-2);
+  margin: 18px 0 0;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--soft);
   display: flex;
   flex-direction: column;
   gap: 9px;
 }
 /* One field per row, in request-body order, so the eye tracks straight across
    to the line it writes (sync.js FIELD_MAP lights that line on focus). */
-.acct-fields { display: flex; flex-direction: column; gap: 9px; }
-.acct-field { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.acct-field > span { font-size: 11px; font-weight: 600; color: var(--ink-3); }
-.acct-field .co-input { height: 40px; }
-.acct-field input { font-size: 13px; }
+.acct-fields { display: flex; flex-direction: column; gap: 12px; }
+.acct-field { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.acct-field > span { font-size: 13px; font-weight: 500; color: var(--text); }
+.acct-field .co-input { height: 44px; background: var(--surface); }
+.acct-field input { font-family: inherit; font-size: 14px; }
+/* in flight: the fields are frozen while POST /v1/customers is out — and look it */
+.acct-block.locked .co-input { background: var(--soft-2); border-color: var(--line); }
+.acct-block.locked input { color: var(--muted); cursor: not-allowed; }
 .acct-chip {
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: 10.5px;
   padding: 2px 7px;
   border-radius: 999px;
-  border: 1px solid var(--line-2);
+  border: 1px solid var(--field);
   background: var(--surface);
-  color: var(--ink-3);
+  color: var(--muted);
   white-space: nowrap;
 }
 .acct-err {
-  font-size: 11px; line-height: 1.5; color: var(--err-deep);
-  border: 1px dashed color-mix(in srgb, var(--err) 40%, transparent);
-  border-radius: var(--r-sm);
-  padding: 7px 10px;
+  font-size: 13px; line-height: 1.5; color: var(--err-deep);
+  background: var(--err-soft);
+  border: 1px solid color-mix(in srgb, var(--err) 30%, transparent);
+  border-radius: var(--r-md);
+  padding: 9px 12px;
 }
 /* created: one row, no form */
-.acct-block.created { flex-direction: row; align-items: center; padding: 10px 14px; }
-.acct-row { display: flex; align-items: center; gap: 10px; width: 100%; }
+.acct-block.created { flex-direction: row; align-items: center; padding: 14px 16px; }
+.acct-row { display: flex; align-items: center; gap: 12px; width: 100%; }
 .acct-tick {
-  flex: none; width: 20px; height: 20px; border-radius: 50%;
+  flex: none; width: 24px; height: 24px; border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 700;
-  background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok-deep);
+  font-size: 12px; font-weight: 700;
+  background: var(--ok-soft); color: var(--ok-deep);
 }
 .acct-row-main { flex: 1 1 auto; min-width: 0; }
-/* the cus_*** and a typed name are both unbroken tokens — let them wrap rather
-   than push the "view in back office" link out of the row */
+/* a typed name and an email are unbroken tokens — let them wrap */
 .acct-row-name, .acct-row-id { overflow-wrap: anywhere; }
-.acct-row-name { font-size: 12.5px; font-weight: 700; color: var(--ink); }
-.acct-row-mail { font-weight: 500; font-size: 11px; color: var(--ink-3); margin-left: 7px; }
-.acct-row-id { font-size: 10.5px; color: var(--ink-3); margin-top: 1px; }
-/* the checkout frame's profile strip — read-only: who is paying, as a fact */
-.acct-block.strip { flex-direction: row; align-items: center; padding: 10px 14px; background: var(--surface-2); }
-.acct-tick.guest, .acct-tick.pending { background: var(--line-2); color: var(--ink-3); }
-/* the toolkit hosts the step in its narrower summary column */
-.tk-summary .acct-block { margin: 0 0 12px; padding: 11px 12px; }
+.acct-row-name { font-size: 14px; font-weight: 600; color: var(--ink); }
+.acct-row-mail { font-weight: 400; font-size: 13px; color: var(--muted); margin-left: 8px; }
+.acct-row-id { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+/* the checkout page's profile strip — read-only: who is paying, as a fact */
+.acct-block.strip { flex-direction: row; align-items: center; padding: 14px 16px; background: var(--soft); }
+.acct-tick.guest, .acct-tick.pending { background: var(--soft-2); color: var(--muted); }
+/* the toolkit hosts the strip in its narrower summary column */
+.tk-summary .acct-block { margin: 0 0 12px; padding: 12px; }
 
-/* ── SE strategy deck — now the #sc-popover portal ────────
-   The dashed .se-deck / .se-deck-head panel it used to be went with
-   #demo-controls; only the rows and the two copy classes survive. */
-.se-deck-empty { font-size: 11.5px; color: var(--ink-3); }
-.se-deck-hint { font-size: 9.5px; font-weight: 500; letter-spacing: .02em; text-transform: none; color: var(--ink-4); }
-.se-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.se-lab { display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; font-weight: 600; color: var(--ink-2); }
-.se-lab code, .se-fixed code, .se-warn code {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--ink-3);
-}
+/* ── SE strategy deck — rendered in the demo-controls drawer's Payment
+   behaviour section (own-fields strategyHTML) ── */
+.se-strategy { display: flex; flex-direction: column; gap: 12px; }
+/* the customer prerequisite a token save implies */
+.sc-cust { display: flex; flex-direction: column; gap: 5px; padding: 10px 12px; border: 1px dashed var(--field); border-radius: var(--r-md); background: var(--soft); }
+.sc-cust.vault { border-style: solid; }
+.sc-cust-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.sc-cust-body { font-size: 12.5px; line-height: 1.5; color: var(--text); }
+.sc-cust-body code { font-size: 11px; color: var(--accent); }
+.sc-cust-id { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.sc-cust-id code { font-size: 11px; color: var(--muted); }
+.se-deck-empty { font-size: 13px; line-height: 1.5; color: var(--muted); }
+.se-deck-empty code { font-size: 11.5px; color: var(--text); }
+.se-deck-hint { font-size: 10px; font-weight: 500; letter-spacing: .02em; text-transform: none; color: var(--faint); }
+.se-row { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.se-lab { display: flex; flex-direction: column; gap: 2px; font-size: 13px; font-weight: 500; color: var(--text); }
+.se-lab code, .se-fixed code, .se-warn code { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
 .se-fixed { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.se-fixed > code {
-  font-size: 11px;
-  color: var(--accent);
-  background: var(--accent-soft);
-  padding: 2px 8px;
-  border-radius: 999px;
-}
-.se-note { font-size: 10.5px; color: var(--ink-3); }
-.se-seg {
-  display: flex;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-sm);
-  overflow: hidden;
-  background: var(--surface);
-}
+.se-fixed > code { font-size: 12px; color: var(--accent); background: var(--accent-soft); padding: 3px 9px; border-radius: var(--r-pill); }
+.se-note { font-size: 12px; color: var(--muted); }
+/* the drawer's segmented grammar (main.css .dc-seg) */
+.se-seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; padding: 3px; border-radius: var(--r-md); background: var(--soft-2); }
 .se-seg button {
-  padding: 6px 10px;
-  border: 0;
-  background: none;
-  color: var(--ink-2);
-  font-family: var(--font-sans);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
+  min-height: 32px; padding: 0 8px; border: 0; border-radius: var(--r-sm); background: transparent;
+  color: var(--muted); font-family: var(--font-ui); font-size: 12.5px; font-weight: 500; cursor: pointer;
 }
-.se-seg button + button { border-left: 1px solid var(--line-2); }
-.se-seg button.active { background: var(--accent-soft); color: var(--ink); }
+.se-seg button:hover:not(:disabled) { color: var(--ink); }
+.se-seg button.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
 .se-seg button:disabled { opacity: .45; cursor: not-allowed; }
 .se-warn {
-  font-size: 11px;
-  color: var(--warn);
-  border: 1px dashed color-mix(in srgb, var(--warn) 40%, transparent);
-  border-radius: var(--r-sm);
-  padding: 7px 10px;
+  font-size: 12.5px; line-height: 1.45; color: var(--warn-deep);
+  background: var(--warn-soft); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  border-radius: var(--r-md); padding: 8px 10px;
 }
 
-/* ── Toolkit: express block + config extras ──────────────── */
-.tk-express {
-  border: 1px solid var(--accent-soft);
-  border-radius: var(--r-md);
-  background: var(--surface);
-  padding: 12px;
-  margin: 12px 0 2px;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-.tk-express-head {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: .07em;
-  text-transform: uppercase;
-  color: var(--ink-2);
-}
+/* ── Toolkit: express block ──────────────────────────────── */
+.tk-express { display: flex; flex-direction: column; gap: 10px; margin: 14px 0 2px; padding: 14px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); }
+.tk-express-head { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .tk-express-pay { margin: 0; }
-.tk-express-alt { font-size: 10px; color: var(--ink-4); text-align: center; }
-.tk-express-alt code { font-family: var(--font-mono); font-size: 9.5px; }
-
-.tkc-fixed code {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--eng-text);
-  background: var(--eng-surface-2);
-  border: 1px solid var(--eng-line);
-  padding: 3px 9px;
-  border-radius: 999px;
-}
+.tk-express-alt { font-size: 12px; color: var(--faint); text-align: center; }
 
 /* ── Back office: customer on file + MIT charge form ─────── */
 .bo-cof { margin-bottom: 4px; }
-.bo-cof-card {
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
+.bo-cof-card { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-card); }
 .bo-cof-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.bo-cof-headbtns { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.bo-cof-headbtns { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 /* customer view (view === 'customer'): the cus_*** as an object */
 .bo-cust-kyc { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin: 14px 0 0; }
-.bo-cust-kyc-label {
-  font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
-  color: var(--ink-4); margin-right: 2px;
-}
-.bo-cust-actions { display: flex; gap: 7px; flex-wrap: wrap; margin: 16px 0 4px; }
-.bo-cof-name { font-weight: 700; font-size: 13.5px; color: var(--ink); }
-.bo-cof-id { font-size: 11px; color: var(--ink-3); margin-top: 1px; }
-.bo-cof-id code { font-family: var(--font-mono); font-size: 10.5px; }
+.bo-cust-kyc-label { margin-right: 2px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.backoffice .acct-chip { background: var(--soft); }
+.bo-cust-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0 4px; }
+.bo-cof-name { font-size: 14px; font-weight: 600; color: var(--ink); }
+.bo-cof-id { margin-top: 2px; font-size: 12px; color: var(--muted); }
+.bo-cof-id code { font-size: 11.5px; }
+/* the Rapyd soft button */
 .bo-cof-sync {
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-sm);
-  background: var(--surface-2);
-  color: var(--ink-2);
-  font-family: var(--font-sans);
-  font-size: 11px;
-  font-weight: 600;
-  padding: 6px 10px;
-  cursor: pointer;
-  white-space: nowrap;
+  height: 32px; padding: 0 12px; white-space: nowrap; cursor: pointer;
+  border: 0; border-radius: var(--r-md); background: var(--accent-soft); color: var(--accent);
+  font-family: var(--font-ui); font-size: 12.5px; font-weight: 500;
 }
-.bo-cof-sync:hover { border-color: var(--ink-4); }
+.bo-cof-sync:hover:not(:disabled) { background: var(--accent-hover); }
 .bo-cof-sync:disabled { opacity: .5; cursor: not-allowed; }
+.bo-cust-actions .bo-cof-sync { font-family: var(--font-mono); font-size: 11.5px; }
 .bo-cof-creds { display: flex; flex-direction: column; gap: 8px; }
-.bo-cof-empty { font-size: 11.5px; line-height: 1.5; color: var(--ink-3); }
-.bo-cof-cred {
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  background: var(--surface-2);
-  padding: 9px 12px;
-}
-.bo-cof-cred.open { border-color: var(--accent); }
+.bo-cof-empty { font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+.bo-cof-cred { padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--soft); }
+.bo-cof-cred.open { border-color: var(--accent); background: var(--surface); }
 .bo-cof-credrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.bo-cof-brand { font-weight: 700; font-size: 12.5px; color: var(--ink); }
-.bo-cof-exp { font-size: 11px; color: var(--ink-3); }
-.bo-cof-cit { margin-left: auto; font-size: 10px; color: var(--ink-4); font-style: italic; }
+.bo-cof-brand { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.bo-cof-exp { font-size: 12px; color: var(--muted); }
+.bo-cof-cit { margin-left: auto; font-size: 11.5px; font-style: italic; color: var(--faint); }
 .bo-cof-charge {
-  margin-left: auto;
-  border: 1px solid var(--accent);
-  border-radius: var(--r-sm);
-  background: var(--accent);
-  color: var(--on-accent);
-  font-family: var(--font-sans);
-  font-size: 11px;
-  font-weight: 700;
-  padding: 5px 14px;
-  cursor: pointer;
+  margin-left: auto; height: 30px; padding: 0 14px; cursor: pointer;
+  border: 0; border-radius: var(--r-md); background: var(--accent); color: var(--on-accent);
+  font-family: var(--font-ui); font-size: 12.5px; font-weight: 500;
 }
 .bo-cof-charge:hover { filter: brightness(1.08); }
-.bo-cof-charge:disabled {
-  background: var(--surface);
-  border-color: var(--line-2);
-  color: var(--ink-4);
-  cursor: not-allowed;
-  filter: none;
-}
-
-.bo-charge-form {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--line-2);
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
+.bo-cof-charge:disabled { background: var(--soft-2); color: var(--faint); cursor: not-allowed; filter: none; }
+.bo-charge-form { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; padding-top: 12px; border-top: 1px dashed var(--field); }
 .bo-charge-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.bo-charge-prod { font-weight: 700; font-size: 12px; color: var(--ink); margin-right: 2px; }
-.bo-charge-note { font-size: 10.5px; color: var(--ink-3); line-height: 1.5; }
-.bo-charge-note code { font-family: var(--font-mono); font-size: 9.5px; }
+.bo-charge-prod { margin-right: 2px; font-size: 13px; font-weight: 600; color: var(--ink); }
+.bo-charge-note { font-size: 12px; line-height: 1.5; color: var(--muted); }
+.bo-charge-note code { font-size: 11px; }
 
 /* MIT / AFT badges on payment tiles + detail */
 .bo-mit-badge {
-  display: inline-block;
-  font-family: var(--font-mono);
-  font-size: 8.5px;
-  letter-spacing: .03em;
-  padding: 1px 6px;
-  border-radius: 999px;
-  border: 1px solid var(--line-2);
-  color: var(--ink-3);
-  background: var(--surface-2);
-  vertical-align: 1px;
+  display: inline-block; vertical-align: 1px; padding: 1px 6px;
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .03em;
+  border: 1px solid var(--field); border-radius: var(--r-pill); color: var(--muted); background: var(--soft);
 }
 .bo-mit-badge.aft { color: var(--info); border-color: color-mix(in srgb, var(--info) 30%, transparent); }
-.bo-model-tag.mit { margin-left: 4px; }

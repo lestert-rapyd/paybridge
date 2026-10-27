@@ -6,6 +6,17 @@
    Buckets are keyed by `${env}:${profile}` — a cus_/card_ minted
    under one sandbox MID does not exist under another.
 
+   Remembered customers: a SANDBOX bucket's customer survives a reload —
+   the cus_***, the shopper's name/email and the TOKEN credentials'
+   metadata (card_***, brand, last4, expiry, network_reference_id,
+   intent) are written to localStorage, one entry per bucket. Never a
+   card number or CVV: merchant-vault credentials hold the PAN, so they
+   stay memory-only and are not remembered at all. Live buckets are never
+   written. Storage failures (private mode, quota, blocked) are swallowed
+   — the demo then simply forgets on reload, as it always did. A
+   restored bucket is flagged so app.js re-syncs its cards with the list
+   call the first time it's used (needsResync / markResynced).
+
    Two credential kinds (single-intent each — a card authorised
    `unscheduled` is never charged `recurring`, and vice versa):
      · 'vault'  — PCI merchant stores the PAN itself; NO Rapyd object.
@@ -44,6 +55,15 @@ const IDENTITY = {
   address: { name: 'Jordan Taylor', line_1: '10 Downing Street', city: 'London', country: 'GB', zip: 'SW1A 2AA', state: '' },
 };
 
+const DEFAULT_IDENTITY = JSON.parse(JSON.stringify(IDENTITY));
+
+/** Back to the demo's own dummy shopper — after the SE forgets a customer
+    whose name/email the site had taken on (sign-in with a customer ID). */
+export function resetIdentity() {
+  Object.assign(IDENTITY, JSON.parse(JSON.stringify(DEFAULT_IDENTITY)));
+  notify();
+}
+
 const key = () => `${state.env}:${state.profile}`;
 
 /** The current bucket's key, `${env}:${profile}` — capture it before an
@@ -63,6 +83,7 @@ function bucket(k = key()) {
 // A throwing subscriber must not abort the mutation's caller (refreshTokens
 // in particular is fired without a catch) or starve the other subscribers.
 function notify() {
+  persist();
   for (const fn of listeners) {
     try { fn(); } catch (err) { console.error('customers listener failed:', err); }
   }
@@ -141,8 +162,33 @@ export function enrichedCustomerBody() {
 export function getCustomerId() { return bucket().customer_id; }
 export function setCustomerId(id, opts) {
   if (!id) return;
-  bucket(keyFrom(opts)).customer_id = id;
+  const k = keyFrom(opts);
+  forgotten.delete(k);
+  const b = bucket(k);
+  b.customer_id = id;
+  b.identity = { name: IDENTITY.name, email: IDENTITY.email }; // who it was created for
   notify();
+}
+
+/** Adopt an EXISTING customer (sign-in with a customer ID): file `id` in the
+    bucket, dropping the previous customer's cards when it's a different
+    customer (they belong to someone else), and take the shopper's name/email
+    from the retrieved customer object when it carries them. */
+export function adoptCustomer(id, { name, email } = {}, opts) {
+  if (!id) return;
+  const k = keyFrom(opts);
+  forgotten.delete(k);
+  const b = bucket(k);
+  if (b.customer_id !== id) b.credentials = [];
+  b.customer_id = id;
+  if (typeof name === 'string' && name.trim()) setIdentityQuiet('name', name.trim());
+  if (typeof email === 'string' && email.trim()) setIdentityQuiet('email', email.trim());
+  b.identity = { name: IDENTITY.name, email: IDENTITY.email };
+  notify();
+}
+function setIdentityQuiet(path, value) {
+  if (path === 'name') { IDENTITY.name = value; IDENTITY.address.name = twoWordName(value); }
+  else IDENTITY[path] = value;
 }
 
 /* ── credentials ─────────────────────────────────────────── */
@@ -193,9 +239,138 @@ export function setNetworkReferenceId(ref, nri, opts) {
 /** Demo-side forget — the sandbox cus_*** keeps existing on Rapyd's side
     (worth narrating); the demo simply stops referencing it. */
 export function forgetCustomer(opts) {
-  buckets.delete(keyFrom(opts));
-  notify();
+  const k = keyFrom(opts);
+  buckets.delete(k);
+  forgotten.add(k);
+  resync.delete(k);
+  notify(); // persist() drops the remembered entry with the bucket
 }
+
+/* ── Remembered customers (localStorage, sandbox only) ─────── */
+const STORE_KEY = 'rapyd-demo:customers:v1';
+
+/** Only sandbox buckets are ever remembered — a live cus_*** is real data. */
+export const persistable = (k) => typeof k === 'string' && k.startsWith('sandbox:');
+
+/* The token-credential fields that may be written. An allowlist, not a
+   denylist: whatever a credential grows later stays memory-only until it's
+   deliberately added here. No number, no cvv, no name-on-card. */
+const SAFE_CRED_FIELDS = [
+  'card_id', 'type', 'brand', 'last4', 'expiration_month', 'expiration_year',
+  'network_reference_id', 'recurrence_type', 'aft',
+  'origin_vertical', 'origin_model', 'origin_product', 'created_at',
+];
+
+/** A bucket as a storable plain object, or null when there's nothing to
+    remember. Pure — exported for tests/unit.js. Vault credentials are dropped
+    whole (their reuse needs the PAN, which never leaves memory). */
+export function serializeBucket(b, identity = b?.identity || IDENTITY) {
+  if (!b?.customer_id) return null;
+  const credentials = (b.credentials || [])
+    .filter((c) => c && c.kind === 'token' && typeof c.card_id === 'string')
+    .map((c) => Object.fromEntries(SAFE_CRED_FIELDS.filter((f) => c[f] != null).map((f) => [f, c[f]])));
+  return {
+    customer_id: String(b.customer_id),
+    identity: { name: String(identity?.name || ''), email: String(identity?.email || '') },
+    credentials,
+  };
+}
+
+/** The inverse, validating as it goes — storage is user-editable, so nothing
+    is trusted: a malformed entry restores as null, a malformed card is
+    skipped, unknown fields are ignored. Pure — exported for tests. */
+export function restoreBucket(saved) {
+  if (!saved || typeof saved !== 'object') return null;
+  const id = saved.customer_id;
+  if (typeof id !== 'string' || !/^cus_[A-Za-z0-9]+$/.test(id)) return null;
+  const credentials = (Array.isArray(saved.credentials) ? saved.credentials : [])
+    .filter((c) => c && typeof c.card_id === 'string' && /^card_[A-Za-z0-9]+$/.test(c.card_id))
+    .map((c) => ({
+      ...Object.fromEntries(SAFE_CRED_FIELDS.filter((f) => c[f] != null).map((f) => [f, c[f]])),
+      kind: 'token',
+      recurrence_type: c.recurrence_type === 'recurring' ? 'recurring' : 'unscheduled',
+      aft: !!c.aft,
+    }));
+  const name = typeof saved.identity?.name === 'string' ? saved.identity.name : '';
+  const email = typeof saved.identity?.email === 'string' ? saved.identity.email : '';
+  return { customer_id: id, credentials, identity: { name, email } };
+}
+
+/* localStorage, guarded: any access can throw (blocked storage, private mode). */
+let storage = (() => {
+  try { return typeof localStorage !== 'undefined' ? localStorage : null; } catch { return null; }
+})();
+/** Swap the storage backend (tests pass an in-memory stand-in; null disables). */
+export function setCustomerStorage(s) { storage = s || null; }
+
+function readStore() {
+  try {
+    const raw = storage?.getItem(STORE_KEY);
+    const obj = raw ? JSON.parse(raw) : null;
+    return obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {};
+  } catch { return {}; }
+}
+
+/* Write every remembered bucket. Called from notify(), so the store follows
+   each mutation. Restored-but-untouched entries for buckets this tab never
+   loaded are left alone; live keys are never written. */
+function persist() {
+  if (!storage) return;
+  try {
+    const out = {};
+    const prev = readStore();
+    for (const [k, v] of Object.entries(prev)) if (persistable(k) && !buckets.has(k) && !forgotten.has(k)) out[k] = v;
+    for (const [k, b] of buckets) {
+      if (!persistable(k)) continue;
+      const ser = serializeBucket(b);
+      if (ser) out[k] = ser;
+    }
+    if (Object.keys(out).length) storage.setItem(STORE_KEY, JSON.stringify(out));
+    else storage.removeItem(STORE_KEY);
+  } catch { /* quota / blocked — remembered state is a convenience */ }
+}
+
+/* Buckets restored from storage that haven't been re-synced with Rapyd yet. */
+const resync = new Set();
+/* Buckets forgotten this session — a stale stored copy must not come back. */
+const forgotten = new Set();
+
+/** Load remembered sandbox buckets. Runs once at import; the identity follows
+    the bucket that's active at load (the shopper the SE left signed in). */
+export function restoreRemembered() {
+  const saved = readStore();
+  for (const [k, v] of Object.entries(saved)) {
+    if (!persistable(k) || buckets.has(k)) continue;
+    const r = restoreBucket(v);
+    if (!r) continue;
+    buckets.set(k, {
+      customer_id: r.customer_id,
+      credentials: r.credentials.map((c) => ({ ref: `cred_${++credSeq}`, network_reference_id: null, ...c })),
+      identity: r.identity,
+    });
+    resync.add(k);
+  }
+  useBucketIdentity();
+}
+
+/** Make the demo identity the active bucket's customer's — called at load and
+    after an env/profile switch, so the site greets whoever that MID's
+    customer is. A bucket without a customer leaves the identity alone (the
+    account form may be mid-edit). */
+export function useBucketIdentity() {
+  const b = buckets.get(key());
+  if (!b?.customer_id || !b.identity) return;
+  if (b.identity.name) setIdentityQuiet('name', b.identity.name);
+  if (b.identity.email) setIdentityQuiet('email', b.identity.email);
+}
+
+/** Whether the ACTIVE bucket came from storage and still needs its cards
+    re-read from Rapyd (they may have been deleted, or new ones added). */
+export function needsResync() { return resync.has(key()); }
+export function markResynced(opts) { resync.delete(keyFrom(opts)); }
+/** Whether the active bucket's customer is remembered across reloads. */
+export function isRemembered() { return persistable(key()) && !!bucket().customer_id && !!storage; }
+
 
 /* ── live sync (GET /v1/customers/{id}/payment_methods) ──────
    Silent backfill after a save completes, and the back office's
@@ -246,3 +421,5 @@ export async function refreshTokens(opts) {
   }
   return resp;
 }
+
+restoreRemembered();

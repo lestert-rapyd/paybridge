@@ -10,8 +10,9 @@
    Signing out keeps the cus_*** (it still exists at Rapyd, and the
    next sign-in references it again) and checks the shopper out as a
    guest. Signing in with no cus_*** in the bucket is refused in
-   shopper words — "returning" can only mean this tab's own customer
-   (see js/identity.js on why nothing persists across reloads).
+   shopper words — "returning" means the bucket's own customer: one this
+   tab created, one remembered from an earlier session (customers.js), or
+   one adopted by id (site/lookup.js).
 
    The password field is decorative: there is no merchant user store
    in this demo, and nothing typed into it is read or kept.
