@@ -131,7 +131,7 @@
         <button data-v="gaming">iGaming</button>
       </div>
       <span class="ds-switch-note">
-        Sets <code>&lt;html data-vertical&gt;</code> — the accent, the store head and the account
+        Sets <code>&lt;html data-vertical&gt;</code> and the skin’s colour tokens — the accent, the store head and the account
         form's length all follow it, exactly as they do in the app.
       </span>
     </div>
@@ -982,23 +982,22 @@
 
 </div>
 
-<script>
-  /* Page chrome only: flip the vertical the way the app does — one attribute on
-     :root — and keep the store head honest, since the accent is not the only
-     thing that changes with it. Values mirror js/verticals.js. */
-  const HEAD = {
-    ecommerce: { merchant: 'PayBridge Shop', headline: 'SECURE CHECKOUT' },
-    crypto:    { merchant: 'PayBridge Coin', headline: 'BUY CRYPTO INSTANTLY' },
-    gaming:    { merchant: 'PayBridge Play', headline: 'ADD FUNDS TO YOUR WALLET' },
-  };
+<script type="module">
+  /* Page chrome only: flip the skin the way the app does — data-vertical plus
+     the skin's colour tokens on :root (js/skins.js applySkin) — and keep the
+     store head honest, since the accent is not the only thing that changes
+     with it. Merchant and headline come from the real skin + pack data. */
+  import { VERTICALS } from './js/verticals.js';
+  import { applySkin } from './js/skins.js';
   document.getElementById('ds-vertical').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-v]');
     if (!btn) return;
     const v = btn.dataset.v;
     document.documentElement.setAttribute('data-vertical', v);
+    applySkin(v);
     document.querySelectorAll('#ds-vertical button').forEach((b) => b.classList.toggle('on', b === btn));
-    document.querySelectorAll('[data-ds-merchant]').forEach((el) => { el.textContent = HEAD[v].merchant; });
-    document.querySelectorAll('[data-ds-headline]').forEach((el) => { el.textContent = HEAD[v].headline; });
+    document.querySelectorAll('[data-ds-merchant]').forEach((el) => { el.textContent = VERTICALS[v].merchant; });
+    document.querySelectorAll('[data-ds-headline]').forEach((el) => { el.textContent = VERTICALS[v].headline.toUpperCase(); });
   });
 </script>
 </body>

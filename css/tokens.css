@@ -9,7 +9,7 @@
      B · Engine room     (--eng-*)    dark, tinted · JetBrains Mono
      C · SE config panel (--se-*)     near-black violet · dev-code feel
    plus the app chrome (--chrome-*, the top/sub bars) and the
-   per-vertical accent, which swaps via [data-vertical].
+   per-skin accent, which js/skins.js applySkin() writes onto :root.
 
    Consolidates the former tokens.css + tokens.v2.css and the hardcoded
    "design-refresh layer" of main.css. Legacy aliases (--paper/--ink/…)
@@ -136,7 +136,7 @@
   --r-xl: 20px;   /* config panel */
   --r-card: 24px; /* the browser card */
 
-  /* Defaults (Retail) — overridden per vertical below */
+  /* Defaults (Retail) — overridden per skin by js/skins.js */
   --accent:     #5600ef;
   --accent-2:   #a855f7;
   --on-accent:  #ffffff;
@@ -152,26 +152,9 @@
   --eng-faint:  #6b5b80;
 }
 
-/* ── Verticals ─────────────────────────────────────────────
-   To add a vertical: copy a block, set the 4 accent tokens + 7 engine
-   tints (engine hue follows the accent, value stays near-black), and add
-   the entry to js/verticals.js. Accent must pass 4.5:1 on white for text
-   use, or use accent-soft fills with accent text. Only accent + engine
-   tint change per vertical; layout and the ramps above never fork. */
-:root[data-vertical="ecommerce"] {
-  --accent: #5600ef; --accent-2: #a855f7; --on-accent: #ffffff; --accent-soft: #efe8ff;
-  --eng-bg: #0f0a17; --eng-surface: #170f22; --eng-surface-2: #1c1230;
-  --eng-line: #2a1c3b; --eng-text: #f6ecff; --eng-muted: #9a86b0; --eng-faint: #6b5b80;
-}
-/* Crypto — neon green */
-:root[data-vertical="crypto"] {
-  --accent: #00e07a; --accent-2: #00ff89; --on-accent: #00140a; --accent-soft: #daffed;
-  --eng-bg: #0a0e0c; --eng-surface: #121814; --eng-surface-2: #16201b;
-  --eng-line: #1d2823; --eng-text: #eafff4; --eng-muted: #6f8a7e; --eng-faint: #4a5f55;
-}
-/* iGaming — magenta */
-:root[data-vertical="gaming"] {
-  --accent: #ff007a; --accent-2: #ff5ca8; --on-accent: #ffffff; --accent-soft: #ffe1ee;
-  --eng-bg: #120410; --eng-surface: #1c0a17; --eng-surface-2: #250d1e;
-  --eng-line: #3a1329; --eng-text: #ffeaf4; --eng-muted: #b07d97; --eng-faint: #7a5266;
-}
+/* ── Skins ────────────────────────────────────────────────
+   Per-skin accent + engine tints are DATA in js/skins.js (applySkin
+   writes them onto :root), so a customer skin needs no CSS edit. The
+   :root values above are the Retail defaults they override. Only
+   accent + engine tint change per skin; layout and the ramps above
+   never fork. */

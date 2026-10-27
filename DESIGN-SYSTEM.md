@@ -82,9 +82,11 @@ Near-black violet dev-code surface. `--se-bg #100f16` · `--se-surface #1a1824` 
 `--se-surface-2 #2c2942` · `--se-line #2a2740` · `--se-line-2 #211f2c` · `--se-text #fff` ·
 `--se-title #c7c2e0` · `--se-muted #8681a0` · `--se-faint #6f6a86` · `--se-faint-2 #5a5670`.
 
-### 2.4 Per-vertical accent (set on `<html data-vertical>`) [both]
-The accent is the ONLY strong hue on a surface. It swaps per vertical; **never hard-code it**.
-| vertical (`data-vertical`) | `--accent` | `--accent-2` | `--accent-soft` | `--on-accent` |
+### 2.4 Per-skin accent (written onto `:root` by `js/skins.js` `applySkin()`) [both]
+The accent is the ONLY strong hue on a surface. It swaps per skin; **never hard-code it**.
+Skin colours are data in `js/skins.js` (`tokens`), not CSS blocks, so a customer skin needs
+no stylesheet edit. Built-in skins:
+| skin (`data-vertical`) | `--accent` | `--accent-2` | `--accent-soft` | `--on-accent` |
 |---|---|---|---|---|
 | Retail (`ecommerce`) | `#5600ef` | `#a855f7` | `#efe8ff` | `#fff` |
 | Crypto (`crypto`) | `#00e07a` | `#00ff89` | `#daffed` | `#00140a` |

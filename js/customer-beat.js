@@ -28,6 +28,7 @@
    ───────────────────────────────────────────────────────────── */
 
 import { state } from './state.js';
+import { VERTICALS } from './verticals.js';
 import * as customers from './customers.js';
 import { identityMode, usesCustomer } from './identity.js';
 import { createCustomer, newIdempotencyKey } from './api.js';
@@ -309,10 +310,10 @@ const ACCOUNT_FIELDS = [
   { id: 'f-cus-country', path: 'address.country', label: 'Country',          autocomplete: 'country-name' },
   { id: 'f-cus-zip',     path: 'address.zip',     label: 'Postcode',         autocomplete: 'postal-code' },
 ];
-/** Verticals whose real-world equivalent runs KYC at signup. */
-const KYC_VERTICALS = new Set(['crypto']);
+/** KYC fields show when the active industry pack's real-world merchants run
+    KYC at signup (packs.js kycAtSignup — crypto today). */
 const visibleAccountFields = () =>
-  ACCOUNT_FIELDS.filter((f) => !f.kyc || KYC_VERTICALS.has(state.vertical));
+  ACCOUNT_FIELDS.filter((f) => !f.kyc || VERTICALS[state.vertical]?.kycAtSignup);
 
 /** The field a given id writes — used by the input handler. */
 export const accountFieldPath = (id) => ACCOUNT_FIELDS.find((f) => f.id === id)?.path || null;

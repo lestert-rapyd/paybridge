@@ -1,129 +1,36 @@
 /* ─────────────────────────────────────────────────────────────
-   Vertical definitions.
-   Brand stays "PayBridge" — client-side merchants are PayBridge
-   sub-brands. Only context, product framing, colours and copy change.
+   Verticals — the composed view the flows read: a skin (whose site,
+   js/skins.js) laid over an industry pack (what it sells, js/packs.js).
+   Brand stays "PayBridge" for the built-in skins — client-side
+   merchants are PayBridge sub-brands; a customer skin swaps the
+   identity without touching the pack.
 
-   Each vertical carries a small PRODUCT CATALOG: one-time products
-   and subscription products. The product's billing nature — not a
-   mechanical back-office switch — is what drives the stored-credential
-   intent (`recurrence_type`): one-time + save → unscheduled (card-on-
-   file, customer-present reuse); subscription → recurring (MIT charges
-   run from the back office). Crypto products additionally carry the
-   AFT indicators (aft / purpose_code / special_condition_indicator).
+   VERTICALS[id] keeps the shape every caller already reads — label,
+   dot, merchant, descriptor, domain from the skin; headline, cta,
+   successNote, kycAtSignup, products from the pack — keyed by skin id
+   (state.vertical holds the active skin id). See packs.js for how a
+   product's billing nature drives the stored-credential intent.
    ───────────────────────────────────────────────────────────── */
 
 import { state } from './state.js';
+import { SKINS } from './skins.js';
+import { PACKS } from './packs.js';
 
-export const VERTICALS = {
-  ecommerce: {
-    id: 'ecommerce',
-    label: 'Retail',
-    dot: '#5600ef',
-    merchant: 'PayBridge Shop',
-    descriptor: 'PayBridge - Shop',
-    domain: 'shop.paybridge.com',
-    headline: 'Secure checkout',
-    cta: 'Pay',
-    successNote: 'Order confirmed — we’re packing it now. Dispatch and tracking details will land in your inbox shortly.',
-    products: [
-      {
-        id: 'chair', pill: 'Lounge Chair', billing: 'one_time', glyph: '🪑',
-        thumb: ['#5600ef', '#a855f7'],
-        name: 'Oak Lounge Chair',
-        desc: 'Walnut finish · Qty 1',
-        amount: '149.00', currency: 'GBP', symbol: '£', country: 'GB',
-        delivery: 'Free',
-        successNote: 'Order confirmed — we’re packing it now. Dispatch and tracking details will land in your inbox shortly.',
-      },
-      {
-        id: 'coffee-sub', pill: 'Coffee Club', billing: 'subscription', interval: 'monthly', cta: 'Subscribe', glyph: '☕',
-        thumb: ['#7a3f12', '#c9803a'],
-        name: 'Coffee Bean Club',
-        desc: '250g single origin · monthly',
-        amount: '18.00', currency: 'GBP', symbol: '£', country: 'GB',
-        delivery: 'Free',
-        successNote: 'Subscription active — your first bag ships today. Future bags bill to this card automatically each month.',
-      },
-    ],
-  },
-
-  crypto: {
-    id: 'crypto',
-    label: 'Crypto',
-    dot: '#00ff89',
-    merchant: 'PayBridge Coin',
-    descriptor: 'PayBridge - Coin',
-    domain: 'coin.paybridge.io',
-    headline: 'Buy crypto instantly',
-    cta: 'Buy',
-    successNote: 'Top-up confirmed — ≈ 0.00075 BTC is on its way to your wallet address. Network confirmations usually take a few minutes.',
-    products: [
-      {
-        id: 'btc', pill: 'Buy BTC', billing: 'one_time', glyph: '₿',
-        aft: true, purpose_code: 'crypto_currency', special_condition_indicator: 'cryptocurrency',
-        thumb: ['#00b36b', '#00ff89'],
-        name: 'Bitcoin',
-        desc: 'You receive ≈ 0.00075 BTC',
-        amount: '50.00', currency: 'USD', symbol: '$', country: 'US',
-        delivery: null,
-        successNote: 'Purchase confirmed — ≈ 0.00075 BTC is on its way to your wallet address. Network confirmations usually take a few minutes.',
-        // is_direct_purchase: false → the AFT funds the fiat balance instead
-        fundedNote: 'Funds added — your fiat balance is topped up and held. Buy BTC whenever you’re ready, at your price.',
-      },
-      {
-        id: 'dca', pill: 'DCA Plan', billing: 'subscription', interval: 'monthly', cta: 'Start DCA', glyph: '🔁',
-        aft: true, purpose_code: 'crypto_currency', special_condition_indicator: 'cryptocurrency',
-        thumb: ['#0e7490', '#22d3ee'],
-        name: 'Bitcoin DCA Plan',
-        desc: 'Auto-buy BTC · monthly',
-        amount: '25.00', currency: 'USD', symbol: '$', country: 'US',
-        delivery: null,
-        successNote: 'DCA plan active — your first buy just executed. Future buys run automatically every month, no action needed.',
-      },
-      {
-        id: 'coinplus', pill: 'Coin+', billing: 'subscription', interval: 'monthly', cta: 'Subscribe', glyph: '⭐',
-        thumb: ['#4338ca', '#818cf8'],
-        name: 'Coin+ Platform Fee',
-        desc: 'Pro trading tier · monthly',
-        amount: '9.99', currency: 'USD', symbol: '$', country: 'US',
-        delivery: null,
-        successNote: 'Coin+ active — pro features unlocked. Your card bills automatically each month.',
-      },
-    ],
-  },
-
-  gaming: {
-    id: 'gaming',
-    label: 'iGaming',
-    dot: '#ff007a',
-    merchant: 'PayBridge Play',
-    descriptor: 'PayBridge - Play',
-    domain: 'play.paybridge.bet',
-    headline: 'Add funds to your wallet',
-    cta: 'Deposit',
-    successNote: 'Funds added — your new balance is available to play right away. Withdrawals return to this card.',
-    products: [
-      {
-        id: 'spins', pill: '50 Spins', billing: 'one_time', cta: 'Buy', glyph: '🎲',
-        thumb: ['#c4005f', '#ff007a'],
-        name: '50 Spins Pack',
-        desc: 'Credited instantly',
-        amount: '50.00', currency: 'EUR', symbol: '€', country: 'MT',
-        delivery: null,
-        successNote: 'Spins credited — good luck! Winnings withdraw back to this card.',
-      },
-      {
-        id: 'adfree', pill: 'Ad-free', billing: 'subscription', interval: 'monthly', cta: 'Subscribe', glyph: '✨',
-        thumb: ['#7f1d1d', '#ef4444'],
-        name: 'Ad-free Play',
-        desc: 'No interruptions · monthly',
-        amount: '12.00', currency: 'EUR', symbol: '€', country: 'MT',
-        delivery: null,
-        successNote: 'Ad-free active — enjoy uninterrupted play. Bills to this card automatically each month.',
-      },
-    ],
-  },
+const compose = (skin) => {
+  const pack = PACKS[skin.pack];
+  return {
+    ...pack,
+    id: skin.id,
+    pack: pack.id,
+    label: skin.label,
+    dot: skin.dot,
+    merchant: skin.merchant,
+    descriptor: skin.descriptor,
+    domain: skin.domain,
+  };
 };
+
+export const VERTICALS = Object.fromEntries(Object.values(SKINS).map((s) => [s.id, compose(s)]));
 
 export const VERTICAL_ORDER = ['ecommerce', 'crypto', 'gaming'];
 

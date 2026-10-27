@@ -4,6 +4,7 @@
 
 import { VERTICALS, VERTICAL_ORDER, activeProduct, pricedProduct, customerCharge, fxQuoteKey, chargeText, productCta, setFxBeat } from './verticals.js';
 import { PROFILES, PROFILE_ORDER } from './profiles.js';
+import { applySkin } from './skins.js';
 import { accountPanelHTML, syncCustomerBeat, setPanelRepainter, setHighlightHook } from './customer-beat.js';
 import {
   frameHTML, stepRailHTML, isCheckout, renderStepPanels, resetSteps, setClientRepainter,
@@ -528,6 +529,7 @@ function renderVerticalPills() {
 
 function syncControlStates() {
   document.documentElement.dataset.vertical = state.vertical;
+  applySkin(state.vertical);
   $$('#vertical-pills button').forEach(b => b.classList.toggle('active', b.dataset.vertical === state.vertical));
   $$('#env-switch button').forEach(b => b.classList.toggle('active', b.dataset.env === state.env));
   $$('.model-btn').forEach(b => b.classList.toggle('active', b.dataset.model === state.model));
@@ -813,6 +815,7 @@ setPanelRepainter(() => {
 setHighlightHook(() => FLOWS[state.model].applyHighlight?.());
 
 document.documentElement.dataset.vertical = state.vertical;
+applySkin(state.vertical);
 renderVerticalPills();
 wire();
 wireLiveGate();
