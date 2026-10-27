@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RUNNING</title>
+  <style>
+    :root { --bg: #fff; --fg: #111; --ok: #0a7a3d; --err: #b42318; --muted: #666; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #111; --fg: #eee; --ok: #4ade80; --err: #f87171; --muted: #999; } }
+    body { background: var(--bg); color: var(--fg); font: 14px/1.5 ui-monospace, Menlo, monospace; margin: 0; padding: 24px 16px; }
+    h1 { font-size: 16px; margin: 0 0 12px; }
+    #summary { margin-bottom: 12px; font-weight: 700; }
+    #results { list-style: none; padding: 0; margin: 0; }
+    .ok { color: var(--ok); } .err { color: var(--err); }
+    li { margin: 2px 0; overflow-wrap: anywhere; }
+    .why { color: var(--muted); margin-left: 1.5em; white-space: pre-wrap; }
+  </style>
+  <!-- Network tripwire. A classic inline script runs during parsing, BEFORE any
+       deferred module (and so before the imported app modules evaluate) — any
+       fetch / XHR / beacon from here on is recorded and refused, and unit.js's
+       last test fails if the list isn't empty. Serve over http (python3 -m
+       http.server from the repo root) — ES modules don't load from file://. -->
+  <script>
+    window.__NETWORK_CALLS__ = [];
+    const refuse = (kind, target) => {
+      window.__NETWORK_CALLS__.push(`${kind} ${String(target)}`);
+      return new Error(`unit tests must not touch the network (${kind} ${String(target)})`);
+    };
+    window.fetch = (input) => Promise.reject(refuse('fetch', input?.url || input));
+    XMLHttpRequest.prototype.open = function (method, url) { throw refuse(`xhr ${method}`, url); };
+    if (navigator.sendBeacon) navigator.sendBeacon = (url) => { refuse('beacon', url); return false; };
+
+    // A module that 404s or throws while loading never reaches unit.js's
+    // reporter — surface it as a FAIL instead of leaving the page "RUNNING"
+    // (a headless runner polls __TEST_RESULTS__ / the title).
+    window.__loadFailed = (why) => {
+      if (window.__TEST_RESULTS__) return;
+      window.__TEST_RESULTS__ = { passed: 0, failed: 1, failures: [{ name: 'module load', error: why }] };
+      document.title = 'FAIL 1';
+      const s = document.getElementById('summary');
+      if (s) { s.className = 'err'; s.textContent = `Module load failed: ${why}`; }
+    };
+    window.addEventListener('error', (e) => window.__loadFailed(e.message || 'script error'));
+  </script>
+</head>
+<body>
+  <h1>PayBridge frontend — unit tests (no network)</h1>
+  <div id="summary">Running…</div>
+  <ul id="results"></ul>
+  <script type="module" src="./unit.js" onerror="__loadFailed('unit.js or one of its imports failed to load (serve over http?)')"></script>
+</body>
+</html>

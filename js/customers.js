@@ -14,9 +14,16 @@
    Both card_*** and network_reference_id are harvested from the
    PAYMENT_COMPLETED webhook (never PAYMENT_SUCCEEDED); the INITIAL
    network_reference_id wins forever (setNetworkReferenceId enforces).
+
+   Async writers (the webhook harvest, the list backfill, the customer
+   beat's POST) capture bucketKey() when their request STARTS and pass it
+   back as { key } — the SE may switch sandbox profile while a 3DS
+   challenge is open, and the cus_/card_ must land under the MID that
+   minted it, not whichever one is selected when the response arrives.
    ───────────────────────────────────────────────────────────── */
 
 import { listCustomerPaymentMethods } from './api.js';
+import { brandLabel } from './sync.js';
 import { state } from './state.js';
 
 const buckets = new Map(); // `${env}:${profile}` -> { customer_id, credentials }
@@ -38,11 +45,28 @@ const IDENTITY = {
 };
 
 const key = () => `${state.env}:${state.profile}`;
-function bucket() {
-  if (!buckets.has(key())) buckets.set(key(), { customer_id: null, credentials: [] });
-  return buckets.get(key());
+
+/** The current bucket's key, `${env}:${profile}` — capture it before an
+    async call and hand it back to a mutator as { key }. */
+export function bucketKey() { return key(); }
+
+// Mutators take an optional trailing { key }; anything else (including an
+// Event, should one be wired straight to a listener) means "current bucket".
+// A KeyboardEvent's .key is a string too — hence the ':' shape check.
+const keyFrom = (opts) => (typeof opts?.key === 'string' && opts.key.includes(':') ? opts.key : key());
+
+function bucket(k = key()) {
+  if (!buckets.has(k)) buckets.set(k, { customer_id: null, credentials: [] });
+  return buckets.get(k);
 }
-function notify() { for (const fn of listeners) fn(); }
+
+// A throwing subscriber must not abort the mutation's caller (refreshTokens
+// in particular is fired without a catch) or starve the other subscribers.
+function notify() {
+  for (const fn of listeners) {
+    try { fn(); } catch (err) { console.error('customers listener failed:', err); }
+  }
+}
 
 export function subscribeCustomers(fn) {
   listeners.add(fn);
@@ -115,9 +139,9 @@ export function enrichedCustomerBody() {
 }
 
 export function getCustomerId() { return bucket().customer_id; }
-export function setCustomerId(id) {
+export function setCustomerId(id, opts) {
   if (!id) return;
-  bucket().customer_id = id;
+  bucket(keyFrom(opts)).customer_id = id;
   notify();
 }
 
@@ -132,17 +156,17 @@ export function getCredential(ref) { return bucket().credentials.find((c) => c.r
 /** PCI vault credential — merchant-stored PAN, no Rapyd object.
     c: { type, number, expiration_month, expiration_year, name, brand, last4,
          recurrence_type, aft, origin_vertical, origin_model, origin_product } */
-export function addVaultCredential(c) {
+export function addVaultCredential(c, opts) {
   const ref = `cred_${++credSeq}`;
-  bucket().credentials.push({ ref, kind: 'vault', network_reference_id: null, aft: false, ...c, created_at: Date.now() });
+  bucket(keyFrom(opts)).credentials.push({ ref, kind: 'vault', network_reference_id: null, aft: false, ...c, created_at: Date.now() });
   notify();
   return ref;
 }
 
 /** Rapyd token credential — deduped by card_id; later sightings only fill
     fields we don't have yet (e.g. expiry arriving via the list endpoint). */
-export function upsertTokenCredential(c) {
-  const b = bucket();
+export function upsertTokenCredential(c, opts) {
+  const b = bucket(keyFrom(opts));
   const existing = c.card_id && b.credentials.find((x) => x.kind === 'token' && x.card_id === c.card_id);
   if (existing) {
     for (const [k, v] of Object.entries(c)) {
@@ -159,8 +183,8 @@ export function upsertTokenCredential(c) {
 
 /** FIRST non-null network_reference_id wins, forever — later payments return
     different NRIDs which must never overwrite the initial one (PLAN §1.4). */
-export function setNetworkReferenceId(ref, nri) {
-  const cred = bucket().credentials.find((c) => c.ref === ref);
+export function setNetworkReferenceId(ref, nri, opts) {
+  const cred = bucket(keyFrom(opts)).credentials.find((c) => c.ref === ref);
   if (!cred || !nri || cred.network_reference_id) return;
   cred.network_reference_id = String(nri);
   notify();
@@ -168,24 +192,33 @@ export function setNetworkReferenceId(ref, nri) {
 
 /** Demo-side forget — the sandbox cus_*** keeps existing on Rapyd's side
     (worth narrating); the demo simply stops referencing it. */
-export function forgetCustomer() {
-  buckets.delete(key());
+export function forgetCustomer(opts) {
+  buckets.delete(keyFrom(opts));
   notify();
 }
 
 /* ── live sync (GET /v1/customers/{id}/payment_methods) ──────
    Silent backfill after a save completes, and the back office's
    "Sync from Rapyd" action (which also paints the raw response).
-   Returns the api.js wrapper result so callers can render it. */
-const brandOf = (type) =>
-  /visa/i.test(type || '') ? 'Visa' : /master/i.test(type || '') ? 'Mastercard' : /amex|express/i.test(type || '') ? 'Amex' : 'Card';
-
-export async function refreshTokens() {
-  const b = bucket(); // captured — a later env/profile switch can't misroute the merge
+   Returns the api.js wrapper result so callers can render it, and
+   NEVER rejects — callers fire it without awaiting (or await it without a
+   try), so a failure must come back as a value, not an unhandled rejection.
+   `{ key }` targets a captured bucket (see the header). */
+export async function refreshTokens(opts) {
+  const k = keyFrom(opts);
+  const b = bucket(k); // captured — a later env/profile switch can't misroute the merge
   if (!b.customer_id) return { ok: false, httpStatus: 0, data: null };
-  const resp = await listCustomerPaymentMethods(b.customer_id, { env: state.env, profile: state.profile });
+  // Sign with the bucket's own MID — the only one that can see its cus_***.
+  const sep = k.indexOf(':');
+  const env = k.slice(0, sep), profile = k.slice(sep + 1);
+  let resp;
+  try {
+    resp = await listCustomerPaymentMethods(b.customer_id, { env, profile });
+  } catch (err) {
+    return { ok: false, httpStatus: 0, data: { error: 'NETWORK_ERROR', message: err?.message || 'request failed' } };
+  }
   const cards = resp?.data?.data;
-  if (resp.ok && Array.isArray(cards)) {
+  if (resp?.ok && Array.isArray(cards)) {
     for (const d of cards) {
       if (!d?.id || !/^card_/.test(d.id)) continue;
       const existing = b.credentials.find((x) => x.kind === 'token' && x.card_id === d.id);
@@ -193,14 +226,14 @@ export async function refreshTokens() {
         if (existing.last4 == null && d.last4) existing.last4 = d.last4;
         if (existing.expiration_month == null && d.expiration_month) existing.expiration_month = d.expiration_month;
         if (existing.expiration_year == null && d.expiration_year) existing.expiration_year = d.expiration_year;
-        if (!existing.type && d.type) { existing.type = d.type; existing.brand = existing.brand || brandOf(d.type); }
+        if (!existing.type && d.type) { existing.type = d.type; existing.brand = existing.brand || brandLabel(d.type); }
         if (!existing.network_reference_id && d.network_reference_id) existing.network_reference_id = String(d.network_reference_id);
       } else {
         // Discovered outside this session — intent unknown; Rapyd's default
         // recurrence is unscheduled, so list it as customer-present reuse.
         b.credentials.push({
           ref: `cred_${++credSeq}`, kind: 'token', card_id: d.id,
-          type: d.type || null, brand: brandOf(d.type), last4: d.last4 || null,
+          type: d.type || null, brand: brandLabel(d.type), last4: d.last4 || null,
           expiration_month: d.expiration_month || null, expiration_year: d.expiration_year || null,
           network_reference_id: d.network_reference_id ? String(d.network_reference_id) : null,
           recurrence_type: 'unscheduled', aft: false,

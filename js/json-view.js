@@ -4,23 +4,25 @@
    body. Every primitive value carries its dotted path (data-path) so
    the sync engine can highlight the node a focused field maps to.
    Line numbers anchor demos + troubleshooting ("see line 7").
+
+   Renders webhook payloads (attacker-controllable — /api/webhook is
+   public), so EVERY interpolation goes through ui.js esc(): values,
+   keys AND the data-path attribute built from those keys.
    ───────────────────────────────────────────────────────────── */
 
-function esc(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
+import { esc } from './ui.js';
 
 function valueSpan(value, path) {
   let cls = 'tok-str';
   let text;
   if (value === null)                  { cls = 'tok-bool'; text = 'null'; }
-  else if (typeof value === 'number')  { cls = 'tok-num'; text = String(value); }
-  else if (typeof value === 'boolean') { cls = 'tok-bool'; text = String(value); }
-  else                                  { text = `"${esc(value)}"`; }
+  else if (typeof value === 'number')  { cls = 'tok-num'; text = esc(value); }
+  else if (typeof value === 'boolean') { cls = 'tok-bool'; text = esc(value); }
+  else                                  { text = `"${esc(String(value))}"`; } // String(): undefined still reads "undefined"
   const inner = text === '""'
     ? '<span class="jv-empty">""</span>'
     : `<span class="${cls}">${text}</span>`;
-  return `<span class="jv" data-path="${path}">${inner}</span>`;
+  return `<span class="jv" data-path="${esc(path)}">${inner}</span>`;
 }
 
 function build(value, path, indent, prefix, comma, lines) {

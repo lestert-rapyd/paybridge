@@ -4,6 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>PayBridge · API Sandbox</title>
+  <!-- Backend origin, read once by js/api.js at import time. Point a staging
+       deploy at another backend by editing this one line (a query param is
+       deliberately NOT honoured — a crafted link could redirect the live token). -->
+  <meta name="paybridge-backend" content="https://rapyd-backend.vercel.app" />
+  <!-- https origin of this frontend's deployment. Only used when the page
+       itself isn't served over https (e.g. http://localhost): the hosted
+       checkout's complete/cancel redirects then point at <this>/complete/. -->
+  <meta name="paybridge-public-url" content="" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Anton&family=Epilogue:wght@400;500;600;700;800&family=Hanken+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -31,7 +39,7 @@
         <div class="env-picker" id="env-picker">
           <div class="env-switch" id="env-switch">
             <button data-env="sandbox" class="active">Sandbox<span class="env-cred" id="env-cred-tag"></span><span class="env-caret" aria-hidden="true">▾</span></button>
-            <button data-env="live">Live</button>
+            <button data-env="live" title="Restricted — needs a live access token; charges a real card (0.01 only)">Live<svg class="env-lock" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2.5"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg></button>
           </div>
           <div class="cred-panel" id="cred-panel" hidden><!-- rendered by app.js --></div>
         </div>
@@ -117,6 +125,42 @@
        button and the FX popover's requested_currency button — a native
        <select>'s dropdown is OS-rendered and can't be themed. -->
   <div class="cur-dropdown" id="cur-dropdown" hidden></div>
+
+  <!-- Live unlock (app.js openLiveDialog). The backend refuses env:'live'
+       without X-PayBridge-Live-Token; this asks for it once per tab. The input
+       is cleared on every close and the token is never rendered back. -->
+  <div class="live-dialog-backdrop" id="live-dialog" hidden>
+    <form class="live-dialog" id="live-dialog-form" role="dialog" aria-modal="true" aria-labelledby="live-dialog-title" autocomplete="off" novalidate>
+      <div class="live-dialog-head">
+        <span id="live-dialog-title">Unlock live mode</span>
+        <button type="button" class="fx-popover-x" id="live-dialog-x" aria-label="Cancel — stay in sandbox">×</button>
+      </div>
+      <div class="pb-notice warn">
+        <b>Live is restricted.</b> It charges a real card through the production Rapyd account.
+      </div>
+      <ul class="live-dialog-rules">
+        <li>Every charge is 0.01 — the backend refuses anything above its live cap.</li>
+        <li>Own Card Fields can't send a raw card number in live; use the Checkout Toolkit.</li>
+        <li>The token is kept for this tab only and is never shown again.</li>
+      </ul>
+      <label class="live-dialog-label" for="live-token">Live access token</label>
+      <input type="password" class="live-dialog-input" id="live-token" name="pb-live-token" autocomplete="off" autocapitalize="off" spellcheck="false" />
+      <div class="live-dialog-err" id="live-dialog-err" role="alert" hidden></div>
+      <div class="live-dialog-actions">
+        <button type="button" class="live-dialog-btn" id="live-dialog-cancel">Stay in sandbox</button>
+        <button type="submit" class="live-dialog-btn primary">Unlock live</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Top-of-page notice (app.js showBanner) — live auth failures. Text only. -->
+  <div class="pb-banner pb-notice error" id="pb-banner" role="alert" hidden>
+    <div class="pb-banner-body">
+      <b id="pb-banner-title"></b>
+      <span id="pb-banner-msg"></span>
+    </div>
+    <button type="button" class="pb-banner-x" id="pb-banner-x" aria-label="Dismiss">×</button>
+  </div>
 
   <script type="module" src="js/app.js"></script>
 </body>

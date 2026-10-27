@@ -15,27 +15,38 @@
      · digital_wallets_buttons_customization (AP / GP color + type)
    The same config is mirrored live in the Request tab. Toolkit
    lifecycle events stream to the Console tab. The left success /
-   error screen is driven by the terminal webhook.
+   error screen is driven by the terminal webhook — a TRUSTED one
+   (signature-verified, or confirmed via Retrieve Payment; see
+   webhooks.js). The toolkit's own failure/expired browser events
+   end the payment too, and update the ledger like success does.
+
+   This is the flow to use in LIVE: the card never touches PayBridge
+   (own-fields refuses to collect one in live).
    ───────────────────────────────────────────────────────────── */
 
 import { state } from '../state.js';
-import { VERTICALS, activeProduct, customerCharge, chargeText, fxSnapshot, productCta, getFxBeat, fxBeatPath } from '../verticals.js';
-import { createCheckoutSession, createDirectPayment } from '../api.js';
+import { VERTICALS, activeProduct, customerCharge, fxSnapshot, productCta } from '../verticals.js';
+import { createCheckoutSession, createDirectPayment, newReference } from '../api.js';
 import { profileEwallet } from '../profiles.js';
 import { clientDetails } from '../client-details.js';
 import { renderJSONView } from '../json-view.js';
-import { setActiveTab, setStatus } from '../ui.js';
+import { setActiveTab, setStatus, esc } from '../ui.js';
 import { startWebhookWatch, setWatchPaymentId } from '../webhooks.js';
-import { renderProcessing, render3DS, renderSuccess, renderError } from '../screens.js';
+import { renderProcessing, render3DS, renderError } from '../screens.js';
 import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
 import * as ledger from '../ledger.js';
 import * as customers from '../customers.js';
-import { identityMode, usesCustomer, promoteToReturning, refreshIdentityChooser } from '../identity.js';
+import { identityMode, usesCustomer, refreshIdentityChooser } from '../identity.js';
 import { stepRailHTML } from '../steps.js';
 import {
   accountPanelHTML, beatCardHTML, customerRequestCardHTML, customerResponseCardHTML,
   fillCustomerSignature, fireCreateCustomer, refreshAccountPanel,
 } from '../customer-beat.js';
+import {
+  productTotalsHTML, fxCardHTML, paymentResponseCardHTML, httpLabel, httpOk,
+  amountProblem, bodyAmount, LIVE_GATE_ERRORS, failureStatusText, httpsUrl, sendIdempotent, isUnknownOutcome,
+  terminalHandler, cardSaveSlot, pendingCardSave,
+} from './shared.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -61,6 +72,7 @@ let events = [];
 let lastHeartbeat = null;
 let listenersBound = false;
 let lastSession = null;
+let lastSessionStatus = 0;    // HTTP status of the POST /v1/checkout that produced lastSession
 
 /* Card on file (non-PCI): the HCP saves the card_*** against the session
    cus_*** — a customer is a PREREQUISITE for saving through this route.
@@ -70,7 +82,7 @@ let lastSession = null;
    below reflects it read-only. */
 let saveDefault = true;     // custom_elements.save_card_default
 let requireCvv = false;     // require_card_cvv (CVV re-entry on saved-card reuse)
-let pendingCof = null;      // snapshot between launch and PAYMENT_COMPLETED
+const cofSlot = cardSaveSlot(); // snapshot between launch and the trusted terminal event
 let lastExpress = null;     // persisted express S2S request/response for refreshRightPanel
 
 const isSubscription = () => activeProduct().billing === 'subscription';
@@ -86,13 +98,52 @@ const GP_COLORS = ['black', 'white'];
 
 const accent = () => custom.btnColor || VERTICALS[state.vertical].dot;
 
+/* Where the hosted page sends the customer afterwards. This site ships its
+   own complete/ and cancel/ pages; Rapyd requires https, so:
+     1. served over https → this deployment's own pages;
+     2. else (http://localhost, file://) → the https deployment named in
+        <meta name="paybridge-public-url" content="https://…/"> (index.html);
+     3. else the legacy fixed URL, only so the call still validates — NOTE
+        rapydtoolkit.com currently 404s (Vercel DEPLOYMENT_NOT_FOUND); set the
+        meta tag to fix local runs. */
+const LEGACY_RETURN_ORIGIN = 'https://rapydtoolkit.com/';
+function publicUrl() {
+  try {
+    const v = document.querySelector('meta[name="paybridge-public-url"]')?.getAttribute('content')?.trim();
+    if (v && new URL(v).protocol === 'https:') return v.endsWith('/') ? v : `${v}/`;
+  } catch { /* malformed — ignore */ }
+  return null;
+}
+function returnUrl(page) {
+  try {
+    if (typeof location !== 'undefined' && location.protocol === 'https:') return new URL(`${page}/`, location.href).href;
+    const pub = publicUrl();
+    if (pub) return new URL(`${page}/`, pub).href;
+  } catch { /* fall through */ }
+  return `${LEGACY_RETURN_ORIGIN}${page}`;
+}
+
+/* The toolkit script, per environment. Its iframe is the only window the
+   custom pay button's postMessage may reach — never '*'. */
+const TOOLKIT_SRC = { sandbox: 'https://sandboxcheckouttoolkit.rapyd.net', live: 'https://checkouttoolkit.rapyd.net' };
+const toolkitSrc = (env) => (env === 'live' ? TOOLKIT_SRC.live : TOOLKIT_SRC.sandbox);
+let launchEnv = 'sandbox';   // env the rendered toolkit was created in
+/** The iframe's own origin when it's a Rapyd host, else the toolkit's. */
+function toolkitOrigin(iframe) {
+  try {
+    const o = new URL(iframe.src, location.href).origin;
+    if (/^https:\/\/([a-z0-9-]+\.)*rapyd\.net$/i.test(o)) return o;
+  } catch { /* srcdoc / about:blank — use the script's origin */ }
+  return new URL(toolkitSrc(launchEnv)).origin;
+}
+
 /* ── Request body (server-side POST /v1/checkout) ────────── */
 function displayBody() {
   const v = VERTICALS[state.vertical];
   const p = activeProduct();
   const cofOn = effectiveCof();
   return {
-    amount: Number(p.amount),
+    amount: bodyAmount(p), // raw text while invalid — launch is gated on it
     capture: true,
     currency: p.currency,
     // demo corridor: everything flows through DE regardless of vertical skin
@@ -111,8 +162,8 @@ function displayBody() {
     statement_descriptor: v.descriptor,
     merchant_reference_id: state.reference || '(assigned on launch)',
     // real pages — the vertical domains (shop.paybridge.com etc.) are display-only fiction
-    complete_checkout_url: 'https://rapydtoolkit.com/complete',
-    cancel_checkout_url: 'https://rapydtoolkit.com/cancel',
+    complete_checkout_url: returnUrl('complete'),
+    cancel_checkout_url: returnUrl('cancel'),
     custom_elements: { display_description: true, ...(cofOn ? { save_card_default: saveDefault } : {}) },
     payment_method_type_categories: ['card'],
     payment_method_options: { '3d_required': tds },
@@ -138,7 +189,7 @@ function expressBody(cred) {
   const v = VERTICALS[state.vertical];
   const p = activeProduct();
   const body = {
-    amount: Number(p.amount),
+    amount: bodyAmount(p),
     currency: p.currency,
   };
   if (state.fx.enabled && state.fx.requestedCurrency) {
@@ -190,22 +241,6 @@ function toolkitConfig(checkoutId) {
 }
 
 /* ── Client page: stable two-panel stage ─────────────────── */
-// Customer-facing order totals — reflects what the customer actually pays
-// (the converted requested-currency figure under 'buy'), ISO codes only to
-// match the rest of the demo. Kept in its own fn so refreshSummary() can
-// repaint just this block when the FX quote lands.
-function tkTotalsHTML() {
-  const p = activeProduct();
-  const c = customerCharge();
-  const feeLabel = p.delivery ? 'Delivery' : 'Fees';
-  const feeValue = p.delivery || 'Free';
-  const amt = chargeText(c);
-  const mo = p.billing === 'subscription' ? ' <span class="per-mo">/mo</span>' : '';
-  return `
-    <div class="co-line"><span>Subtotal</span><span>${amt}</span></div>
-    <div class="co-line"><span>${feeLabel}</span><span class="${feeValue === 'Free' ? 'free' : ''}">${feeValue}</span></div>
-    <div class="co-line total"><span>Total</span><span class="co-total-amt">${amt}${mo}</span></div>`;
-}
 /* Express slot content — rendered whenever the customer has a token saved for
    customer-present reuse (one-time products only; subscriptions bill from the
    back office). Repainted in place by the customers subscription. */
@@ -218,14 +253,14 @@ function expressHTML() {
   const c = creds[creds.length - 1];
   const exp = c.expiration_month && c.expiration_year ? `${c.expiration_month}/${c.expiration_year}` : '··/··';
   return `
-    <div class="tk-express" data-cred="${c.ref}">
+    <div class="tk-express" data-cred="${esc(c.ref)}">
       <div class="tk-express-head">Express checkout</div>
       <div class="cof-chip active static">
-        <span class="cof-chip-brand">${c.brand || 'Card'}</span>
-        <span class="cof-chip-num">···· ${c.last4 || '····'}</span>
-        <span class="cof-chip-exp">${exp}</span>
+        <span class="cof-chip-brand">${esc(c.brand || 'Card')}</span>
+        <span class="cof-chip-num">···· ${esc(c.last4 || '····')}</span>
+        <span class="cof-chip-exp">${esc(exp)}</span>
       </div>
-      <button type="button" class="co-cta tk-express-pay" id="tk-express-pay">${productCta()} with saved card</button>
+      <button type="button" class="co-cta tk-express-pay" id="tk-express-pay"${amountProblem() ? ` disabled title="${esc(amountProblem())}"` : ''}>${esc(productCta())} with saved card</button>
       <div class="tk-express-alt">Or enter a new card on the right.</div>
     </div>`;
 }
@@ -251,7 +286,7 @@ function summaryHTML() {
         </div>
         <button type="button" class="fx-trigger${state.fx.enabled ? ' configured' : ''}" id="fx-trigger" title="Configure currency conversion">FX</button>
       </div>
-      <div class="co-totals" id="tk-order-totals">${tkTotalsHTML()}</div>
+      <div class="co-totals" id="tk-order-totals">${productTotalsHTML()}</div>
       <div id="tk-express-slot">${expressHTML()}</div>
       <div class="tk-secure">
         <div class="tk-secure-head">🔒 Secure checkout</div>
@@ -262,10 +297,22 @@ function summaryHTML() {
 }
 /** Repaint the order totals when the FX quote arrives/changes (called by
     app.js refreshCharge via FLOWS[model].refreshSummary). No-op once the
-    summary has been swapped for the live iframe. */
+    summary has been swapped for the live iframe. Re-gates the launch button
+    too: the amount (an own-fields tile edit carries over) may be invalid. */
 export function refreshSummary() {
   const el = $('#tk-order-totals');
-  if (el) el.innerHTML = tkTotalsHTML();
+  if (el) el.innerHTML = productTotalsHTML();
+  refreshLaunchValidity();
+}
+
+/** Launch / express are gated on a sendable amount (sync.js validAmount). */
+function refreshLaunchValidity() {
+  const bad = amountProblem();
+  for (const btn of [$('#tk-launch'), $('#tk-express-pay')]) {
+    if (!btn || btn.dataset.busy) continue;
+    btn.disabled = !!bad;
+    btn.title = bad || '';
+  }
 }
 
 /* ── toolkit.config panel (pre-render, dark / code-styled) ── */
@@ -310,13 +357,13 @@ function configPanelHTML() {
       <div class="tkc-sec" id="tkc-paybtn">
         <div class="tkc-sec-label">Payment button</div>
         ${row('Style', 'hide_submit_button', seg('payBtn', [['rapyd', "Rapyd's"], ['custom', 'Custom']], payBtn))}
-        ${row('Label', 'pay_button_text', `<input type="text" class="tkc-input" id="dc-btn-text" maxlength="16" value="${custom.btnText}" placeholder="Pay Now" />`, 'id="tkc-row-label"')}
+        ${row('Label', 'pay_button_text', `<input type="text" class="tkc-input" id="dc-btn-text" maxlength="16" value="${esc(custom.btnText)}" placeholder="Pay Now" />`, 'id="tkc-row-label"')}
         ${row('Color', 'pay_button_color', `
           <div class="tkc-colorfield">
-            <input type="color" class="tkc-color" id="dc-btn-color" value="${accent()}" />
-            <input type="text" class="tkc-input tkc-hex" id="dc-btn-color-hex" maxlength="7" value="${accent()}" placeholder="#5600ef" />
+            <input type="color" class="tkc-color" id="dc-btn-color" value="${esc(accent())}" />
+            <input type="text" class="tkc-input tkc-hex" id="dc-btn-color-hex" maxlength="7" value="${esc(accent())}" placeholder="#5600ef" />
           </div>`, 'id="tkc-row-color"')}
-        ${row('Button label', 'pay_button_text', `<input type="text" class="tkc-input" id="dc-own-text" value="${custom.ownText}" />`, 'id="tkc-row-own" hidden')}
+        ${row('Button label', 'pay_button_text', `<input type="text" class="tkc-input" id="dc-own-text" value="${esc(custom.ownText)}" />`, 'id="tkc-row-own" hidden')}
       </div>
 
       <div class="tkc-sec" id="tkc-3ds">
@@ -395,22 +442,6 @@ function syncControlVisibility() {
   if (launch) launch.textContent = hosted ? 'Create session →' : 'Render toolkit →';
 }
 
-/* The fx_rates quote, as a card. Recorded in verticals.js by app.js's debounced
-   fetcher; shown here so the call the FX popover makes is inspectable like any
-   other beat instead of living only on the storefront. */
-function fxCardHTML() {
-  const b = getFxBeat();
-  if (!b) return '';
-  const ok = b.httpStatus >= 200 && b.httpStatus < 400 && !b.data?.error;
-  return beatCardHTML({
-    id: 'beat-fx', method: 'GET', path: fxBeatPath(),
-    badge: ok ? 'quoted' : 'failed', badgeKind: ok ? 'ok' : 'err',
-    inner: `
-      <div class="eng-pillrow"><span class="wh-pill ${ok ? 'success' : 'failure'}">HTTP ${b.httpStatus}</span></div>
-      ${renderJSONView(b.data ?? { error: 'no response body' })}`,
-  });
-}
-
 /* ── Right: request / response / console ─────────────────────
    Beat 1 (the customer create) stacks above this flow's own card — same shell
    as own-fields. It used to be a console line only, so the body and response of
@@ -444,12 +475,15 @@ function renderResponse() {
   const cusCard = customerResponseCardHTML();
   let card = '';
   if (lastSession) {
-    const ok = !lastSession.error;
+    // The real status, not a guessed 200/400 — a 401 live-gate refusal and a
+    // 504 timeout read very differently.
+    const ok = !lastSession.error && httpOk(lastSessionStatus);
+    const label = ok ? 'CHECKOUT CREATED' : String(lastSession.error || 'ERROR'); // text — escaped below / by beatCardHTML
     card = beatCardHTML({
       id: 'beat-checkout-res', n: cusCard ? 2 : null, method: 'POST', path: '/v1/checkout',
-      badge: ok ? 'CHECKOUT CREATED' : 'ERROR', badgeKind: ok ? 'ok' : 'err',
+      badge: label, badgeKind: ok ? 'ok' : 'err',
       inner: `
-        <div class="eng-pillrow"><span class="wh-pill ${ok ? 'success' : 'failure'}">HTTP ${ok ? 200 : 400}</span><span class="wh-pill ${ok ? 'success' : 'failure'}">${ok ? 'CHECKOUT CREATED' : 'ERROR'}</span></div>
+        <div class="eng-pillrow"><span class="wh-pill ${ok ? 'success' : 'failure'}">${httpLabel(lastSessionStatus)}</span><span class="wh-pill ${ok ? 'success' : 'failure'}">${esc(label)}</span></div>
         ${renderJSONView(lastSession)}`,
     });
   }
@@ -478,20 +512,8 @@ function paintExpressRequest(body) {
 function paintExpressResponse(httpStatus, data) {
   const el = $('#panel-response');
   if (!el) return;
-  const d = data?.data;
-  const ok = httpStatus < 400 && !data?.error;
-  const badge = d?.status === 'CLO' && d?.paid ? 'PAID · CLO' : d?.status === 'ACT' ? 'ACTION · ACT' : ok ? (d?.status || 'OK') : String(data?.error || 'ERROR');
   const cusCard = customerResponseCardHTML();
-  el.innerHTML = cusCard + beatCardHTML({
-    id: 'beat-express-res', n: cusCard ? 2 : null, method: 'POST', path: '/v1/payments',
-    badge, badgeKind: ok ? (d?.status === 'ACT' ? 'live' : 'ok') : 'err',
-    inner: `
-      <div class="eng-pillrow">
-        <span class="wh-pill ${ok ? 'success' : 'failure'}">HTTP ${httpStatus}</span>
-        <span class="wh-pill ${ok ? (d?.status === 'ACT' ? 'pending' : 'success') : 'failure'}">${badge}</span>
-      </div>
-      ${renderJSONView(data ?? { error: 'no response body' })}`,
-  });
+  el.innerHTML = cusCard + paymentResponseCardHTML({ id: 'beat-express-res', n: cusCard ? 2 : null, httpStatus, data });
 }
 
 /** See own-fields.js's refreshRightPanel — same reasoning. renderResponse()
@@ -517,14 +539,15 @@ export function refreshProfile() {
   refreshRightPanel();
 }
 
-// Terminal-style log, tagged like a real dev console: HH:MM:SS  tag  message
+// Terminal-style log, tagged like a real dev console: HH:MM:SS  tag  message.
+// Messages carry server / toolkit-event text (error messages, ids) — escaped.
 const fmtTime = (d) => d.toLocaleTimeString('en-GB', { hour12: false });
 function logLineHTML(e) {
   return `
     <div class="cl-line">
       <span class="cl-time">${fmtTime(e.at)}</span>
-      <span class="cl-tag cl-${e.tag}">${e.tag}</span>
-      <span class="cl-msg${e.kind ? ` cl-${e.kind}` : ''}">${e.name}${e.detail ? ` <span class="cl-detail">${e.detail}</span>` : ''}</span>
+      <span class="cl-tag cl-${esc(e.tag)}">${esc(e.tag)}</span>
+      <span class="cl-msg${e.kind ? ` cl-${esc(e.kind)}` : ''}">${esc(e.name)}${e.detail ? ` <span class="cl-detail">${esc(e.detail)}</span>` : ''}</span>
     </div>`;
 }
 
@@ -545,55 +568,31 @@ function logEvent(name, detail = '', tag = 'tk', kind = '') {
   renderConsole();
 }
 
-/* ── Terminal (webhook / fallback) → left screen ─────────── */
-function handleTerminal(ev) {
-  // Terminal PAYMENT_COMPLETED/PAYMENT_FAILED webhook, or the poll fallback's
-  // status object (CLO+paid). Never confirmed off PAYMENT_SUCCEEDED.
-  const success = /COMPLETED|CAPTURE/.test((ev.type || '').toUpperCase()) || (ev.status === 'CLO' && ev.paid);
-  if (success) {
-    setStatus('Paid', 'ok'); renderSuccess(ev);
-    ledger.updateStatus(state.reference, { status: 'completed', phase: 'completed' });
-    harvestCofToken(ev);
-  } else {
-    setStatus('Failed', 'error'); renderError(ev);
-    ledger.updateStatus(state.reference, { status: 'failed', phase: 'failed' });
-    pendingCof = null;
-  }
-}
+/* ── Terminal (trusted webhook or Retrieve) → left screen ─────
+   shared.js terminalHandler(): webhooks.js only fires it with a TRUSTED event
+   (never PAYMENT_SUCCEEDED, never an unverified webhook). The HCP saved the
+   card during this payment — the harvest pulls the card_*** out of the
+   completed payment (webhook raw.data, or the retrieve-derived event's), then
+   lets the list endpoint backfill expiry etc. */
+const cofHooks = {
+  onCardSaved: (cardId, ps) => logEvent('card saved', `${cardId} · recurrence ${ps.recurrence_type}`, 'tk', 'ok'),
+  onSync: () => logEvent('GET /v1/customers/{id}/payment_methods', 'syncing saved cards', 'api'),
+};
+const onTerminalFor = (reference) => terminalHandler({ reference, paidLabel: 'Paid', slot: cofSlot, hooks: cofHooks });
 
-/** The HCP saved the card during this payment — pull the card_*** out of the
-    PAYMENT_COMPLETED webhook (never PAYMENT_SUCCEEDED), then let the list
-    endpoint backfill expiry etc. */
-function harvestCofToken(ev) {
-  const pc = pendingCof;
-  pendingCof = null;
-  const d = ev.raw?.data;
-  if (!pc || !d) return;
-  const pmd = d.payment_method_data || {};
-  const cardId =
-    (typeof d.payment_method === 'string' && /^card_/.test(d.payment_method) && d.payment_method) ||
-    (typeof pmd.id === 'string' && /^card_/.test(pmd.id) && pmd.id) || null;
-  if (cardId) {
-    const brand = /visa/i.test(pmd.type || '') ? 'Visa' : /master/i.test(pmd.type || '') ? 'Mastercard' : 'Card';
-    const ref = customers.upsertTokenCredential({
-      card_id: cardId, type: pmd.type || null, brand, last4: pmd.last4 || null,
-      expiration_month: null, expiration_year: null,
-      recurrence_type: pc.recurrence, aft: false,
-      origin_vertical: state.vertical, origin_model: 'toolkit', origin_product: pc.product,
-    });
-    if (pmd.network_reference_id) customers.setNetworkReferenceId(ref, pmd.network_reference_id);
-    logEvent('card saved', `${cardId} · recurrence ${pc.recurrence}`, 'tk', 'ok');
-  }
-  logEvent('GET /v1/customers/{id}/payment_methods', 'syncing saved cards', 'api');
-  customers.refreshTokens();
-  // A card is now on file — the arc's next phase is the returning customer.
-  promoteToReturning();
+/** The toolkit's own failure / expiry events end the payment client-side —
+    the ledger has to hear about it like it does a success, or the back office
+    shows it pending until its 30-minute window lapses. */
+function toolkitEnded(phase) {
+  if (!state.reference) return;
+  ledger.updateStatus(state.reference, { status: 'failed', phase });
+  cofSlot.clear(state.reference);
 }
 
 /* ── Toolkit script + render ─────────────────────────────── */
-function loadToolkitScript() {
+function loadToolkitScript(env) {
   return new Promise(resolve => {
-    const url = state.env === 'live' ? 'https://checkouttoolkit.rapyd.net' : 'https://sandboxcheckouttoolkit.rapyd.net';
+    const url = toolkitSrc(env);
     if (document.querySelector(`script[src="${url}"]`)) return resolve();
     const s = document.createElement('script');
     s.src = url;
@@ -614,7 +613,7 @@ function bindToolkitEvents() {
     setStatus('Pending · 3DS', 'action');
     ledger.updateStatus(state.reference, { phase: 'pending_3ds' });
     // Redirect scenario: the merchant page handles the 3DS challenge itself.
-    const redirect = e.detail?.redirect_url;
+    const redirect = httpsUrl(e.detail?.redirect_url);
     if (tdsFlow === 'redirect' && redirect) {
       window.open(redirect, 'rapyd-3ds', 'width=480,height=720');
       logEvent('3DS redirect opened', 'window.open(redirect_url)', 'tk', 'action');
@@ -629,14 +628,17 @@ function bindToolkitEvents() {
     ledger.updateStatus(state.reference, { phase: 'awaiting_confirmation' });
   });
   window.addEventListener('onCheckoutPaymentFailure', e => {
-    logEvent('onCheckoutPaymentFailure', (e.detail?.error && (e.detail.error.message || e.detail.error)) || 'failure', 'tk', 'err');
+    const err = e.detail?.error;
+    logEvent('onCheckoutPaymentFailure', (err && (err.message || (typeof err === 'string' ? err : JSON.stringify(err)))) || 'failure', 'tk', 'err');
     setStatus('Failed', 'error');
     renderError({ status: 'ERR', message: 'The payment couldn’t be completed. Please try again.' });
+    toolkitEnded('failed');
   });
   window.addEventListener('onCheckoutPaymentExpired', e => {
     logEvent('onCheckoutPaymentExpired', e.detail?.status || 'checkout page expired', 'tk', 'err');
     setStatus('Expired', 'error');
     renderError({ status: 'EXP', message: 'The checkout session expired.' });
+    toolkitEnded('expired');
   });
   // Card-on-file lifecycle — logged for later save/update/delete-card demos.
   window.addEventListener('onCheckoutUpdateCardSuccess', e => {
@@ -659,16 +661,64 @@ function renderToolkit(checkoutId) {
 }
 
 /* ── Launch ──────────────────────────────────────────────── */
+const launchLabel = () => (mode === 'hosted' ? 'Create session →' : 'Render toolkit →');
+
+/** A failure launch()/expressPay() didn't anticipate — their click handlers'
+    promises would otherwise reject unhandled with the button stuck busy. */
+let flowRef = null;         // the reference the in-flight launch/express created — a crash marks only that one
+let flowDispatched = false; // its POST went out — from here the session/payment may exist at Rapyd
+
+function flowCrashed(err) {
+  console.error('toolkit flow failed:', err);
+  // launch() set busy before its first await; a throw before it clears it
+  // would leave the button stuck on "Creating session…" (refreshLaunchValidity
+  // skips busy buttons). expressPay's own flag is cleared by its finally.
+  const btn = $('#tk-launch');
+  if (btn) delete btn.dataset.busy;
+  try {
+    if (btn) btn.textContent = launchLabel();
+    refreshLaunchValidity();
+  } catch { /* the crash may be in these very helpers — the error UI below still matters */ }
+  setStatus('Error', 'error');
+  logEvent('client error', err?.message || String(err), 'app', 'err');
+  renderError({ status: 'ERR' });
+  // Only a request that never left the browser is known to have failed; once
+  // dispatched, the ledger poller (by reference) and the armed card-on-file
+  // slot are left to settle it. No flowRef = nothing of this click's was armed.
+  if (flowRef && !flowDispatched) {
+    ledger.updateStatus(flowRef, { status: 'failed', phase: 'error' });
+    cofSlot.clear(flowRef);
+  }
+}
+
 async function launch() {
   const btn = $('#tk-launch');
+  if (!btn || btn.dataset.busy) return;
+  flowRef = null;
+  flowDispatched = false;
+  // Amount gate — never send '' (Number('') = 0) or more decimals than the currency has.
+  const badAmount = amountProblem();
+  if (badAmount) {
+    refreshLaunchValidity();
+    logEvent('POST /v1/checkout', `not sent — ${badAmount}`, 'api', 'err');
+    setStatus('Invalid amount', 'error');
+    return;
+  }
   btn.disabled = true;
+  btn.dataset.busy = '1'; // a double click must not create a second session
   btn.textContent = 'Creating session…';
   setStatus('Creating session…', 'processing');
   events = [];
   lastHeartbeat = null;
   lastSession = null;
+  lastSessionStatus = 0;
   lastExpress = null;
   renderConsole();
+  const restoreBtn = () => {
+    delete btn.dataset.busy;
+    btn.disabled = false;
+    btn.textContent = launchLabel();
+  };
 
   // Card on file: a cus_*** is a PREREQUISITE for saving a card through the
   // hosted route — create it first (two-beat). Fails → STOP, nothing recorded.
@@ -682,14 +732,16 @@ async function launch() {
       setStatus('Error', 'error');
       logEvent('POST /v1/customers', 'failed', 'api', 'err');
       renderError({ status: 'ERR', message: 'We couldn’t start your payment. Please try again.' });
-      btn.disabled = false;
-      btn.textContent = mode === 'hosted' ? 'Create session →' : 'Render toolkit →';
+      restoreBtn();
       return;
     }
     logEvent('POST /v1/customers', `${customers.getCustomerId()} · created (enriched)`, 'api', 'ok');
   }
 
-  state.reference = `pb_${state.vertical}_tk_${Date.now()}`;
+  state.reference = newReference(`pb_${state.vertical}_tk`); // unguessable — it's the webhook read key
+  const reference = state.reference; // the session this click owns
+  flowRef = reference;
+  launchEnv = state.env;             // the toolkit script + postMessage origin follow it
   {
     const v = VERTICALS[state.vertical];
     const p = activeProduct();
@@ -705,83 +757,126 @@ async function launch() {
       initiation_type: 'customer_present',
       note: p.successNote || v.successNote,
     };
-    ledger.recordPayment(state.reference, {
+    ledger.recordPayment(reference, {
       model: 'toolkit', vertical: state.vertical, amount: p.amount, currency: p.currency,
       requested_currency: fxOn ? state.fx.requestedCurrency : null, fixed_side: fxOn ? state.fx.fixedSide : null,
       origin: 'client', initiation_type: 'customer_present', profile: state.profile,
     });
-    pendingCof = effectiveCof() ? { recurrence: recurrence(), product: p.id } : null;
+    // Armed synchronously before the POST — captures this session's reference
+    // and customer bucket (env:profile) against a mid-flight profile switch.
+    cofSlot.arm(effectiveCof() ? pendingCardSave({
+      token: true, recurrence_type: recurrence(), aft: false,
+      origin_model: 'toolkit', origin_product: p.id,
+    }) : null);
   }
   renderRequest();
   setActiveTab('request');
 
-  try {
-    const { data } = await createCheckoutSession(postBody());
-    lastSession = data;
-    renderRequest(); // config now shows the real checkout id
-    renderResponse();
-    setActiveTab('response');
-    const id = data?.data?.id;
-    const redirect = data?.data?.redirect_url;
-    if (!id) throw new Error(data?.message || 'No checkout id returned');
-    logEvent('POST /v1/checkout', `${id} · 201`, 'api', 'ok');
-    startWebhookWatch({ reference: state.reference, onTerminal: handleTerminal, onPoll: () => { lastHeartbeat = new Date(); renderConsole(); } });
+  // One Idempotency-Key for this launch; an unknown outcome is re-sent once
+  // under the same key (shared.js) — a retry can't mint a second session.
+  const reqBody = postBody();
+  flowDispatched = true;
+  const { httpStatus, data } = await sendIdempotent(createCheckoutSession, reqBody, {
+    onRetry: (r) => logEvent('POST /v1/checkout', `${httpLabel(r.httpStatus)} — retrying with the same Idempotency-Key`, 'api', 'err'),
+  });
+  lastSession = data ?? { error: 'NO_BODY', message: 'Empty response' };
+  lastSessionStatus = httpStatus;
+  delete btn.dataset.busy;
+  renderRequest(); // config now shows the real checkout id
+  renderResponse();
+  setActiveTab('response');
+  const id = data?.data?.id;
+  const redirect = httpsUrl(data?.data?.redirect_url);
 
-    // Only #tk-area is replaced below, so the summary column survives the
-    // launch — including its profile row. Refresh it, or the row painted before
-    // the session was created sits beside the live iframe for the whole payment.
-    refreshAccountPanel();
+  // api.js never throws: transport failures are httpStatus 0 + NETWORK_ERROR,
+  // and the live gate's refusals (LIVE_*) arrive as ordinary errors.
+  if (!id || data?.error || !httpOk(httpStatus)) {
+    const msg = data?.message || data?.error || 'No checkout id returned';
+    setStatus(failureStatusText(data, 'Error'), 'error');
+    logEvent('POST /v1/checkout', LIVE_GATE_ERRORS.has(data?.error) ? `${data.error} · ${msg}` : msg, 'api', 'err');
+    renderError({ status: data?.error || 'ERR' });
+    ledger.updateStatus(reference, { status: 'failed', phase: 'error' });
+    cofSlot.clear(reference);
+    return;
+  }
 
-    const area = $('#tk-area');
-    if (mode === 'hosted') {
-      setStatus('Redirect ready', 'action');
-      area.innerHTML = `
-        <div class="tk-redirect">
-          <div class="tk-redirect-title">Ready to pay</div>
-          <div class="tk-redirect-desc">You’ll finish paying on a secure payment page, then come back here.</div>
-          <button class="co-cta" id="tk-open">Continue to payment ↗</button>
-        </div>`;
-      $('#tk-open').addEventListener('click', () => window.open(redirect, '_blank', 'noopener'));
-    } else {
-      await loadToolkitScript();
-      // The page shape stays put — the config panel swaps for the iframe.
-      const ownBtn = payBtn === 'custom' && mode !== 'wallets'
-        ? `<button class="co-cta" id="tk-own-pay" style="background:${accent()}">${custom.ownText}</button>`
-        : '';
-      area.innerHTML = `<div id="rapyd-checkout"></div>${ownBtn}`;
-      $('#tk-own-pay')?.addEventListener('click', () => {
-        const iframe = document.querySelector('#rapyd-checkout iframe');
-        if (!iframe) return;
-        iframe.contentWindow.postMessage({ type: 'CHECKOUT_SUBMIT_PAYMENT' }, '*');
-        logEvent('CHECKOUT_SUBMIT_PAYMENT', 'postMessage from custom button', 'tk', 'action');
-        // NOT removed here — the toolkit may reject the submit (required-field
-        // validation). It leaves once the payment is accepted for authorisation
-        // (onCheckoutPaymentPending / onCheckoutPaymentSuccess).
-      });
-      renderToolkit(id);
-      setStatus('Toolkit rendered', 'processing');
-      setActiveTab('console');
-    }
-  } catch (err) {
-    lastSession = { error: 'error', message: err.message };
-    renderResponse();
-    setStatus('Error', 'error');
-    logEvent('POST /v1/checkout', err.message, 'api', 'err');
-    renderError({ status: 'ERR' });
-    ledger.updateStatus(state.reference, { status: 'failed', phase: 'error' });
+  logEvent('POST /v1/checkout', `${id} · ${httpStatus}`, 'api', 'ok');
+  startWebhookWatch({ reference, onTerminal: onTerminalFor(reference), onPoll: () => { lastHeartbeat = new Date(); renderConsole(); } });
+
+  // Only #tk-area is replaced below, so the summary column survives the
+  // launch — including its profile row. Refresh it, or the row painted before
+  // the session was created sits beside the live iframe for the whole payment.
+  refreshAccountPanel();
+
+  const area = $('#tk-area');
+  if (!area) return; // the page was reset while the session was being created
+  if (mode === 'hosted') {
+    setStatus('Redirect ready', 'action');
+    area.innerHTML = `
+      <div class="tk-redirect">
+        <div class="tk-redirect-title">Ready to pay</div>
+        <div class="tk-redirect-desc">You’ll finish paying on a secure payment page, then come back here.</div>
+        <button class="co-cta" id="tk-open"${redirect ? '' : ' disabled title="No https redirect_url in the response"'}>Continue to payment ↗</button>
+      </div>`;
+    $('#tk-open').addEventListener('click', () => { if (redirect) window.open(redirect, '_blank', 'noopener'); });
+  } else {
+    await loadToolkitScript(launchEnv);
+    if (state.reference !== reference || !$('#tk-area')) return; // reset while the script loaded
+    // The page shape stays put — the config panel swaps for the iframe.
+    const ownBtn = payBtn === 'custom' && mode !== 'wallets'
+      ? `<button class="co-cta" id="tk-own-pay" style="background:${esc(accent())}">${esc(custom.ownText)}</button>`
+      : '';
+    $('#tk-area').innerHTML = `<div id="rapyd-checkout"></div>${ownBtn}`;
+    $('#tk-own-pay')?.addEventListener('click', () => {
+      const iframe = document.querySelector('#rapyd-checkout iframe');
+      if (!iframe?.contentWindow) return;
+      // Addressed to the toolkit's origin only — '*' would hand the message
+      // to whatever document the frame happened to be showing.
+      iframe.contentWindow.postMessage({ type: 'CHECKOUT_SUBMIT_PAYMENT' }, toolkitOrigin(iframe));
+      logEvent('CHECKOUT_SUBMIT_PAYMENT', 'postMessage from custom button', 'tk', 'action');
+      // NOT removed here — the toolkit may reject the submit (required-field
+      // validation). It leaves once the payment is accepted for authorisation
+      // (onCheckoutPaymentPending / onCheckoutPaymentSuccess).
+    });
+    renderToolkit(id);
+    setStatus('Toolkit rendered', 'processing');
+    setActiveTab('console');
   }
 }
 
 /* ── Express S2S token charge ────────────────────────────── */
+let expressBusy = false; // a double click must not fire a second charge
+
 async function expressPay(credRef) {
+  if (expressBusy) return;
   const cred = customers.getCredential(credRef);
   if (!cred || !cred.card_id) return;
+  const badAmount = amountProblem();
+  if (badAmount) {
+    refreshLaunchValidity();
+    logEvent('POST /v1/payments', `not sent — ${badAmount}`, 'api', 'err');
+    setStatus('Invalid amount', 'error');
+    return;
+  }
+  expressBusy = true;
+  flowRef = null;
+  flowDispatched = false;
+  try {
+    await expressCharge(cred);
+  } finally {
+    expressBusy = false;
+  }
+}
+
+async function expressCharge(cred) {
   const v = VERTICALS[state.vertical];
   const p = activeProduct();
   setStatus('Processing…', 'processing');
-  state.reference = `pb_${state.vertical}_xp_${Date.now()}`;
+  state.reference = newReference(`pb_${state.vertical}_xp`);
+  const reference = state.reference;
+  flowRef = reference;
   const body = expressBody(cred);
-  body.merchant_reference_id = state.reference;
+  body.merchant_reference_id = reference;
 
   const fxOn = state.fx.enabled && state.fx.requestedCurrency;
   const charge = customerCharge();
@@ -793,7 +888,7 @@ async function expressPay(credRef) {
     aft: !!p.aft, is_direct_purchase: p.aft ? true : null,
     note: p.successNote || v.successNote,
   };
-  ledger.recordPayment(state.reference, {
+  ledger.recordPayment(reference, {
     model: 'toolkit', vertical: state.vertical, amount: p.amount, currency: p.currency,
     requested_currency: fxOn ? state.fx.requestedCurrency : null, fixed_side: fxOn ? state.fx.fixedSide : null,
     last4: cred.last4, brand: cred.brand,
@@ -801,6 +896,7 @@ async function expressPay(credRef) {
     credential: { kind: 'token', label: `${cred.brand} ···${cred.last4}` },
     aft: !!p.aft,
   });
+  cofSlot.clear(); // a token reuse saves nothing — no stale launch save may harvest from it
 
   lastExpress = { body, httpStatus: null, data: null };
   paintExpressRequest(body);
@@ -808,39 +904,44 @@ async function expressPay(credRef) {
   logEvent('POST /v1/payments', `express · ${cred.card_id}`, 'api');
   renderProcessing('Charging your saved card…', 'No card details needed — we’ll use the card you saved.');
 
-  try {
-    const { httpStatus, data } = await createDirectPayment({ ...body, env: state.env, profile: state.profile });
-    lastExpress = { body, httpStatus, data };
-    paintExpressResponse(httpStatus, data);
-    setActiveTab('response');
-    const d = data?.data;
-    if (!d || data?.error) {
-      setStatus('Declined', 'error');
-      logEvent('POST /v1/payments', data?.message || data?.error || 'declined', 'api', 'err');
-      renderError({ status: data?.error || 'ERR' });
-      ledger.updateStatus(state.reference, { status: 'failed', phase: 'declined' });
-      return;
-    }
-    ledger.setPaymentId(state.reference, d.id);
-    logEvent('POST /v1/payments', `${d.id} · ${d.status}`, 'api', 'ok');
-    if (d.status === 'ACT' && d.next_action === '3d_verification') {
-      setStatus('3DS challenge', 'action');
-      render3DS(d.redirect_url);
-      ledger.updateStatus(state.reference, { phase: 'pending_3ds' });
-    } else {
-      setStatus('Confirming…', 'processing');
-      renderProcessing('Payment received', 'Just a moment while we confirm your payment…');
-      ledger.updateStatus(state.reference, { phase: 'awaiting_confirmation' });
-    }
-    startWebhookWatch({ reference: state.reference, payment_id: d.id, onTerminal: handleTerminal, onPoll: () => { lastHeartbeat = new Date(); renderConsole(); } });
-  } catch (err) {
-    lastExpress = { body, httpStatus: 0, data: { error: 'network_error', message: err.message } };
-    paintExpressResponse(0, lastExpress.data);
-    setStatus('Error', 'error');
-    logEvent('POST /v1/payments', err.message, 'api', 'err');
-    renderError({ status: 'ERR' });
-    ledger.updateStatus(state.reference, { status: 'failed', phase: 'error' });
+  flowDispatched = true;
+  const { httpStatus, data } = await sendIdempotent(createDirectPayment, { ...body, env: state.env, profile: state.profile }, {
+    onRetry: (r) => logEvent('POST /v1/payments', `${httpLabel(r.httpStatus)} — retrying with the same Idempotency-Key`, 'api', 'err'),
+  });
+  lastExpress = { body, httpStatus, data };
+  paintExpressResponse(httpStatus, data);
+  setActiveTab('response');
+  const d = data?.data;
+  // Still no answer after the same-key retry: the card_*** charge may exist —
+  // not a decline. Leave it pending and let the watch settle it (own-fields).
+  if (isUnknownOutcome(httpStatus)) {
+    setStatus('Outcome unknown · confirming', 'processing');
+    logEvent('POST /v1/payments', `${httpLabel(httpStatus)} — outcome unknown, confirming via webhook / Retrieve Payment`, 'api', 'err');
+    renderProcessing('Confirming payment…', 'We didn’t hear back in time — checking whether your payment went through. Please don’t pay again.');
+    ledger.updateStatus(reference, { phase: 'unconfirmed' });
+    startWebhookWatch({ reference, onTerminal: onTerminalFor(reference), onPoll: () => { lastHeartbeat = new Date(); renderConsole(); } });
+    return;
   }
+  // api.js never throws — httpStatus 0 + NETWORK_ERROR is the transport failure.
+  if (!d || data?.error || !httpOk(httpStatus)) {
+    setStatus(failureStatusText(data, httpStatus === 0 ? 'Error' : 'Declined'), 'error');
+    logEvent('POST /v1/payments', data?.message || data?.error || 'declined', 'api', 'err');
+    renderError({ status: data?.error || 'ERR' });
+    ledger.updateStatus(reference, { status: 'failed', phase: httpStatus === 0 ? 'error' : 'declined' });
+    return;
+  }
+  ledger.setPaymentId(reference, d.id);
+  logEvent('POST /v1/payments', `${d.id} · ${d.status}`, 'api', 'ok');
+  if (d.status === 'ACT' && d.next_action === '3d_verification') {
+    setStatus('3DS challenge', 'action');
+    render3DS(httpsUrl(d.redirect_url) || 'about:blank');
+    ledger.updateStatus(reference, { phase: 'pending_3ds' });
+  } else {
+    setStatus('Confirming…', 'processing');
+    renderProcessing('Payment received', 'Just a moment while we confirm your payment…');
+    ledger.updateStatus(reference, { phase: 'awaiting_confirmation' });
+  }
+  startWebhookWatch({ reference, payment_id: d.id, onTerminal: onTerminalFor(reference), onPoll: () => { lastHeartbeat = new Date(); renderConsole(); } });
 }
 
 /* ── Mount ───────────────────────────────────────────────── */
@@ -851,6 +952,7 @@ export function mount() {
   events = [];
   lastHeartbeat = null;
   lastSession = null;
+  lastSessionStatus = 0;
   logEvent(`${state.env} session started`, '', 'sys');
   logEvent('toolkit.mount(inline) ok', '', 'app');
   syncControlVisibility();
@@ -882,7 +984,7 @@ export function mount() {
   $('.tk-checkout')?.addEventListener('click', e => {
     if (e.target.closest('#tk-express-pay')) {
       const slot = e.target.closest('.tk-express');
-      if (slot?.dataset.cred) expressPay(slot.dataset.cred);
+      if (slot?.dataset.cred) expressPay(slot.dataset.cred).catch(flowCrashed);
     }
   });
   // Each wallet is its own on/off switch, independent of the other
@@ -913,7 +1015,8 @@ export function mount() {
   wire('dc-gp-color', custom.gp, 'button_color');
   wire('dc-gp-type', custom.gp, 'button_type');
 
-  $('#tk-launch').addEventListener('click', launch);
+  $('#tk-launch').addEventListener('click', () => { launch().catch(flowCrashed); });
+  refreshLaunchValidity();
 }
 
 // Tokens landing (webhook harvest / list backfill / profile re-key) surface

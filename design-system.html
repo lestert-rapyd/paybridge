@@ -146,6 +146,7 @@
       <a href="#s-prod">06 · The product frame</a>
       <a href="#s-receipt">07 · The receipt</a>
       <a href="#s-rules">08 · Rules ratified here</a>
+      <a href="#s-guards">09 · Guards &amp; trust</a>
     </nav>
   </header>
 
@@ -875,6 +876,108 @@
       </li>
     </ul>
     <div class="ds-src">Recorded in DESIGN-SYSTEM.md §11 · components in §5.8 · the rules they amend in §1, §5.6, §6, §8</div>
+  </section>
+
+  <!-- ══ 09 ══════════════════════════════════════════════════ -->
+  <section class="ds-sec" id="s-guards">
+    <div class="ds-num">09</div>
+    <h2 class="ds-h2">Guards &amp; trust</h2>
+    <p class="ds-note">
+      Added by the security audit. None of these is a new pattern so much as an honest state an existing
+      one was missing: a price tile that can hold a typo, a webhook that may be forged, and a Live switch
+      that is now gated server-side. Classes live in the <b>audit additions</b> block at the end of
+      <code>main.css</code>; DESIGN-SYSTEM.md §13 records the rules.
+    </p>
+    <div class="ds-grid">
+
+      <div class="ds-spec">
+        <div class="ds-spec-h">
+          <span class="ds-state">Invalid amount</span>
+          <span class="ds-pred">app.js → commitTileEdit() · !validAmount()</span>
+        </div>
+        <div class="ds-stage"><div class="pane-left ds-pane"><div class="browser"><div class="browser-body"><div class="checkout">
+          <div class="co-order">
+            <div class="co-thumb" style="background:linear-gradient(135deg,#5600ef,#a855f7)">🪑</div>
+            <div class="co-order-info">
+              <div class="co-order-name">Oak Lounge Chair</div>
+              <div class="co-order-desc">Walnut finish · Qty 1</div>
+            </div>
+            <div class="co-order-price">
+              <input type="text" class="tile-field tile-amount input-invalid" value="149.999" aria-invalid="true" readonly />
+              <button type="button" class="tile-field tile-currency cur-trigger">GBP<span class="cur-caret">▾</span></button>
+            </div>
+            <button type="button" class="fx-trigger">FX</button>
+          </div>
+        </div></div></div></div></div>
+        <div class="ds-cap">The tile keeps what was typed, ringed red; <b>state.productOverride</b> keeps the last valid amount, so no request body ever carries the typo. Pay stays disabled until it's fixed.</div>
+      </div>
+
+      <div class="ds-spec">
+        <div class="ds-spec-h">
+          <span class="ds-state">Notices</span>
+          <span class="ds-pred">.pb-notice · .warn · .error · .info</span>
+        </div>
+        <div class="ds-stage"><div class="pane-left ds-pane"><div class="browser"><div class="browser-body"><div class="checkout" style="display:flex;flex-direction:column;gap:10px">
+          <div class="pb-notice warn"><b>Card entry is off in live.</b> The backend refuses raw card numbers outside sandbox.</div>
+          <div class="pb-notice error"><b>Live token rejected — back in sandbox.</b> The live access token was missing or wrong.</div>
+          <div class="pb-notice info"><b>Neutral information.</b> One fact, stated once.</div>
+        </div></div></div></div></div>
+        <div class="ds-cap">One notice block for every surface; inside the engine room (<b>.pane-right</b>) it restates itself on the dark ramp. A notice states its own surface's condition — it never stage-directs the SE elsewhere (§11).</div>
+      </div>
+
+      <div class="ds-spec">
+        <div class="ds-spec-h">
+          <span class="ds-state">Unverified webhook</span>
+          <span class="ds-pred">webhooks.js → eventCardHTML() · !isTrusted(e)</span>
+        </div>
+        <div class="ds-stage" style="background:var(--eng-bg);padding:18px">
+          <details class="wh-card success untrusted">
+            <summary class="wh-card-head">
+              <span class="wh-chev">▸</span>
+              <span class="wh-pill evt">PAYMENT_COMPLETED</span>
+              <span class="wh-pill success">status: CLO</span>
+              <span class="wh-verify warn">unverified — not trusted</span>
+            </summary>
+          </details>
+          <details class="wh-card success">
+            <summary class="wh-card-head">
+              <span class="wh-chev">▸</span>
+              <span class="wh-pill evt">PAYMENT_COMPLETED</span>
+              <span class="wh-pill success">status: CLO</span>
+              <span class="wh-verify ok">✓ signature verified</span>
+            </summary>
+          </details>
+        </div>
+        <div class="ds-cap">An event the receiver couldn't verify is <b>shown, never acted on</b>: dashed edge, struck outcome pill, solid warning chip. It triggers a Retrieve Payment; only that answer, or a verified event, moves the screen.</div>
+      </div>
+
+      <div class="ds-spec">
+        <div class="ds-spec-h">
+          <span class="ds-state">Live unlock</span>
+          <span class="ds-pred">app.js → openLiveDialog() · #live-dialog</span>
+        </div>
+        <div class="ds-stage" style="padding:18px">
+          <form class="live-dialog" onsubmit="return false">
+            <div class="live-dialog-head"><span>Unlock live mode</span><button type="button" class="fx-popover-x" aria-label="Cancel">×</button></div>
+            <div class="pb-notice warn"><b>Live is restricted.</b> It charges a real card through the production Rapyd account.</div>
+            <ul class="live-dialog-rules">
+              <li>Every charge is 0.01 — the backend refuses anything above its live cap.</li>
+              <li>Own Card Fields can't send a raw card number in live; use the Checkout Toolkit.</li>
+              <li>The token is kept for this tab only and is never shown again.</li>
+            </ul>
+            <label class="live-dialog-label">Live access token</label>
+            <input type="password" class="live-dialog-input" value="" readonly />
+            <div class="live-dialog-actions">
+              <button type="button" class="live-dialog-btn">Stay in sandbox</button>
+              <button type="button" class="live-dialog-btn primary">Unlock live</button>
+            </div>
+          </form>
+        </div>
+        <div class="ds-cap">Opens when Live is clicked with no token for this tab. Cancel, Escape or the backdrop all <b>stay in sandbox</b>. A rejected token surfaces later as the error notice, pinned under the top bar.</div>
+      </div>
+
+    </div>
+    <div class="ds-src">Recorded in DESIGN-SYSTEM.md §13 · components in §5.2, §5.3, §5.7 · the law it amends: §8 law 5</div>
   </section>
 
 </div>

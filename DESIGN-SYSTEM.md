@@ -189,6 +189,10 @@ Class prefixes map to areas (§9). Specs below are the *shipped* values.
 - **`.co-field label`** — 13px 600 `--c-ink-3`.
 - **Inline editable tile `.tile-field` / `.tile-amount`** — looks like text until hover (border/bg
   fade in); `field-sizing:content`, right-aligned. The "the whole tile is editable" Layer-C pattern.
+  `[readonly]` in live (every live charge is 0.01, so an editable amount would do nothing).
+- **`.input-invalid`** — generic content-invalid state: `--err` border + 3px 15% ring, `--err-deep`
+  text. On the tile it's persistent (the tile is text-styled until hover, so hover can't be what
+  reveals the problem). Card inputs keep the wrapper-level `.co-input.is-invalid`.
 
 ### 5.3 Pills, badges, chips, dots [both]
 - **`.wh-pill`** [B] — mono 10.5px 700, `--r-xs`, semantic tint ~16% alpha: `.success` / `.failure` /
@@ -199,6 +203,9 @@ Class prefixes map to areas (§9). Specs below are the *shipped* values.
 - **Saved-card chip `.cof-chip`** [A] — brand · masked number (mono) · exp. Radio-select via `.active`
   (accent ring). Nothing else: the credential's `recurrence_type` and whether it carries a
   `network_reference_id` are engine-room facts, and the shopper's chip stopped carrying them.
+- **Webhook trust chip `.wh-verify`** [B] — `.ok` (signature verified / confirmed via Retrieve),
+  `.warn` (= `.untrusted`: solid warning fill + border, uppercase — "unverified — not trusted"), bare
+  (built locally). An untrusted terminal card is `.wh-card.untrusted`: dashed edge, outcome pill struck.
 - **Category dot `.vp-dot` / `.eyebrow-dot`** — 8px accent/status dot before a label.
 - **Small tag** — `.bo-fx-badge`, `.bo-mit-badge`, `.mb-tag` — mono micro-caps for tile metadata.
 
@@ -242,6 +249,14 @@ Class prefixes map to areas (§9). Specs below are the *shipped* values.
   **Form validation only** ("Complete the card details first"). It is no longer an API-result channel:
   announcing `cus_*** created` / `confirmed by webhook` / a raw gateway error over the shop said the SE's
   line for them, and the status pill plus the response card already carry all three.
+- **Notice `.pb-notice`** [both] — 12.5px block, 3px left rule; `.warn` / `.error` / `.info` tint it
+  ~7–9% on white. Restates itself on `--eng-*` inside `.pane-right`. States its own surface's condition
+  (e.g. own fields disabled in live); never stage-directs the SE elsewhere.
+- **Live unlock `#live-dialog`** [chrome, portal] — `.live-dialog-backdrop` › `.live-dialog` (warm card,
+  `--r-lg`, `--shadow-pop`), a `.pb-notice.warn`, the rules list, a password `.live-dialog-input`, and
+  `.live-dialog-btn` / `.live-dialog-btn.primary`. Cancel, Escape and backdrop = stay in sandbox.
+- **Banner `#pb-banner`** [chrome, portal] — a `.pb-notice` pinned under the top bar, top-right, for
+  what the SE must see mid-narration (live auth failed → back in sandbox). Text only; auto-hides at 12s.
 - **SE strategy popover `#sc-popover`** [C, portal] — the stored-credential deck. `.se-row` / `.se-lab` /
   `.se-seg` / `.se-fixed` rows plus `.se-deck-empty` / `.se-deck-hint` / `.se-warn` copy. It used to be a
   dashed panel in a `#demo-controls` container below the browser card; both the container and the
@@ -330,10 +345,14 @@ may annotate (the bank-app mock keeps its `statement_descriptor` eyebrow). The b
 4. **Live, honest request bodies** — the Request tab updates as you type with a real recomputing
    signature. Never fake a field; omit what the API would omit.
 5. **Webhook is the source of truth** — terminal screens are driven by real webhooks. No optimistic
-   success screens, ever. But the *label* is not the client's job: "waiting for the confirmation
+   success screens, ever. *Amended §13:* by a **trusted** event only — one whose Rapyd signature the
+   receiver verified, or our own signed Retrieve Payment. An unverified webhook is displayed and
+   confirmed, never acted on. But the *label* is not the client's job: "waiting for the confirmation
    webhook…" is engine-room vocabulary, and it belongs to the status pill and the Webhooks tab. The
    storefront says what a shop says — "This only takes a moment — please don't close this page."
-6. **Redaction** — access keys show `rak_ABC***XYZ`; secrets never appear client-side.
+6. **Redaction** — access keys show `rak_ABC***XYZ` (`signing.js redactKey`, the one helper — the
+   credential picker uses it too, title attributes included); secrets never appear client-side, and
+   the live access token is never rendered at all.
 7. **Surface guards** — a paint fn checks it's the active surface before writing shared DOM
    (`state.leftView`); a monotonic `actionSeq`/`fxSeq` stops a slow response clobbering a newer one.
 8. **Don't clobber a form mid-edit** — background ticks repaint everything *except* an open form.
@@ -428,6 +447,25 @@ all fixed in the same pass:
 **Open:** `.acct-block.locked` is defined against the warm client card. The toolkit's config panel is
 `--se-*` near-black, where `--c-soft-2` would be wrong. Nothing renders that combination today, so no
 rule was invented — the first surface that needs one derives it from `--se-surface-2`.
+
+## 13. Amendment — security audit (2026-10-07)
+
+What the audit's fixes changed on screen, so the reasons survive:
+
+1. **Live is restricted, visibly.** The Live button carries a lock (`.env-lock`) and a title; in live
+   the sub-bar's model description appends the caveat in `--warn` (`.model-desc.is-live`). Switching to
+   Live with no token for this tab opens `#live-dialog` first. A 401/403 from the backend's live gate
+   drops back to sandbox and says why in `#pb-banner` — the SE is never left in a live mode that
+   silently fails.
+2. **§8 law 5 — trusted events only** (see the law). The Webhooks tab still shows everything; the
+   difference is the chip and, for terminal-looking events, the dashed `.wh-card.untrusted`.
+3. **The price tile can be wrong.** A blank / zero / over-precise amount (`149.999 GBP`) is flagged
+   with `.input-invalid` and never reaches state; Pay stays disabled. Live makes the tile read-only.
+4. **One escape, one redaction.** Everything interpolated into HTML goes through `ui.js esc()`
+   (quotes included); every key display goes through `signing.js redactKey()`.
+5. **`.pb-notice`** is the generic inline notice. Reuse it before inventing a one-off callout.
+
+Specimens: `design-system.html` §09.
 
 ## 12. Reconciliation history (2026-07-25)
 

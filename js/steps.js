@@ -36,6 +36,7 @@ import {
 } from './customer-beat.js';
 import * as customers from './customers.js';
 import { headersHTML, fillSignature, newSaltTimestamp } from './signing.js';
+import { esc } from './ui.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -189,7 +190,8 @@ function customerGetCardHTML(cus) {
   const salt = newSaltTimestamp();
   getPainted = { salt, path: `/v1/customers/${cus}` };
   return beatCardHTML({
-    id: 'beat-cus-get', method: 'GET', path: getPainted.path, badge: 'prepared', badgeKind: '',
+    // the cus_*** came back from Rapyd — escaped for display, signed raw
+    id: 'beat-cus-get', method: 'GET', path: esc(getPainted.path), badge: 'prepared', badgeKind: '',
     inner: `
       ${headersHTML(salt)}
       <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">a GET carries none</span></div>`,

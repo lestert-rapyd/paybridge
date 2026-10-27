@@ -45,7 +45,13 @@ export const state = {
   // setState) by app.js/own-fields.js, deliberately outside the reactive
   // pipeline so a keystroke never triggers a full flow reset. Read by
   // verticals.js's activeProduct() and own-fields.js's displayBody().
-  productOverride: null,    // { vertical, amount, currency } | null
+  productOverride: null,    // { vertical, productId, amount, currency } | null — amount always passes validAmount
+  // True while the tile's TYPED amount fails sync.js validAmount (blank,
+  // "149.999", "0"). app.js never stores such an amount — productOverride keeps
+  // the last valid one, so no request body can carry it — and this flag tells
+  // the flows to keep Pay disabled until the tile is fixed. Mutated directly;
+  // reset whenever the checkout re-renders the tile.
+  amountInvalid: false,
   // `quote` caches the latest live Rapyd fx_rates result so every customer-facing
   // surface (checkout totals, pay button, success screen, bank statement) shows
   // the SAME converted figure — see verticals.js customerCharge()/merchantReceive().

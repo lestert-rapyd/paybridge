@@ -28,12 +28,17 @@ const identity = () => (state.env === 'live' ? 'live' : `sandbox:${state.profile
 const accessKey = () => (state.env === 'live' ? DEMO_LIVE_ACCESS : activeProfile().access_key);
 const secretKey = () => (DEMO_SECRETS[identity()] ||= 'rsk_' + randHex(40));
 
-// "rak_A1B***X9Z" — first 3 / last 3 chars of the key body, prefix kept in full.
+/** "rak_A1B***X9Z" — first 3 / last 3 chars of the key body, prefix kept in
+    full (DESIGN-SYSTEM.md §8 law 6). The ONE redaction helper: the request
+    headers and app.js's sandbox credential picker both render through it.
+    Anything that doesn't look like a prefixed key is masked whole rather than
+    echoed — this output only ever lands in the DOM. */
 export function redactKey(key) {
-  const m = /^([a-z]+_)(.+)$/i.exec(key);
-  if (!m) return key;
+  if (!key) return '';
+  const m = /^([a-z]+_)(.+)$/i.exec(String(key));
+  if (!m) return '***';
   const [, prefix, body] = m;
-  if (body.length <= 6) return key;
+  if (body.length <= 6) return `${prefix}***`;
   return `${prefix}${body.slice(0, 3)}***${body.slice(-3)}`;
 }
 

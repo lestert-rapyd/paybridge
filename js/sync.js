@@ -1,6 +1,6 @@
 /* ─────────────────────────────────────────────────────────────
    Sync helpers: which form field maps to which request path,
-   plus card-brand detection and input formatting.
+   plus card-brand detection, amount validation and input formatting.
    ───────────────────────────────────────────────────────────── */
 
 /** left field id → request-body path(s) it populates */
@@ -41,6 +41,85 @@ export function detectBrand(number) {
   if (/^4/.test(n))              return { brand: 'VISA',       type: 'gb_visa_card' };
   if (/^(5[1-5]|2[2-7])/.test(n)) return { brand: 'MASTERCARD', type: 'gb_mastercard_card' };
   return { brand: '', type: 'gb_visa_card' }; // default while empty/unknown
+}
+
+/* ── Display brand ───────────────────────────────────────────
+   ONE answer to "what do we call this card" — replaces the four copies
+   that had drifted (customers.js brandOf, screens.js cardLabel,
+   back-office.js brandLabel, toolkit.js harvestCofToken). Accepts:
+     · a PAN or IIN prefix          '4111…' / '5555 4444' / '3782'
+     · a Rapyd payment_method type  'us_visa_card' / 'gb_mastercard_card'
+     · a brand / scheme string      'VISA' / 'Mastercard' / 'american_express'
+   Wallet hints (Apple/Google Pay) win, as screens.js's receipt did.
+   Unknown → `fallback` ('Card' by default; pass null to detect "unknown"). */
+const IIN_RULES = [
+  [/^4/, 'Visa'],
+  [/^(5[1-5]|222[1-9]|22[3-9]|2[3-6]|27[01]|2720)/, 'Mastercard'],
+  [/^3[47]/, 'Amex'],
+  [/^(6011|64[4-9]|65)/, 'Discover'],
+  [/^35(2[89]|[3-8])/, 'JCB'],
+  [/^(30[0-5]|309|36|3[89])/, 'Diners Club'],
+  [/^62/, 'UnionPay'],
+  [/^(5018|5020|5038|5893|6304|6759|676[1-3])/, 'Maestro'],
+];
+const NAME_RULES = [
+  [/apple/, 'Apple Pay'],
+  [/google/, 'Google Pay'],
+  [/visa/, 'Visa'],
+  [/master/, 'Mastercard'],
+  [/amex|express/, 'Amex'],          // american_express / americanexpress / amex
+  [/discover/, 'Discover'],
+  [/jcb/, 'JCB'],
+  [/diners/, 'Diners Club'],
+  [/union_?pay/, 'UnionPay'],
+  [/maestro/, 'Maestro'],
+  [/mada/, 'Mada'],
+];
+
+export function brandLabel(input, fallback = 'Card') {
+  const raw = String(input ?? '').trim();
+  if (!raw) return fallback;
+  // Digits only (spaces/dashes allowed) → treat as a PAN / IIN prefix.
+  if (/^[\d\s-]+$/.test(raw)) {
+    const n = raw.replace(/\D/g, '');
+    for (const [re, label] of IIN_RULES) if (re.test(n)) return label;
+    return fallback;
+  }
+  const t = raw.toLowerCase();
+  for (const [re, label] of NAME_RULES) if (re.test(t)) return label;
+  return fallback;
+}
+
+/* ── Amounts ─────────────────────────────────────────────────
+   ISO 4217 minor units. Everything not listed has 2. */
+const ZERO_DECIMAL = new Set([
+  'BIF', 'CLP', 'DJF', 'GNF', 'ISK', 'JPY', 'KMF', 'KRW', 'PYG', 'RWF',
+  'UGX', 'UYI', 'VND', 'VUV', 'XAF', 'XOF', 'XPF',
+]);
+const THREE_DECIMAL = new Set(['BHD', 'IQD', 'JOD', 'KWD', 'LYD', 'OMR', 'TND']);
+const FOUR_DECIMAL = new Set(['CLF', 'UYW']);
+
+/** Minor-unit exponent for a currency code (ISO 4217). */
+export function currencyDecimals(currency) {
+  const c = String(currency || '').toUpperCase();
+  if (ZERO_DECIMAL.has(c)) return 0;
+  if (THREE_DECIMAL.has(c)) return 3;
+  if (FOUR_DECIMAL.has(c)) return 4;
+  return 2;
+}
+
+/** True iff `amount` is a finite number > 0 with no more decimals than the
+    currency allows — the gate before an amount goes into a request body
+    (blank, "149.999" USD or "10.5" JPY would otherwise reach Rapyd). */
+export function validAmount(amount, currency) {
+  if (typeof amount !== 'number' && typeof amount !== 'string') return false;
+  // Strings must be plain decimals — Number() would also take '0x10' / '1e3'.
+  if (typeof amount === 'string' && !/^(\d+\.?\d*|\.\d+)$/.test(amount.trim())) return false;
+  const n = typeof amount === 'number' ? amount : Number(amount.trim());
+  if (!Number.isFinite(n) || n <= 0) return false;
+  const scaled = n * 10 ** currencyDecimals(currency);
+  // tolerance absorbs float noise (0.07 * 100 = 7.000000000000001)
+  return Math.abs(scaled - Math.round(scaled)) < Math.max(1e-6, Math.abs(scaled) * 1e-12);
 }
 
 /** Group digits into blocks of 4, max 19 digits. */

@@ -2,20 +2,22 @@
    PayBridge Demo Suite — bootstrap (on-brand redesign)
    ───────────────────────────────────────────────────────────── */
 
-import { VERTICALS, VERTICAL_ORDER, activeProduct, customerCharge, fxQuoteKey, chargeText, productCta, setFxBeat } from './verticals.js';
+import { VERTICALS, VERTICAL_ORDER, activeProduct, pricedProduct, customerCharge, fxQuoteKey, chargeText, productCta, setFxBeat } from './verticals.js';
 import { PROFILES, PROFILE_ORDER } from './profiles.js';
 import { accountPanelHTML, syncCustomerBeat, setPanelRepainter, setHighlightHook } from './customer-beat.js';
 import {
   frameHTML, stepRailHTML, isCheckout, renderStepPanels, resetSteps, setClientRepainter,
 } from './steps.js';
 import { state, setState, subscribe } from './state.js';
-import { setActiveTab, setStatus } from './ui.js';
+import { setActiveTab, setStatus, esc } from './ui.js';
 import { clearPaymentWatch, repaintWebhooks } from './webhooks.js';
-import { formatAmount } from './sync.js';
-import { getFxRate } from './api.js';
+import { formatAmount, validAmount, currencyDecimals } from './sync.js';
+import { getFxRate, getLiveToken, setLiveToken } from './api.js';
+import { redactKey } from './signing.js';
 import * as ownFields from './flows/own-fields.js';
 import * as toolkit from './flows/toolkit.js';
 import * as backOffice from './flows/back-office.js';
+import { totalsHTML } from './flows/shared.js';
 
 // Patch keys that mean "the customer's flow/context actually changed" —
 // only these trigger the full client-flow reset (mount() etc). Everything
@@ -32,6 +34,13 @@ const MODEL_DESC = {
   'own-fields': "Merchant collects the card and calls POST /v1/payments directly — a PCI-DSS path.",
   'toolkit':    "Rapyd's iframe collects the card — zero PCI scope for the merchant.",
 };
+// Shown INSTEAD of MODEL_DESC in live, so the restriction is on screen, not
+// just in the SE's head (kept short — the sub-bar is one line). Own fields:
+// the backend refuses raw card data in live (LIVE_RAW_CARD_FORBIDDEN).
+const LIVE_DESC = {
+  'own-fields': 'LIVE · restricted — raw card numbers are refused; 0.01 charges only.',
+  'toolkit':    'LIVE · restricted — charges a real card; 0.01 charges only.',
+};
 
 const THUMB_GLYPH = { ecommerce: '🪑', crypto: '₿', gaming: '🎲' };
 
@@ -44,18 +53,8 @@ const CURRENCIES = ['USD', 'EUR', 'GBP', 'SGD'];
    The tile is the single editable source of truth for amount/currency
    (state.productOverride); the popover beside it configures settlement FX
    (state.fx). Both are plain data mutated directly — see state.js. */
-// `c` is a customerCharge() object — the amount the customer actually pays,
-// which is the base price under 'sell' but the converted requested-currency
-// figure under 'buy'. Subtotal and Total both reflect it (Option 2).
-// Subscription products carry a small "/mo" on the total line.
-function totalsHTML(c, feeLabel, feeValue, perMonth = false) {
-  const amt = chargeText(c);
-  const mo = perMonth ? ' <span class="per-mo">/mo</span>' : '';
-  return `
-    <div class="co-line"><span>Subtotal</span><span>${amt}</span></div>
-    <div class="co-line"><span>${feeLabel}</span><span class="${feeValue === 'Free' ? 'free' : ''}">${feeValue}</span></div>
-    <div class="co-line total"><span>Total</span><span class="co-total-amt">${amt}${mo}</span></div>`;
-}
+// Order totals: flows/shared.js totalsHTML(c, feeLabel, feeValue, perMonth)
+// — the one (fully escaped) copy, shared with the flows.
 function ensureFxCurrencyValid() {
   const options = CURRENCIES.filter(c => c !== activeProduct().currency);
   if (!options.includes(state.fx.requestedCurrency)) state.fx.requestedCurrency = options[0];
@@ -130,11 +129,11 @@ function fxRequestParams() {
 function fxPreviewHTML(q) {
   const customerFixed = state.fx.fixedSide === 'sell'; // customer's charge is the fixed side
   const row = (label, c, fixed) =>
-    `<div class="fx-preview-row"><span>${label}</span><span class="${fixed ? 'fixed' : 'vary'}">${chargeText({ ...c, approx: !fixed })}</span></div>`;
+    `<div class="fx-preview-row"><span>${label}</span><span class="${fixed ? 'fixed' : 'vary'}">${esc(chargeText({ ...c, approx: !fixed }))}</span></div>`;
   return `
     ${row('Customer pays', { amount: q.sellAmount, currency: q.sellCurrency }, customerFixed)}
     ${row('You receive', { amount: q.buyAmount, currency: q.buyCurrency }, !customerFixed)}
-    <div class="fx-preview-rate">Rate ${Number(q.rate).toFixed(4)} · <span class="guar">${customerFixed ? 'customer amount guaranteed' : 'your payout guaranteed'}</span></div>`;
+    <div class="fx-preview-rate">Rate ${esc(Number(q.rate).toFixed(4))} · <span class="guar">${customerFixed ? 'customer amount guaranteed' : 'your payout guaranteed'}</span></div>`;
 }
 function renderFxPreview() {
   const el = $('#fx-preview');
@@ -159,8 +158,7 @@ function maybeFetchFxQuote() {
   const seq = ++fxSeq;
   clearTimeout(fxTimer);
   fxTimer = setTimeout(async () => {
-    let resp = null;
-    try { resp = await getFxRate(params); } catch { /* network */ }
+    const resp = await getFxRate(params); // never throws — a dead network is httpStatus 0
     if (seq !== fxSeq) return; // superseded by a newer edit
     const d = resp?.data?.data;
     state.fx.quote = (resp?.ok && d && d.buy_amount != null && d.sell_amount != null)
@@ -196,7 +194,29 @@ function refreshCharge() {
   if (totalsEl) totalsEl.innerHTML = totalsHTML(c, p.delivery ? 'Delivery' : 'Fees', p.delivery || 'Free', sub);
   const payBtn = $('#pay-btn');
   if (payBtn) payBtn.textContent = `${productCta()} ${chargeText(c)}${sub ? ' /mo' : ''}`;
+  syncAmountGate();
   FLOWS[state.model].refreshSummary?.();
+}
+/* Keep #pay-btn disabled while the tile holds an invalid amount (F13). The
+   flow owns the button's card-validity gating, so this only ever ADDS a block
+   and, when the amount is fixed, hands control back: to the flow's own
+   refreshPayValidity() when it exports one, else to the disabled state the
+   button had before the block. The flows also check state.amountInvalid in
+   pay() — this is the visible half, not the only guard. */
+function syncAmountGate() {
+  const btn = $('#pay-btn');
+  if (!btn) return;
+  if (state.amountInvalid) {
+    if (!btn.dataset.amountBlocked) btn.dataset.amountBlocked = btn.disabled ? 'was-disabled' : 'was-enabled';
+    btn.disabled = true;
+    return;
+  }
+  const was = btn.dataset.amountBlocked;
+  if (!was) return;
+  delete btn.dataset.amountBlocked;
+  const flow = FLOWS[state.model];
+  if (flow.refreshPayValidity) flow.refreshPayValidity();
+  else btn.disabled = was === 'was-disabled';
 }
 function openFxPopover() {
   const trigger = $('#fx-trigger');
@@ -303,12 +323,31 @@ function commitTileEdit(currencyOverride) {
   const currency = currencyOverride || currencyBtn.dataset.currency;
   if (currencyOverride) {
     currencyBtn.dataset.currency = currencyOverride;
-    currencyBtn.innerHTML = `${currencyOverride}<span class="cur-caret">▾</span>`;
+    currencyBtn.innerHTML = `${esc(currencyOverride)}<span class="cur-caret">▾</span>`;
   }
+  // F13: blank, "0", or more decimals than the currency allows ("149.999")
+  // never reach state. The tile keeps what was typed — flagged — while
+  // productOverride keeps the last VALID amount, so every request body (in
+  // either flow; the override isn't per-model) stays sendable. In live the
+  // tile is read-only and shows the 0.01 clamp, so a currency pick there keeps
+  // the pre-clamp price (pricedProduct) rather than storing '0.01'.
+  const live = state.env === 'live';
+  const valid = live || validAmount(filtered, currency);
+  const amount = valid && !live ? filtered : pricedProduct().amount;
+  state.amountInvalid = !valid;
+  setTileValidity(amountEl, valid, currency);
   // keyed by product too — an edited price never leaks onto a sibling product
-  state.productOverride = { vertical: state.vertical, productId: activeProduct().id, amount: filtered, currency };
+  state.productOverride = { vertical: state.vertical, productId: activeProduct().id, amount, currency };
   refreshAfterEdit();
 }
+function setTileValidity(amountEl, valid, currency) {
+  amountEl.classList.toggle('input-invalid', !valid);
+  amountEl.setAttribute('aria-invalid', valid ? 'false' : 'true');
+  amountEl.title = valid
+    ? 'Click to edit the charged amount'
+    : `Enter an amount above 0 with at most ${decimalsText(currencyDecimals(currency))} for ${currency} — Pay stays disabled until then`;
+}
+const decimalsText = (n) => (n === 0 ? 'no decimals' : n === 1 ? '1 decimal' : `${n} decimals`);
 
 /* ── Left: the client page ────────────────────────────────────
    Four frames (js/steps.js). Frames 1–3 are model-independent — the identity
@@ -323,6 +362,9 @@ function renderCheckout() {
 
   closeFxPopover(); // never lingers open across a vertical/model/env reset
   closeCurDropdown();
+  // The tile is about to be rebuilt from activeProduct() — always a valid
+  // amount — so any invalid draft the SE left in the old one is gone with it.
+  state.amountInvalid = false;
 
   // Clear out-of-window annotations (bank-app view) on any re-render.
   const off = $('#offstage');
@@ -366,8 +408,12 @@ function renderCheckout() {
           <div class="co-order-desc">${p.desc}</div>
         </div>
         <div class="co-order-price">
-          <input type="text" inputmode="decimal" class="tile-field tile-amount" id="tile-amount" value="${p.amount}" title="Click to edit the charged amount" />
-          <button type="button" class="tile-field tile-currency cur-trigger" id="tile-currency" data-currency="${p.currency}" title="Click to edit the charge currency">${p.currency}<span class="cur-caret">▾</span></button>
+          ${state.env === 'live'
+            // Live clamps every charge to 0.01 (activeProduct), so an editable
+            // amount would be a control that does nothing.
+            ? `<input type="text" class="tile-field tile-amount" id="tile-amount" value="${esc(p.amount)}" readonly title="Live charges are fixed at 0.01" />`
+            : `<input type="text" inputmode="decimal" class="tile-field tile-amount" id="tile-amount" value="${esc(p.amount)}" aria-invalid="false" title="Click to edit the charged amount" />`}
+          <button type="button" class="tile-field tile-currency cur-trigger" id="tile-currency" data-currency="${esc(p.currency)}" title="Click to edit the charge currency">${esc(p.currency)}<span class="cur-caret">▾</span></button>
         </div>
         <button type="button" class="fx-trigger${state.fx.enabled ? ' configured' : ''}" id="fx-trigger" title="Configure currency conversion">FX</button>
       </div>
@@ -430,18 +476,18 @@ function toggleLeftView() {
 // the reactive store) folded into the Sandbox button of the env switch.
 let credPanelOpen = false;
 
-const redactKey = k => k ? `${k.slice(0, 4)}····${k.slice(-4)}` : '';
-
 function credRowsHTML() {
   return PROFILE_ORDER.map(id => {
     const pf = PROFILES[id];
     const active = id === state.profile;
-    return `<button type="button" class="cred-row ${active ? 'active' : ''}" data-profile="${id}" title="access_key ${pf.access_key}">
+    // Redacted everywhere, title included — the full key is a public
+    // identifier, but nothing on screen needs more than the design-system form.
+    return `<button type="button" class="cred-row ${active ? 'active' : ''}" data-profile="${esc(id)}">
       <span class="cred-radio"></span>
       <span class="cred-main">
-        <span class="cred-id">${id}</span>
+        <span class="cred-id">${esc(id)}</span>
         <span class="cred-sub">3DS ${pf.tds === 'rapyd' ? 'Rapyd' : 'External'} · AFT ${pf.aft ? '✓' : '✗'}</span>
-        <span class="cred-key">${redactKey(pf.access_key)}</span>
+        <span class="cred-key">${esc(redactKey(pf.access_key))}</span>
       </span>
       <span class="cred-flags">
         <span class="cred-flag ${pf.nrid ? 'on' : 'off'}">NRID ${pf.nrid ? '✓' : '✗'}</span>
@@ -486,7 +532,8 @@ function syncControlStates() {
   $$('#env-switch button').forEach(b => b.classList.toggle('active', b.dataset.env === state.env));
   $$('.model-btn').forEach(b => b.classList.toggle('active', b.dataset.model === state.model));
   $('#client-domain').textContent = VERTICALS[state.vertical].domain;
-  $('#model-desc').textContent = MODEL_DESC[state.model];
+  $('#model-desc').textContent = (state.env === 'live' ? LIVE_DESC : MODEL_DESC)[state.model];
+  $('#model-desc').classList.toggle('is-live', state.env === 'live');
   renderCredPanel(); // the SC tag + panel track the env switch
 }
 
@@ -501,7 +548,11 @@ function wire() {
     if (!btn) return;
     if (btn.dataset.env === 'live') {
       credPanelOpen = false;
-      if (state.env !== 'live') setState({ env: 'live' }); else renderCredPanel();
+      if (state.env === 'live') { renderCredPanel(); return; }
+      // Live is gated server-side (X-PayBridge-Live-Token). No token for this
+      // tab yet → ask first; cancelling simply leaves us in sandbox.
+      if (getLiveToken()) { hideBanner(); setState({ env: 'live' }); }
+      else { renderCredPanel(); openLiveDialog(); }
       return;
     }
     // Sandbox: arriving from Live opens the picker; clicking it again toggles.
@@ -604,6 +655,119 @@ function wire() {
   });
 }
 
+/* ── Live unlock (F1) ────────────────────────────────────────
+   The backend refuses every env:'live' call without the shared
+   X-PayBridge-Live-Token, so switching to Live first asks for it. The token
+   goes straight into api.js setLiveToken (sessionStorage for this tab, memory
+   fallback) — it's never rendered, logged or put in a URL; the input is a
+   password field that's cleared on every close. A wrong token isn't detected
+   here (there's no free live call to test it with): the first live request
+   comes back 401/403, api.js clears the token and raises
+   `paybridge:live-auth-failed`, and the listener below drops back to sandbox. */
+let liveDialogReturnFocus = null;
+
+function openLiveDialog() {
+  const dlg = $('#live-dialog');
+  if (!dlg) {
+    // Markup missing (older index.html) — the plain prompt still gates it.
+    const t = window.prompt('Live mode is restricted. Enter the live access token:');
+    const token = (t || '').trim();
+    if (token && validTokenShape(token)) { setLiveToken(token); setState({ env: 'live' }); }
+    return;
+  }
+  liveDialogReturnFocus = document.activeElement;
+  $('#live-token').value = '';
+  setLiveDialogError('');
+  dlg.hidden = false;
+  $('#live-token').focus();
+}
+function closeLiveDialog() {
+  const dlg = $('#live-dialog');
+  if (!dlg || dlg.hidden) return;
+  $('#live-token').value = ''; // never leave the token sitting in the DOM
+  dlg.hidden = true;
+  liveDialogReturnFocus?.focus?.();
+  liveDialogReturnFocus = null;
+}
+function setLiveDialogError(msg) {
+  const el = $('#live-dialog-err');
+  if (!el) return;
+  el.textContent = msg;
+  el.hidden = !msg;
+}
+// Header values must be printable ASCII — anything else makes fetch() throw,
+// which api.js reports as NETWORK_ERROR rather than an auth failure, leaving
+// the SE stuck in live with every call failing for no visible reason.
+const validTokenShape = (t) => /^[\x21-\x7e]{1,512}$/.test(t);
+
+function submitLiveDialog() {
+  const token = $('#live-token').value.trim();
+  if (!token) { setLiveDialogError('Enter the live access token, or stay in sandbox.'); return; }
+  if (!validTokenShape(token)) { setLiveDialogError('That doesn’t look like a token — no spaces or special characters.'); return; }
+  setLiveToken(token);
+  closeLiveDialog();
+  hideBanner();
+  setState({ env: 'live' });
+}
+
+/* Top-of-page notice for things the SE must see even mid-narration (live auth
+   failures). Plain text only — the message can come from the backend. */
+let bannerTimer = null;
+function showBanner(title, message, kind = 'error') {
+  const el = $('#pb-banner');
+  if (!el) return;
+  el.className = `pb-banner pb-notice ${kind}`;
+  $('#pb-banner-title').textContent = title;
+  $('#pb-banner-msg').textContent = message || '';
+  el.hidden = false;
+  clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(hideBanner, 12000);
+}
+function hideBanner() {
+  clearTimeout(bannerTimer);
+  const el = $('#pb-banner');
+  if (el) el.hidden = true;
+}
+
+function onLiveAuthFailed(e) {
+  const { error, message } = e.detail || {};
+  const title = error === 'LIVE_DISABLED'
+    ? 'Live mode is disabled on this backend'
+    : 'Live token rejected';
+  const fallback = error === 'LIVE_DISABLED'
+    ? 'The backend has no PAYBRIDGE_LIVE_TOKEN configured, so it refuses every live call.'
+    : 'The live access token was missing or wrong. Click Live to enter it again.';
+  // Deferred one macrotask: api.js raises this event BEFORE its request()
+  // resolves, so the failing flow's own continuation (status pill, error
+  // screen, ledger) still runs after the await. Resetting synchronously let
+  // that continuation paint "Payment declined" over the fresh sandbox page.
+  setTimeout(() => {
+    // Several in-flight live calls can fail together; only the first switches.
+    if (state.env === 'live') {
+      credPanelOpen = false;
+      setState({ env: 'sandbox' }); // a RESET_KEY — the live flow is abandoned
+    }
+    setStatus('Back in sandbox — live auth failed', 'error');
+    showBanner(`${title} — back in sandbox`, message || fallback, 'error');
+  }, 0);
+}
+
+function wireLiveGate() {
+  window.addEventListener('paybridge:live-auth-failed', onLiveAuthFailed);
+  $('#pb-banner-x')?.addEventListener('click', hideBanner);
+  const form = $('#live-dialog-form');
+  if (!form) return;
+  form.addEventListener('submit', (e) => { e.preventDefault(); submitLiveDialog(); });
+  $('#live-dialog-cancel').addEventListener('click', closeLiveDialog);
+  $('#live-dialog-x').addEventListener('click', closeLiveDialog);
+  $('#live-token').addEventListener('input', () => setLiveDialogError(''));
+  // Backdrop click / Escape = cancel (stay in sandbox).
+  $('#live-dialog').addEventListener('mousedown', (e) => { if (e.target.id === 'live-dialog') closeLiveDialog(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !$('#live-dialog').hidden) closeLiveDialog();
+  });
+}
+
 /* ── Render orchestration ────────────────────────────────── */
 function renderAll(_state, patch) {
   const isInitial = !patch;
@@ -651,5 +815,6 @@ setHighlightHook(() => FLOWS[state.model].applyHighlight?.());
 document.documentElement.dataset.vertical = state.vertical;
 renderVerticalPills();
 wire();
+wireLiveGate();
 backOffice.mount();
 renderAll();

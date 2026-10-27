@@ -2,10 +2,17 @@
    Left-panel post-payment screens: processing → (inline 3DS) →
    success / error. The terminal screen is driven by the real
    PAYMENT_COMPLETED / PAYMENT_FAILED webhook (see webhooks.js).
+
+   The event's raw.data reaches innerHTML here (descriptor, last4,
+   currency), so every non-constant interpolation goes through esc().
+   webhooks.js only hands over TRUSTED events, but a payment object is
+   still third-party data — escaping is the renderer's job regardless.
    ───────────────────────────────────────────────────────────── */
 
 import { VERTICALS, activeProduct } from './verticals.js';
 import { state, setState } from './state.js';
+import { esc } from './ui.js';
+import { brandLabel } from './sync.js';
 
 const host = () => document.getElementById('checkout');
 const set3DSWidth = (on) => document.querySelector('.browser')?.classList.toggle('wide-3ds', on);
@@ -13,19 +20,17 @@ const set3DSWidth = (on) => document.querySelector('.browser')?.classList.toggle
    wide stage would otherwise stretch the success/error layout. */
 const resetWide = () => document.querySelector('.browser')?.classList.remove('wide-tk');
 
-/* "Visa ending 1111" / "Apple Pay" / "Google Pay ending 4242" */
+/* "Visa ending 1111" / "Apple Pay" / "Google Pay ending 4242" — plain text;
+   factsHTML() escapes it. The scheme comes from sync.js's one brandLabel()
+   (null = unknown, so the request snapshot's network can fill in). */
+const WALLETS = new Set(['Apple Pay', 'Google Pay']);
 function cardLabel(pay, lp) {
   const pmd = pay.payment_method_data || {};
-  const hint = `${pmd.type || ''} ${pmd.name || ''}`.toLowerCase();
+  const hint = `${pmd.type || ''} ${pmd.name || ''}`;
   const last4 = pmd.last4 || lp.last4;
   const ending = last4 ? ` ending ${last4}` : '';
-  if (/apple/.test(hint)) return `Apple Pay${ending}`;
-  if (/google/.test(hint)) return `Google Pay${ending}`;
-  const network =
-    /visa/.test(hint) ? 'Visa' :
-    /master/.test(hint) ? 'Mastercard' :
-    /amex|american_?express/.test(hint) ? 'Amex' :
-    lp.network || null;
+  const network = brandLabel(hint, null) || lp.network || null;
+  if (WALLETS.has(network)) return `${network}${ending}`; // a wallet names itself even without last4
   if (network && last4) return `${network}${ending}`;
   if (last4) return `Card${ending}`;
   return '—';
@@ -77,12 +82,12 @@ function bankViewHTML(event) {
       <div class="bank-card">
         <div class="bank-ico">↑</div>
         <div class="bank-info">
-          <div class="bank-desc">${descriptor}</div>
+          <div class="bank-desc">${esc(descriptor)}</div>
           <div class="bank-date">${when}</div>
         </div>
         <div class="bank-amt">
-          <div class="bank-amt-main">${main}</div>
-          ${isFx ? `<div class="bank-amt-fx">− ${fmtAmount(origAmount)} ${origCurrency}</div>` : ''}
+          <div class="bank-amt-main">${esc(main)}</div>
+          ${isFx ? `<div class="bank-amt-fx">− ${esc(fmtAmount(origAmount))} ${esc(origCurrency)}</div>` : ''}
         </div>
       </div>
     </div>`;
@@ -100,18 +105,26 @@ function paidLabel() {
   return `${p.amount} ${p.currency}`;
 }
 
+/** `title` / `sub` are plain text (every caller passes a literal). */
 export function renderProcessing(title = 'Confirming payment…', sub = 'This only takes a moment — please don’t close this page.') {
   resetWide();
   setOffstage(null);
   host().innerHTML = `
     <div class="screen">
       <div class="screen-spinner"></div>
-      <div class="screen-title">${title}</div>
-      <div class="screen-sub">${sub}</div>
+      <div class="screen-title">${esc(title)}</div>
+      <div class="screen-sub">${esc(sub)}</div>
     </div>`;
 }
 
 const LOCK_SVG = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#5b564d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2.5"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path><circle cx="12" cy="15.5" r="1.3" fill="#5b564d"></circle></svg>`;
+
+/* The challenge URL is Rapyd's redirect_url — only http(s) may load in the
+   frame: a javascript:/data: src would run in (or be framed by) this origin. */
+function safeFrameUrl(url) {
+  const u = String(url ?? '').trim();
+  return /^https?:\/\//i.test(u) ? u : 'about:blank'; // Rapyd's redirect_url is always absolute
+}
 
 export function render3DS(url) {
   set3DSWidth(true);
@@ -125,18 +138,19 @@ export function render3DS(url) {
           <div class="screen-3ds-sub">Your bank needs to confirm it’s you — follow the steps below to finish paying.</div>
         </div>
       </div>
-      <iframe class="tds-frame" src="${url}" title="3-D Secure challenge"></iframe>
+      <iframe class="tds-frame" src="${esc(safeFrameUrl(url))}" title="3-D Secure challenge"></iframe>
     </div>`;
 }
 
 /* Receipt rows. Values are set in the UI face, not mono, and are not
    click-to-copy: a receipt is something a shopper reads, and the mono +
    "Copied ✓" treatment made it read as a debug dump. The ids the SE needs —
-   payment, reference, customer — are one pane to the right. */
+   payment, reference, customer — are one pane to the right.
+   Values are plain text (card label, amounts) and escaped here. */
 function factsHTML(rows) {
   return `<div class="screen-facts rise-4">` + rows
     .filter(([, value]) => value != null && value !== '')
-    .map(([label, value]) => `<div><span>${label}</span><b>${value}</b></div>`)
+    .map(([label, value]) => `<div><span>${esc(label)}</span><b>${esc(value)}</b></div>`)
     .join('') + `</div>`;
 }
 
@@ -180,8 +194,8 @@ export function renderSuccess(event = {}) {
     <div class="screen success">
       ${badgeHTML('ok')}
       <div class="screen-title rise-1">${successVerb(v)} confirmed</div>
-      <div class="screen-sub rise-2">${v.merchant} · <strong>${paidLabel()}</strong></div>
-      ${note ? `<div class="screen-next rise-3">${note}</div>` : ''}
+      <div class="screen-sub rise-2">${esc(v.merchant)} · <strong>${esc(paidLabel())}</strong></div>
+      ${note ? `<div class="screen-next rise-3">${esc(note)}</div>` : ''}
       ${factsHTML([
         ['Order', orderNumber()],
         ['Paid', paidLabel()],
@@ -209,8 +223,8 @@ export function renderError(event = {}) {
     <div class="screen error">
       ${badgeHTML('err')}
       <div class="screen-title rise-1">Payment declined</div>
-      <div class="screen-sub rise-2">${v.merchant} · <strong>${paidLabel()}</strong></div>
-      <div class="screen-next err rise-3">${note}</div>
+      <div class="screen-sub rise-2">${esc(v.merchant)} · <strong>${esc(paidLabel())}</strong></div>
+      <div class="screen-next err rise-3">${esc(note)}</div>
       ${factsHTML([
         ['Order', orderNumber()],
         ['Method', cardLabel(pay, lp)],

@@ -1,0 +1,10 @@
+# OS / editor
+.DS_Store
+.claude/
+
+# Tooling that may appear later
+node_modules/
+.vercel
+
+# Secrets — this repo is a static site and should never hold any
+.env*

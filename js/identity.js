@@ -18,8 +18,11 @@
 
    Session-scoped, like customers.js: "returning" means a credential
    already exists in the active `env:profile` bucket. Nothing persists
-   across reloads and there is no retrieve-customer endpoint, so this is
-   the only honest meaning available.
+   across reloads, so this is the only honest meaning available. (The
+   backend does proxy GET /v1/customers/{id} — api.js retrieveCustomer —
+   but that re-reads a cus_*** this tab already holds; it can't find a
+   shopper's account from nothing, which is what "returning" would need
+   across sessions.)
    ───────────────────────────────────────────────────────────── */
 
 import { state } from './state.js';

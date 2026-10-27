@@ -1296,3 +1296,122 @@ details[open] .wh-chev { transform: rotate(90deg); }
   .tkc-wallet-custom { margin-left: 37px; }
   .tkc-cta { margin-top: 14px; height: 46px; font-size: 15px; }
 }
+
+/* ── Audit additions (fix/audit) ─────────────────────────────
+   Live gate, amount validation, webhook trust and generic notices.
+   Tokens only — no new colours. Several of these classes are produced by
+   other modules (webhooks.js, the flows); they're defined here, once, so
+   each renderer just names them. */
+
+/* Live is restricted: a lock on the Live button, and the sub-bar's model
+   description carries the live caveat in the warning tint while live is on. */
+.env-lock { flex: none; opacity: .75; }
+.env-switch button.active .env-lock { opacity: 1; }
+.model-desc.is-live { color: var(--warn); font-weight: 600; }
+
+/* Generic inline notice — `.pb-notice` (neutral), `.warn`, `.error`, `.info`.
+   Light (client / back-office) ground by default; inside the engine room it
+   restates itself on the dark --eng-* ramp. Used by the live dialog, the
+   live-auth banner, and the own-fields "disabled in live" notice. */
+.pb-notice {
+  font-family: var(--font-client); font-size: 12.5px; line-height: 1.5;
+  padding: 10px 12px; border-radius: var(--r-sm);
+  border: 1px solid var(--c-line-3); border-left-width: 3px;
+  background: var(--c-soft); color: var(--c-ink-3);
+}
+.pb-notice b { color: var(--c-ink-2); font-weight: 700; }
+.pb-notice.warn  { border-color: color-mix(in srgb, var(--warn) 40%, transparent); border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 9%, #fff); }
+.pb-notice.error { border-color: color-mix(in srgb, var(--err) 35%, transparent);  border-left-color: var(--err);  background: color-mix(in srgb, var(--err) 7%, #fff); }
+.pb-notice.info  { border-color: color-mix(in srgb, var(--info) 35%, transparent); border-left-color: var(--info); background: color-mix(in srgb, var(--info) 7%, #fff); }
+.pb-notice[hidden] { display: none; }
+.pane-right .pb-notice { font-family: var(--font-sans); background: var(--eng-surface); border-color: var(--eng-line); color: var(--eng-muted); }
+.pane-right .pb-notice b { color: var(--eng-text); }
+.pane-right .pb-notice.warn  { border-left-color: var(--eng-warn); }
+.pane-right .pb-notice.error { border-left-color: var(--eng-err); }
+.pane-right .pb-notice.info  { border-left-color: var(--eng-info); }
+
+/* Invalid input — generic, for any field whose CONTENT fails validation
+   (own-fields' card inputs use the wrapper-level .co-input.is-invalid). The
+   price tile is text-styled until hovered, so it gets a persistent red ring
+   rather than relying on hover to reveal the problem. */
+.input-invalid,
+.tile-field.input-invalid,
+.tile-field.input-invalid:hover,
+.tile-field.input-invalid:focus {
+  border-color: var(--err); color: var(--err-deep);
+  background: color-mix(in srgb, var(--err) 6%, #fff);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--err) 15%, transparent);
+}
+.tile-field[readonly] { cursor: default; }
+.tile-field[readonly]:hover { background: transparent; border-color: transparent; }
+
+/* Webhook trust (webhooks.js eventCardHTML). An event whose Rapyd signature
+   the receiver didn't verify is still shown, but it must not read as an
+   outcome at a glance: the chip goes solid warning, and a terminal-looking
+   card (.wh-card.untrusted) loses its success/failure edge for a dashed one. */
+.wh-verify.warn, .wh-verify.untrusted {
+  background: rgba(245,158,11,.22); color: var(--eng-warn);
+  border: 1px solid color-mix(in srgb, var(--eng-warn) 55%, transparent);
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.wh-card.untrusted { border-style: dashed; border-left-style: dashed; border-left-color: var(--warn); }
+.wh-card.untrusted .wh-pill.success,
+.wh-card.untrusted .wh-pill.failure { background: var(--eng-surface-2); color: var(--eng-muted); text-decoration: line-through; text-decoration-thickness: 1px; }
+.backoffice .wh-verify { background: var(--c-line); color: var(--c-ink-8); }
+.backoffice .wh-verify.ok { background: rgba(34,165,90,.14); color: var(--ok-deep); }
+.backoffice .wh-verify.warn, .backoffice .wh-verify.untrusted { background: rgba(245,158,11,.2); color: #a56a0a; border-color: rgba(245,158,11,.5); }
+.backoffice .wh-card.untrusted .wh-pill.success,
+.backoffice .wh-card.untrusted .wh-pill.failure { background: var(--c-line); color: var(--c-ink-8); }
+
+/* Live unlock dialog (portal #live-dialog). Warm-card treatment, like the
+   other portals — it sits outside .pane-left, so it restates Layer A. */
+.live-dialog-backdrop {
+  position: fixed; inset: 0; z-index: 900;
+  display: grid; place-items: center; padding: 16px;
+  background: rgba(16,11,10,.55);
+}
+.live-dialog-backdrop[hidden] { display: none; }
+.live-dialog {
+  width: min(400px, 100%); display: flex; flex-direction: column; gap: 12px;
+  padding: 18px 20px 20px; font-family: var(--font-client); color: var(--c-ink-3);
+  background: #fff; border: 1px solid var(--c-line-2); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-pop);
+}
+.live-dialog-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--c-ink-7);
+}
+.live-dialog-rules { margin: 0; padding-left: 18px; font-size: 12.5px; line-height: 1.55; color: var(--c-ink-4); }
+.live-dialog-label { font-size: 13px; font-weight: 600; color: var(--c-ink-3); margin-bottom: -6px; }
+.live-dialog-input {
+  height: 44px; padding: 0 12px; width: 100%;
+  font-family: var(--font-mono); font-size: 14px; color: var(--c-ink-2);
+  border: 1.5px solid var(--c-line-3); border-radius: var(--r-md); background: var(--c-soft);
+}
+.live-dialog-input:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
+.live-dialog-err { font-size: 12px; font-weight: 600; color: var(--err-deep); margin-top: -4px; }
+.live-dialog-err[hidden] { display: none; }
+.live-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.live-dialog-btn {
+  height: 38px; padding: 0 16px; border-radius: 10px; font-size: 13px; font-weight: 700;
+  border: 1px solid var(--c-line-3); background: #fff; color: var(--c-ink-3);
+  transition: border-color .12s ease, background .12s ease;
+}
+.live-dialog-btn:hover { border-color: var(--c-line-4); background: var(--c-soft); }
+.live-dialog-btn.primary { border-color: transparent; background: var(--accent); color: var(--on-accent); }
+.live-dialog-btn.primary:hover { background: var(--accent); filter: brightness(1.08); }
+
+/* Top-of-page banner (portal #pb-banner) — a .pb-notice pinned under the
+   top bar for things the SE must see mid-narration (live auth failures). */
+.pb-banner {
+  position: fixed; top: 66px; right: 16px; z-index: 950;
+  width: min(420px, calc(100vw - 32px));
+  display: flex; align-items: flex-start; gap: 10px;
+  box-shadow: var(--shadow-pop); animation: pbBannerIn .2s ease;
+}
+/* own keyframes — toastIn bakes in the toast's translateX(-50%) centring */
+@keyframes pbBannerIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.pb-banner[hidden] { display: none; }
+.pb-banner-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.pb-banner-x { flex: none; border: 0; background: transparent; color: var(--c-ink-6); font-size: 17px; line-height: 1; padding: 0 2px; }
+.pb-banner-x:hover { color: var(--c-ink-2); }
