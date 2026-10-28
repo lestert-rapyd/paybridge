@@ -21,9 +21,30 @@ signature shown in the Request tab is a display-only recomputation
 Two integration models are demoed side by side:
 
 - **Own Card Fields** — the merchant collects the PAN and calls
-  `POST /v1/payments` directly (PCI-DSS path). Sandbox only for raw cards.
+  `POST /v1/payments` directly (PCI-DSS path, typically SAQ D). Sandbox only for raw cards.
 - **Checkout Toolkit** — Rapyd's hosted iframe collects the card
-  (`POST /v1/checkout`), zero PCI scope for the merchant.
+  (`POST /v1/checkout`): full toolkit, wallet buttons only, or the hosted
+  checkout page (typically SAQ A).
+
+### The integration seam
+
+`js/seam.js` is the one description of where the merchant's site ends and Rapyd
+begins on each path (who hosts the card form, PCI scope, where redirects
+happen); the drawer's Integration path section and the engine room's seam strip
+both render it. Inside the browser frame every Rapyd surface — the toolkit
+iframe, Rapyd's 3DS challenge, the hosted page — is outlined and tagged
+"Rapyd"; the merchant's parts carry no label and Rapyd's surfaces are never
+restyled. **Show seam** (drawer, default on) hides the markers for a clean
+customer view.
+
+The frame's address bar follows the journey: the merchant's domain and page;
+on the hosted path, **Continue to payment** still opens Rapyd's real page in a
+new tab, and the frame switches to the session's `redirect_url` host
+(`sandboxcheckout.rapyd.net` in sandbox, the live host in live) with a labelled
+stand-in; it comes back to `merchant/checkout/complete` (the skinned success /
+decline screen, driven by the trusted terminal event as before) or
+`merchant/checkout/cancel` (the stand-in's "Back to merchant" link, or the
+real `cancel/` page reporting back over a same-origin `BroadcastChannel`).
 
 ## Running locally
 
@@ -85,8 +106,9 @@ backend's preflight must answer
 One drawer, toggled by the header button or the `` ` `` key (Esc closes):
 
 - **Customer** — which merchant skin is on screen.
-- **Integration path** — Own Card Fields / Checkout Toolkit, and the toolkit's
-  mode (full toolkit, wallet buttons, hosted page).
+- **Integration path** — Own Card Fields / Checkout Toolkit, the toolkit's
+  mode (full toolkit, wallet buttons, hosted page), and **Show seam** with the
+  path's seam explainer.
 - **Account** — Sandbox / Live (live asks for its token first, see below), the
   sandbox credential picker over three MIDs (`SC1`–`SC3`, `js/profiles.js`) with
   their AFT / `network_reference_id` badges, the MID's 3DS provider (Rapyd vs
@@ -180,7 +202,8 @@ shown as declined. Everything rendered into HTML goes through `ui.js esc()`.
 | `js/ledger.js` | Session payment ledger (each payment tagged with the `cus_***` it was made under) + its settlement poller. |
 | `js/webhooks.js` | Webhook watcher for the active payment and customer; Retrieve Payment fallback. |
 | `js/classify.js` | Webhook classification and the trust rule. |
-| `js/screens.js` | Post-payment screens (processing, 3DS, success, error). |
+| `js/screens.js` | Post-payment screens (processing, 3DS, success, error, hosted cancel). |
+| `js/seam.js` | The integration seam per path (`SEAM_PATHS`), seam markers + Show seam, the frame's address bar. |
 | `js/api.js` | The only network layer: backend wrappers, idempotency keys, live token. Never throws. |
 | `js/signing.js` | Display-only request signing + key redaction for the engine room. |
 | `js/json-view.js` | Line-numbered, escaped JSON viewer with field↔path highlighting. |
@@ -191,7 +214,7 @@ shown as declined. Everything rendered into HTML goes through `ui.js esc()`.
 | `css/main.css`, `css/cof.css` | Components: header, drawer, checkout, toolkit stage, result screens, engine room, back office, notices · card-on-file surfaces. |
 | `css/site.css` | The merchant site (header, shop, bag, account pages), token-only. |
 | `assets/` | Inter TTFs (`fonts/`), the Rapyd design-system icon font (`icons/`), the empty-state illustration. |
-| `complete/`, `cancel/` | Landing pages for the hosted checkout's redirect URLs. |
+| `complete/`, `cancel/` | Landing pages for the hosted checkout's redirect URLs; they tell the demo tab over a same-origin `BroadcastChannel`. |
 | `tests/` | No-network unit tests (`unit.js`), their browser runner (`index.html`) and the `check_modules.py` import/export checker. |
 | `DESIGN-SYSTEM.md`, `design-system.html` | The design system and its specimen page. |
 
@@ -205,7 +228,7 @@ modules directly (which is why `ui.js`, `api.js`, `sync.js`, `classify.js` and
 It covers `ui.esc`, `json-view` escaping, `sync.brandLabel` / `currencyDecimals` / `validAmount`,
 `classify.isTrusted` / `isTrustedFor`, `api.newReference`,
 `ledger.refundedTotals` / `ordersFor`, the bag (`site/cart.js`), the built-in
-skins, and the remembered-customer persistence (`customers.js` serialize /
+skins, the integration seam (`seam.js` paths and the hosted address), and the remembered-customer persistence (`customers.js` serialize /
 restore — never a PAN/CVV, never live — against an in-memory storage stand-in),
 and makes no network calls. The flows themselves are not unit-tested.
 

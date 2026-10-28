@@ -145,9 +145,10 @@ the right edge, white head with the Rapyd sandbox icon and the `` ` `` key chip,
 cards, four sections:
 
 1. **Customer** — whose site: the skins as option rows (merchant, industry, domain).
-2. **Integration path** — Own Card Fields (PCI-DSS) / Checkout Toolkit (Hosted), the path's one-line
-   description (the live restriction in `--warn-deep` when live), and for the toolkit its
-   `integration_mode`: Full toolkit / Wallet buttons / Hosted page (mirrored with the config panel).
+2. **Integration path** — Own Card Fields (SAQ D) / Checkout Toolkit (SAQ A), the path's one-line
+   description (the live restriction in `--warn-deep` when live), for the toolkit its
+   `integration_mode`: Full toolkit / Wallet buttons / Hosted page (mirrored with the config panel),
+   and the **Show seam** card (§5.3) with the path's seam explainer.
 3. **Account** — Sandbox / Live (Live opens the live-token dialog when this tab has no token), the
    SC1–SC3 credentials with redacted keys and AFT/NRID badges, the MID's **3-D Secure provider**
    (Rapyd vs External, read-only — external-3DS simulation is not built yet and says so), and the
@@ -167,6 +168,26 @@ the account form, shop (Products / Subscriptions), product page, bag (its rules 
 `.site-alert`), checkout, result screens, **Orders** (two groups: "Your orders" — payments recorded
 under the signed-in customer's `cus_***`; "Guest checkouts this session") and **Payment methods** (synced
 once per visit, with a Refresh link). Product imagery is a hatched `.ph` placeholder.
+
+### 5.3 The integration seam (`js/seam.js`)
+Where the merchant's site ends and Rapyd begins, per path — one source of truth (`SEAM_PATHS`) read by
+the drawer's Show seam card and the engine room's collapsible **seam strip** (between the tabs and the
+panels: path · SAQ tag; open → card form / PCI / redirects, then Merchant vs Rapyd surfaces).
+
+- **Markers.** Every Rapyd surface in the frame — the toolkit iframe (`#rapyd-checkout`), Rapyd's 3DS
+  challenge, the hosted page's stand-in — is wrapped in `.seam-rapyd`: a 1.5px dashed `--rapyd`
+  outline plus a "Rapyd · …" pill tag, drawn **around** the surface. Nothing styles inside it. Merchant
+  surfaces (including a custom pay button) carry no mark. `--rapyd` is Rapyd's purple and is never
+  re-faced by a skin — the frame's `--accent` is the merchant's.
+- **Show seam** (drawer, default on) toggles `.browser.seam-on`; off gives a clean customer view. CSS
+  only — a live iframe is never re-rendered.
+- **Address bar.** The frame's URL follows the journey: `merchant.tld/<page>` on the site; the
+  session's `redirect_url` host (e.g. `sandboxcheckout.rapyd.net/?token=…`) while the hosted page is
+  up — the bar gets the Rapyd outline and a "Rapyd" pill; `merchant.tld/checkout/complete` or
+  `/checkout/cancel` on return (the merchant's skinned result / cancelled screens).
+- **Hosted stand-in** (`.hp-*`). Rapyd's real page opens in a new tab; the frame shows a neutral
+  stand-in in the demo's fixed greys (not the skin, not a copy of Rapyd's page) with "Reopen payment
+  page ↗" and "‹ Back to merchant" (what Rapyd's back link does — `cancel_checkout_url`).
 
 ## 6. Voice: the shopper / SE split (a hard rule)
 
@@ -236,6 +257,9 @@ catalog, copy, `kycAtSignup`). Layout never forks per skin. Keep the built-in id
 
 ## 10. History
 
+- **2026-10 — integration seam.** `js/seam.js`, `.seam-rapyd` markers + Show seam, the engine room's
+  seam strip, the hosted redirect played in the address bar, the merchant's cancelled screen,
+  `--rapyd` / `--rapyd-soft`.
 - **2026-10 — Rapyd rebrand.** The tool became *Rapyd Demo*; the whole UI moved to the Rapyd design
   language (Anton/Epilogue/Hanken Grotesk and the warm greys retired — Inter covers every role, the
   system mono covers code, so nothing loads from a font CDN). The header pills, env switch +

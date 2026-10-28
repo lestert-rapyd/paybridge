@@ -32,7 +32,8 @@ import { clientDetails } from '../client-details.js';
 import { renderJSONView } from '../json-view.js';
 import { setActiveTab, setStatus, esc } from '../ui.js';
 import { startWebhookWatch, setWatchPaymentId } from '../webhooks.js';
-import { renderProcessing, render3DS, renderError } from '../screens.js';
+import { renderProcessing, render3DS, renderError, renderCancelled } from '../screens.js';
+import { seamWrapHTML, SEAM_LABELS, hostedAddress, setAddress, pagePath } from '../seam.js';
 import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
 import * as ledger from '../ledger.js';
 import * as customers from '../customers.js';
@@ -588,7 +589,109 @@ const cofHooks = {
   onCardSaved: (cardId, ps) => logEvent('card saved', `${cardId} · recurrence ${ps.recurrence_type}`, 'tk', 'ok'),
   onSync: () => logEvent('GET /v1/customers/{id}/payment_methods', 'syncing saved cards', 'api'),
 };
-const onTerminalFor = (reference) => terminalHandler({ reference, paidLabel: 'Paid', slot: cofSlot, hooks: cofHooks });
+const onTerminalFor = (reference) => terminalHandler({
+  reference, paidLabel: 'Paid', slot: cofSlot, hooks: cofHooks,
+  onShown: (success) => hostedLanded(reference, success),
+});
+
+/* ── Hosted page: the redirect, as the fake browser shows it ──
+   The REAL behaviour is unchanged: "Continue to payment" opens Rapyd's hosted
+   page (the session's redirect_url) in a new tab — the demo never frames it.
+   What this adds is how the frame reads while that happens, so the SE can show
+   exactly where the merchant's site ends (js/seam.js):
+
+     merchant · rapyd.shop/checkout    "Ready to pay" (skinned)
+     Rapyd    · sandboxcheckout.rapyd.net/?token=…   (the redirect_url's own
+                host — live sessions come back with the live one) — a labelled
+                stand-in in the frame, never a copy of Rapyd's page
+     merchant · rapyd.shop/checkout/complete  — success / decline (screens.js),
+                when the trusted terminal event lands
+              · rapyd.shop/checkout/cancel    — renderCancelled()
+
+   The return pages the shopper actually lands on (complete/, cancel/) tell
+   this tab over a same-origin BroadcastChannel, so the frame follows them when
+   the demo is served from the same origin as its public return URLs. That
+   message only moves the frame (cancel page / "confirming…") — never marks
+   anything paid; the success screen is still the trusted terminal event's. */
+let hosted = null;            // { reference, redirect, phase: 'merchant' | 'rapyd' | 'returned' }
+const RETURN_CHANNEL = 'rapyd-demo-hosted';
+let returnChannel = null;
+
+const merchantDomain = () => VERTICALS[state.vertical].domain;
+
+function listenForReturn() {
+  if (returnChannel || typeof BroadcastChannel === 'undefined') return;
+  try {
+    returnChannel = new BroadcastChannel(RETURN_CHANNEL);
+    returnChannel.onmessage = (e) => {
+      const page = e.data?.page;
+      if (page === 'complete' || page === 'cancel') hostedReturn(page, 'return page');
+    };
+  } catch { /* no channel — the frame still follows the terminal event */ }
+}
+
+/** The shopper leaves for Rapyd's page: the address bar switches to the
+    redirect_url's host and the frame shows the labelled stand-in. */
+function goToHosted() {
+  if (!hosted || hosted.reference !== state.reference) return;
+  hosted.phase = 'rapyd';
+  const addr = hostedAddress(hosted.redirect, launchEnv);
+  setAddress(addr.host, addr.path, true);
+  const host = document.getElementById('checkout');
+  if (!host) return;
+  document.querySelector('.browser')?.classList.remove('wide-tk', 'wide-3ds');
+  const v = VERTICALS[state.vertical];
+  // Rapyd's page is on its own domain — the merchant skin stops here, so the
+  // stand-in is drawn in the demo's neutral chrome (css .hp-*), not the skin.
+  host.innerHTML = `
+    <div class="hp-stage">
+      ${seamWrapHTML(`
+        <div class="hp-away" id="hp-away">
+          <div class="hp-away-host">${esc(addr.host)}</div>
+          <div class="hp-away-title">Paying on Rapyd’s hosted checkout</div>
+          <div class="hp-away-sub">Rapyd’s real page is open in a new tab — the shopper pays there. When they finish, Rapyd sends them back to ${esc(v.merchant)}.</div>
+          <div class="hp-away-actions">
+            <button type="button" class="hp-btn" id="hp-reopen">Reopen payment page ↗</button>
+            <button type="button" class="hp-link" id="hp-cancel" title="What Rapyd’s back link does — cancel_checkout_url">‹ Back to ${esc(v.merchant)}</button>
+          </div>
+        </div>`, SEAM_LABELS.hosted, 'seam-page')}
+    </div>`;
+  $('#hp-reopen')?.addEventListener('click', () => openHosted());
+  $('#hp-cancel')?.addEventListener('click', () => hostedReturn('cancel', 'back link'));
+  setStatus('On Rapyd’s hosted page', 'action');
+  logEvent('redirect → hosted page', addr.host, 'tk', 'action');
+}
+
+function openHosted() {
+  if (!hosted?.redirect) return;
+  window.open(hosted.redirect, '_blank', 'noopener');
+}
+
+/** Back on the merchant's site from Rapyd's page. Acts only while the
+    stand-in is on screen for this session — a stale tab or a reset page
+    must not repaint the frame. */
+function hostedReturn(page, via) {
+  if (!hosted || hosted.phase !== 'rapyd' || hosted.reference !== state.reference || !document.getElementById('hp-away')) return;
+  hosted.phase = 'returned';
+  setAddress(merchantDomain(), pagePath(page));
+  if (page === 'cancel') {
+    logEvent('cancel_checkout_url', `shopper back on ${merchantDomain()} · ${via}`, 'tk');
+    setStatus('Cancelled', 'idle');
+    renderCancelled();
+  } else {
+    logEvent('complete_checkout_url', `shopper back on ${merchantDomain()} · ${via}`, 'tk', 'ok');
+    setStatus('Confirming…', 'processing');
+    renderProcessing('Payment received', 'Just a moment while we confirm your payment…');
+  }
+}
+
+/** The trusted terminal event is about to paint: a hosted payment lands on the
+    merchant's complete page (a decline on its checkout). */
+function hostedLanded(reference, success) {
+  if (!hosted || hosted.reference !== reference) return;
+  hosted.phase = 'returned';
+  setAddress(merchantDomain(), pagePath(success ? 'complete' : 'checkout'));
+}
 
 /** The toolkit's own failure / expiry events end the payment client-side —
     the ledger has to hear about it like it does a success, or the back office
@@ -823,6 +926,8 @@ async function launch() {
   const area = $('#tk-area');
   if (!area) return; // the page was reset while the session was being created
   if (mode === 'hosted') {
+    hosted = { reference, redirect, phase: 'merchant' };
+    listenForReturn();
     setStatus('Redirect ready', 'action');
     area.innerHTML = `
       <div class="tk-redirect">
@@ -830,7 +935,9 @@ async function launch() {
         <div class="tk-redirect-desc">You’ll finish paying on a secure payment page, then come back here.</div>
         <button class="co-cta" id="tk-open"${redirect ? '' : ' disabled title="No https redirect_url in the response"'}>Continue to payment ↗</button>
       </div>`;
-    $('#tk-open').addEventListener('click', () => { if (redirect) window.open(redirect, '_blank', 'noopener'); });
+    // Real behaviour: Rapyd's page opens in a new tab. The frame then plays
+    // the redirect (address bar → Rapyd's domain) — goToHosted().
+    $('#tk-open').addEventListener('click', () => { if (!redirect) return; openHosted(); goToHosted(); });
   } else {
     await loadToolkitScript(launchEnv);
     if (state.reference !== reference || !$('#tk-area')) return; // reset while the script loaded
@@ -838,7 +945,9 @@ async function launch() {
     const ownBtn = payBtn === 'custom' && mode !== 'wallets'
       ? `<button class="co-cta" id="tk-own-pay" style="background:${esc(accent())}">${esc(custom.ownText)}</button>`
       : '';
-    $('#tk-area').innerHTML = `<div id="rapyd-checkout"></div>${ownBtn}`;
+    // Rapyd's iframe carries the seam marker (drawn around it, never inside);
+    // a custom pay button is the merchant's, so it sits outside the marker.
+    $('#tk-area').innerHTML = seamWrapHTML('<div id="rapyd-checkout"></div>', mode === 'wallets' ? SEAM_LABELS.wallets : SEAM_LABELS.toolkit, 'seam-iframe') + ownBtn;
     $('#tk-own-pay')?.addEventListener('click', () => {
       const iframe = document.querySelector('#rapyd-checkout iframe');
       if (!iframe?.contentWindow) return;
@@ -962,6 +1071,7 @@ async function expressCharge(cred) {
 export function mount() {
   const panel = $('#tk-config');
   if (!panel) return;
+  hosted = null; // a fresh checkout page — no redirect in flight
   renderRequest();
   events = [];
   lastHeartbeat = null;

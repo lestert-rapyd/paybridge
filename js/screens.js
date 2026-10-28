@@ -18,6 +18,7 @@ import { markResultShown, landOn } from './steps.js';
 import { clearCart } from './site/cart.js';
 import { siteHeaderHTML } from './site/chrome.js';
 import { isSignedIn } from './site/session.js';
+import { seamWrapHTML, SEAM_LABELS } from './seam.js';
 
 const host = () => document.getElementById('checkout');
 const set3DSWidth = (on) => document.querySelector('.browser')?.classList.toggle('wide-3ds', on);
@@ -143,7 +144,7 @@ export function render3DS(url) {
           <div class="screen-3ds-sub">Your bank needs to confirm it’s you — follow the steps below to finish paying.</div>
         </div>
       </div>
-      <iframe class="tds-frame" src="${esc(safeFrameUrl(url))}" title="3-D Secure challenge"></iframe>
+      ${seamWrapHTML(`<iframe class="tds-frame" src="${esc(safeFrameUrl(url))}" title="3-D Secure challenge"></iframe>`, SEAM_LABELS.tds, 'seam-tds')}
     </div>`;
 }
 
@@ -260,6 +261,27 @@ export function renderError(event = {}) {
       <div class="screen-actions rise-5">
         <button class="cs-secondary" data-land="bag">Back to bag</button>
         <button class="co-cta site-cta" data-land="checkout">Try a different card</button>
+      </div>
+    </div>`);
+  wireReset();
+}
+
+/* The hosted page's cancel return (cancel_checkout_url): the shopper left
+   Rapyd's page and is back on the MERCHANT's site — its header, its words.
+   Nothing was charged; the bag is untouched. Not an error: no badge. */
+export function renderCancelled() {
+  set3DSWidth(false);
+  resetWide();
+  setOffstage(null);
+  const v = VERTICALS[state.vertical];
+  host().innerHTML = sitePage(`
+    <div class="screen cancelled">
+      <div class="screen-title rise-1">Payment cancelled</div>
+      <div class="screen-sub rise-2">${esc(v.merchant)} · <strong>${esc(paidLabel())}</strong></div>
+      <div class="screen-next rise-3">You left the payment page — nothing was charged. Your items are still in your bag.</div>
+      <div class="screen-actions rise-5">
+        <button class="cs-secondary" data-land="bag">Back to bag</button>
+        <button class="co-cta site-cta" data-land="checkout">Return to checkout</button>
       </div>
     </div>`);
   wireReset();

@@ -83,6 +83,11 @@
   --r-pill: 999px;
 
   /* ── Engine room (dark) — Rapyd's palette on near-black ── */
+  /* The integration seam (js/seam.js): Rapyd's own purple, NEVER re-faced by
+     a skin — --accent inside .browser is the merchant's, this one is Rapyd's. */
+  --rapyd:      #7437F5;
+  --rapyd-soft: #F6F2FF;
+
   --eng-bg:        #121019;
   --eng-surface:   #1A1724;
   --eng-surface-2: #231F30;

@@ -36,6 +36,11 @@ import { state } from '../js/state.js';
 // pointed at an in-memory stand-in below, so no test writes real localStorage.
 import * as customers from '../js/customers.js';
 import { SKINS } from '../js/skins.js';
+// The integration seam: pure data + address helpers (DOM writers untouched).
+import {
+  SEAM_PATHS, SEAM_LABELS, seamPathKey, hostedAddress, isRapydHost, pagePath, HOSTED_DOMAIN,
+  seamWrapHTML, seamStripHTML,
+} from '../js/seam.js';
 
 /* ── Tiny harness ── */
 const cases = [];
@@ -586,6 +591,49 @@ test('ordersFor: signed-in customer\'s orders vs this tab\'s guest checkouts', (
   const anon = ordersFor(list, { customerId: null, vertical: 'ecommerce', env: 'sandbox' });
   eq(anon.mine, [], 'no signed-in customer → nothing is "yours"');
   eq(anon.guest.map((e) => e.reference), ['p2']);
+});
+
+/* ── seam — where the merchant ends and Rapyd begins ── */
+test('seam: every path names its card form, PCI scope, redirects and both sides', () => {
+  eq(Object.keys(SEAM_PATHS), ['own-fields', 'embedded', 'wallets', 'hosted']);
+  for (const [key, p] of Object.entries(SEAM_PATHS)) {
+    for (const f of ['label', 'tag', 'summary', 'form', 'pci', 'redirect']) ok(typeof p[f] === 'string' && p[f].length > 0, `${key}.${f}`);
+    ok(Array.isArray(p.merchant) && p.merchant.length > 0, `${key}.merchant`);
+    ok(Array.isArray(p.rapyd) && p.rapyd.length > 0, `${key}.rapyd`);
+  }
+  eq(SEAM_PATHS['own-fields'].tag, 'SAQ D');
+  eq(['embedded', 'wallets', 'hosted'].map((k) => SEAM_PATHS[k].tag), ['SAQ A', 'SAQ A', 'SAQ A']);
+});
+
+test('seam: model + toolkit mode → path key', () => {
+  eq(seamPathKey('own-fields', 'hosted'), 'own-fields'); // the mode only matters on the toolkit
+  eq(seamPathKey('toolkit', 'embedded'), 'embedded');
+  eq(seamPathKey('toolkit', 'wallets'), 'wallets');
+  eq(seamPathKey('toolkit', 'hosted'), 'hosted');
+  eq(seamPathKey('toolkit', 'nonsense'), 'embedded');
+});
+
+test('seam: hosted address comes from the redirect_url, Rapyd hosts only', () => {
+  eq(hostedAddress('https://sandboxcheckout.rapyd.net/?token=checkout_abc', 'sandbox'),
+    { host: 'sandboxcheckout.rapyd.net', path: '/?token=checkout_abc' });
+  eq(hostedAddress('https://checkout.rapyd.net/?token=checkout_live', 'sandbox').host, 'checkout.rapyd.net'); // the URL wins over env
+  // never print a non-Rapyd host as Rapyd's — fall back to the env's domain
+  eq(hostedAddress('https://rapyd.net.evil.example/?token=x', 'sandbox'), { host: HOSTED_DOMAIN.sandbox, path: '/' });
+  eq(hostedAddress('http://sandboxcheckout.rapyd.net/?token=x', 'sandbox').path, '/');
+  eq(hostedAddress('javascript:alert(1)', 'live'), { host: HOSTED_DOMAIN.live, path: '/' });
+  eq(hostedAddress(null), { host: HOSTED_DOMAIN.sandbox, path: '/' });
+  ok(isRapydHost('sandboxcheckouttoolkit.rapyd.net'), 'toolkit host');
+  ok(!isRapydHost('rapyd.net.evil.example') && !isRapydHost('evilrapyd.net') && !isRapydHost(''), 'look-alikes');
+});
+
+test('seam: page paths and escaped markers', () => {
+  eq([pagePath('shop'), pagePath('checkout'), pagePath('complete'), pagePath('cancel'), pagePath('??')],
+    ['/', '/checkout', '/checkout/complete', '/checkout/cancel', '/']);
+  const w = seamWrapHTML('<i></i>', '"><img src=x onerror=1>');
+  ok(!w.includes('<img'), 'label escaped');
+  ok(w.includes('<i></i>'), 'inner kept');
+  ok(SEAM_LABELS.hosted.startsWith('Rapyd'), 'labels name Rapyd');
+  ok(seamStripHTML('hosted').includes('SAQ A') && seamStripHTML('bogus').includes('SAQ D'), 'strip falls back to own-fields');
 });
 
 test('no network calls were made', () => {
