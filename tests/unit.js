@@ -25,7 +25,7 @@ import { renderJSONView, highlightPaths } from '../js/json-view.js';
 import { refundedTotals, settlementOf, ordersFor } from '../js/ledger.js';
 // api.js has no top-level I/O (BACKEND_URL only reads a <meta>); only the
 // two pure generators are exercised — nothing here calls request().
-import { newReference, newIdempotencyKey } from '../js/api.js';
+import { newReference, newIdempotencyKey, pickBackend } from '../js/api.js';
 // The bag rules (pure, catalog passed in) and the one path the flows read it
 // through — verticals.js activeProduct(). Neither touches the DOM or network.
 import {
@@ -868,6 +868,19 @@ test('wallet: Rapyd payout status → ledger outcome', () => {
     ['completed', 'pending', 'pending', 'pending', 'pending', 'failed', 'failed', 'failed', 'failed', 'failed', 'pending']);
   eq(classify({ type: 'PAYOUT_COMPLETED' }), 'success');
   eq(classify({ type: 'PAYOUT_FAILED' }), 'failure');
+});
+
+test('pickBackend: staging hosts use the staging backend, all others production', () => {
+  const urls = { production: 'https://prod.example/', staging: 'https://stage.example' };
+  eq(pickBackend({ hostname: 'rapyd.shop', ...urls }), 'https://prod.example');
+  eq(pickBackend({ hostname: 'www.rapyd.shop', ...urls }), 'https://prod.example');
+  eq(pickBackend({ hostname: 'localhost', ...urls }), 'https://prod.example');
+  eq(pickBackend({ hostname: 'staging.rapyd.shop', ...urls }), 'https://stage.example');
+  eq(pickBackend({ hostname: 'project-abc-rapyd-se.vercel.app', ...urls }), 'https://stage.example');
+  eq(pickBackend({ hostname: 'evil-vercel.app.example.com', ...urls }), 'https://prod.example');
+  // no staging configured → production; nothing configured → the default
+  eq(pickBackend({ hostname: 'staging.rapyd.shop', production: 'https://prod.example' }), 'https://prod.example');
+  eq(pickBackend({ hostname: 'rapyd.shop' }), 'https://rapyd-backend.vercel.app');
 });
 
 test('no network calls were made', () => {

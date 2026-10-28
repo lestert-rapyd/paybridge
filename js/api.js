@@ -15,14 +15,32 @@
 
 const DEFAULT_BACKEND = 'https://rapyd-backend.vercel.app';
 
-/** Backend origin. Overridable per deployment via
-    <meta name="paybridge-backend" content="https://…"> — deliberately NOT
-    via a query param, which would let a crafted link point the demo (and
-    the live token) at someone else's server. */
+/** Hosts that serve the STAGING frontend: the staging domain and Vercel's
+    preview deployments. They talk to the staging backend so a branch under
+    test never sends new requests to the production backend. */
+const isStagingHost = (host) => host === 'staging.rapyd.shop' || /\.vercel\.app$/.test(host || '');
+
+/** Which backend a page on `hostname` uses: the staging origin on a staging
+    host (when one is configured), else the production origin, else the
+    default. Pure — the meta tags are read by the caller. */
+export function pickBackend({ hostname, production, staging } = {}) {
+  const url = (isStagingHost(hostname) && staging) || production || DEFAULT_BACKEND;
+  return url.trim().replace(/\/+$/, '');
+}
+
+/** Backend origin, from two meta tags in index.html —
+    <meta name="paybridge-backend"> (production) and
+    <meta name="paybridge-backend-staging"> (staging.rapyd.shop and Vercel
+    previews). Deliberately NOT a query param, which would let a crafted
+    link point the demo (and the live token) at someone else's server. */
 export const BACKEND_URL = (() => {
   if (typeof document === 'undefined') return DEFAULT_BACKEND;
-  const meta = document.querySelector('meta[name="paybridge-backend"]')?.getAttribute('content')?.trim();
-  return (meta || DEFAULT_BACKEND).replace(/\/+$/, '');
+  const meta = (name) => document.querySelector(`meta[name="${name}"]`)?.getAttribute('content')?.trim() || '';
+  return pickBackend({
+    hostname: typeof location !== 'undefined' ? location.hostname : '',
+    production: meta('paybridge-backend'),
+    staging: meta('paybridge-backend-staging'),
+  });
 })();
 
 /* ── Idempotency ─────────────────────────────────────────────
