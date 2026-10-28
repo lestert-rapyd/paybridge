@@ -39,8 +39,13 @@ import { SKINS } from '../js/skins.js';
 // The integration seam: pure data + address helpers (DOM writers untouched).
 import {
   SEAM_PATHS, SEAM_LABELS, seamPathKey, hostedAddress, isRapydHost, pagePath, HOSTED_DOMAIN,
-  seamWrapHTML, seamStripHTML,
+  seamWrapHTML, seamStripHTML, seamTdsLine, seamLinesHTML, seamExtWrapHTML, EXT_TDS_LABEL,
 } from '../js/seam.js';
+// External 3DS (simulated): the pure decision + payment_method_options builder.
+import {
+  usesExternal3DS, simulateExternal3DS, externalTdsOptions, ext3dsDecision, EXT3DS_CHOICES,
+  EXT3DS_PMO_PATHS, EXT3DS_PLACEHOLDER, DUMMY_CAVV, ext3dsPreset, setExt3dsPreset, authRequestSummary,
+} from '../js/ext3ds.js';
 
 /* ── Tiny harness ── */
 const cases = [];
@@ -634,6 +639,68 @@ test('seam: page paths and escaped markers', () => {
   ok(w.includes('<i></i>'), 'inner kept');
   ok(SEAM_LABELS.hosted.startsWith('Rapyd'), 'labels name Rapyd');
   ok(seamStripHTML('hosted').includes('SAQ A') && seamStripHTML('bogus').includes('SAQ D'), 'strip falls back to own-fields');
+});
+
+/* ── external 3DS — merchant's own provider, simulated ── */
+test('ext3ds: only a sandbox external-3DS MID on Own Card Fields', () => {
+  ok(usesExternal3DS({ env: 'sandbox', profile: 'SC2', model: 'own-fields' }), 'SC2 own fields');
+  ok(!usesExternal3DS({ env: 'sandbox', profile: 'SC2', model: 'toolkit' }), 'toolkit: Rapyd hosts the card form');
+  ok(!usesExternal3DS({ env: 'sandbox', profile: 'SC1', model: 'own-fields' }), 'SC1 runs Rapyd 3DS');
+  ok(!usesExternal3DS({ env: 'live', profile: 'SC2', model: 'own-fields' }), 'never in live');
+  ok(!usesExternal3DS({ env: 'sandbox', profile: 'nope', model: 'own-fields' }), 'unknown profile');
+});
+
+test('ext3ds: a pass builds Rapyd\'s payment_method_options block', () => {
+  for (const choice of ['challenge-pass', 'frictionless']) {
+    const r = simulateExternal3DS(choice, 'Visa');
+    eq(r.transStatus, 'Y', choice);
+    eq(r.challenged, choice === 'challenge-pass', `${choice} challenged`);
+    const pmo = externalTdsOptions(r);
+    // exactly the documented fields — and never 3d_required alongside
+    eq(Object.keys(pmo).sort(), ['3d_version', 'cavv', 'ds_trans_id', 'eci']);
+    eq(pmo['3d_version'], '2.2.0');
+    eq(pmo.eci, '05');
+    eq(pmo.cavv, DUMMY_CAVV);
+    ok(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(pmo.ds_trans_id), 'ds_trans_id is a UUID');
+    ok(!('3d_required' in pmo), 'no 3d_required');
+    eq(ext3dsDecision(r), { callRapyd: true, payment_method_options: pmo });
+  }
+  eq(externalTdsOptions(simulateExternal3DS('frictionless', 'Mastercard')).eci, '02', 'Mastercard ECI');
+  // the CAVV is 20 bytes Base64 (Rapyd's description) and reads as dummy
+  eq(atob(DUMMY_CAVV), 'SIMULATED-CAVV-00000');
+  eq(atob(DUMMY_CAVV).length, 20);
+  eq(EXT3DS_PMO_PATHS, Object.keys(EXT3DS_PLACEHOLDER).map((k) => `payment_method_options.${k}`));
+});
+
+test('ext3ds: a fail means NO Rapyd request', () => {
+  for (const choice of ['challenge-fail', 'frictionless-fail', 'garbage', undefined]) {
+    const r = simulateExternal3DS(choice, 'Visa');
+    eq(r.transStatus, 'N', String(choice));
+    ok(!r.authenticationValue, 'no CAVV on a fail');
+    eq(externalTdsOptions(r), null);
+    eq(ext3dsDecision(r), { callRapyd: false, payment_method_options: null });
+  }
+  eq(ext3dsDecision(null).callRapyd, false, 'no result → no call');
+  // a forged pass without a CAVV is still not a pass
+  eq(ext3dsDecision({ transStatus: 'Y', eci: '05' }).callRapyd, false);
+  eq(EXT3DS_CHOICES.length, 4);
+});
+
+test('ext3ds: SE preset, AReq summary and the seam line', () => {
+  const before = ext3dsPreset();
+  setExt3dsPreset('fail'); eq(ext3dsPreset(), 'fail');
+  setExt3dsPreset('bogus'); eq(ext3dsPreset(), 'fail', 'unknown values ignored');
+  setExt3dsPreset(before);
+  const req = authRequestSummary({ last4: '1111', brand: 'Visa', amount: '10', currency: 'USD', merchant: 'rapyd.shop' });
+  ok(req.acctNumber.endsWith('1111') && !/\d{5}/.test(req.acctNumber), 'masked PAN only');
+  ok(seamTdsLine('own-fields', 'external').includes('payment_method_options'), 'own fields: external runs first');
+  for (const k of ['embedded', 'wallets', 'hosted']) ok(seamTdsLine(k, 'external').includes('doesn’t apply'), `${k}: n/a`);
+  eq(seamTdsLine('hosted', 'rapyd'), null);
+  ok(seamLinesHTML('hosted', { tds: 'external' }).includes('<b>3DS</b>'), 'explainer gets a 3DS line');
+  ok(!seamLinesHTML('hosted').includes('<b>3DS</b>'), 'no line without a provider');
+  const w = seamExtWrapHTML('<i></i>');
+  ok(w.includes('seam-ext') && !w.includes('seam-rapyd') && w.includes('simulated'), 'own grey marker, not Rapyd\'s');
+  ok(!EXT_TDS_LABEL.startsWith('Rapyd'), 'never labelled Rapyd');
 });
 
 test('no network calls were made', () => {

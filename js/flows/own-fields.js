@@ -24,6 +24,14 @@
      fund the fiat wallet). MIT recurring charges live in the back office,
      NOT here.
 
+   External 3DS (a MID with tds:'external' — SC2; js/ext3ds.js): the
+   merchant's OWN 3DS provider runs first, SIMULATED — a neutral issuer
+   page in the frame and a "Simulated" card in the engine room. A pass
+   puts its dummy results in payment_method_options (3d_version, cavv,
+   eci, ds_trans_id — never 3d_required alongside) on the real POST
+   /v1/payments; a fail stops the merchant before Rapyd: no call, no
+   ledger entry, a skinned "couldn't verify" decline.
+
    Live mode: this flow collects NO card data at all. The PAN and CVV
    would travel through this demo's own (non-PCI) backend, so in live the
    form is replaced by a notice pointing at the Checkout Toolkit, whose
@@ -39,7 +47,12 @@ import { clientDetails } from '../client-details.js';
 import { renderJSONView, highlightPaths } from '../json-view.js';
 import { setActiveTab, setStatus, esc } from '../ui.js';
 import { startWebhookWatch } from '../webhooks.js';
-import { renderProcessing, render3DS, renderError } from '../screens.js';
+import { renderProcessing, render3DS, renderError, renderExternal3DS } from '../screens.js';
+import {
+  usesExternal3DS, ext3dsPreset, simulateExternal3DS, ext3dsDecision, externalTdsOptions,
+  authRequestSummary, EXT3DS_PLACEHOLDER, EXT3DS_PMO_PATHS, EXT3DS_FIELD_MAP,
+} from '../ext3ds.js';
+import { setAddress, pagePath } from '../seam.js';
 import {
   FIELD_MAP, detectBrand, brandLabel,
   formatNumber, formatExpiry, parseExpiry,
@@ -138,6 +151,40 @@ function currentMode() {
 }
 const isDirectPurchase = () => (isSubscription() ? true : directPurchase);
 
+/* ── External 3DS (js/ext3ds.js) ─────────────────────────────
+   The merchant's own provider authenticates only a card the merchant HOLDS: a
+   fresh card or its own vault's PAN. A Rapyd card_*** charge carries no card
+   data for the merchant's provider to check, so it runs as before.
+   extAuth = { reference, phase: 'authenticating' | 'passed' | 'failed',
+   request, result } for the payment that ran it; reset with the flow. */
+let extAuth = null;
+let extPending = null; // resolver of the provider page on screen — resolved null if abandoned
+function extApplies() {
+  if (isLive() || !usesExternal3DS(state)) return false;
+  return !(isReturning() && activeCredential()?.kind === 'token');
+}
+const extFor = (reference) => (extAuth && reference && extAuth.reference === reference ? extAuth : null);
+const extStopped = () => extFor(state.reference)?.phase === 'failed';
+
+/* Put the provider's page in the frame and wait for its answer (an ext3ds.js
+   EXT3DS_CHOICES value); null when the page was abandoned (flow reset). */
+function runExternal3DS(info) {
+  abandonExternal3DS();
+  return new Promise((resolve) => {
+    extPending = resolve;
+    const preset = ext3dsPreset();
+    renderExternal3DS(info, {
+      auto: preset === 'challenge' ? null : preset,
+      onChoice: (choice) => { if (extPending === resolve) { extPending = null; resolve(choice); } },
+    });
+  });
+}
+function abandonExternal3DS() {
+  const r = extPending;
+  extPending = null;
+  r?.(null);
+}
+
 /* ── Request bodies ──────────────────────────────────────── */
 function displayBody() {
   const v = VERTICALS[state.vertical];
@@ -225,7 +272,12 @@ function displayBody() {
   body.initiation_type = 'customer_present';
 
   const pmo = {};
-  if (tds) pmo['3d_required'] = true;
+  if (extApplies()) {
+    // The merchant's own 3DS results (dummy — simulated provider), or what
+    // they will be until it has run. Rapyd's own 3DS is NOT requested
+    // alongside: the external-3DS request carries no 3d_required (ext3ds.js).
+    Object.assign(pmo, externalTdsOptions(extFor(state.reference)?.result) || EXT3DS_PLACEHOLDER);
+  } else if (tds) pmo['3d_required'] = true;
   if (aft) {
     pmo.aft = true;
     pmo.is_direct_purchase = isDirectPurchase();
@@ -245,6 +297,11 @@ function displayBody() {
 }
 function postBody() {
   const b = displayBody();
+  // Defence in depth: an external-3DS payment never leaves without a PASSED
+  // result (pay() stops on a fail) — placeholders must never reach Rapyd.
+  if (extApplies() && !externalTdsOptions(extFor(state.reference)?.result)) {
+    throw new Error('External 3DS has not passed — not calling Rapyd');
+  }
   b.merchant_reference_id = state.reference;
   return { ...b, env: state.env, profile: state.profile };
 }
@@ -298,13 +355,22 @@ function returningHTML() {
         </div>` : `
         ${mode === 'nrid' ? '' : `<div class="cof-nocvv">No card details needed — we’ll use your saved card.</div>`}`}
       ${p.aft ? directPurchaseHTML() : ''}
-      <label class="co-tds">
-        <input type="checkbox" id="f-tds" ${tds ? 'checked' : ''} />
-        <span>Require 3-D Secure</span>
-      </label>
+      ${tdsBoxHTML()}
       <button class="co-cta" id="pay-btn">${esc(productCta())} ${esc(p.amount)} ${esc(p.currency)}</button>
       <div class="cof-foot"><button type="button" class="cof-link subtle" id="cof-forget">Not ${esc(first)}? Sign out</button></div>
     </div>`;
+}
+
+/* "Require 3-D Secure" (3d_required — Rapyd's own 3DS). Withdrawn when the
+   MID uses an external provider: the merchant's provider authenticates, and
+   asking Rapyd for its 3DS too would authenticate the shopper twice. */
+function tdsBoxHTML() {
+  if (extApplies()) return '';
+  return `
+    <label class="co-tds">
+      <input type="checkbox" id="f-tds" ${tds ? 'checked' : ''} />
+      <span>Require 3-D Secure</span>
+    </label>`;
 }
 
 /* "Save card" + the Strategy chip (opens the drawer's strategy controls). When BOTH storage routes are
@@ -375,10 +441,7 @@ export function renderPaymentHTML() {
     </div>
     ${p.aft && !isSubscription() ? directPurchaseHTML() : ''}
     ${saveRowHTML()}
-    <label class="co-tds">
-      <input type="checkbox" id="f-tds" ${tds ? 'checked' : ''} />
-      <span>Require 3-D Secure</span>
-    </label>
+    ${tdsBoxHTML()}
     <button class="co-cta" id="pay-btn">${esc(productCta())} ${esc(p.amount)} ${esc(p.currency)}</button>`;
 }
 
@@ -491,12 +554,18 @@ function renderRequest() {
   const st = newSaltTimestamp();
   const body = displayBody();
   const cusCard = customerRequestCardHTML();
-  el.innerHTML = cusCard + beatCardHTML({
-    id: 'beat-pay', n: cusCard ? 2 : null, method: 'POST', path: '/v1/payments',
-    badge: sent ? 'signed &amp; sent' : '', badgeKind: sent ? 'ok' : '',
+  const extCard = extCardHTML(cusCard ? 2 : 1);
+  const n = (cusCard ? 1 : 0) + (extCard ? 1 : 0) + 1;
+  const stopped = !sent && extStopped();
+  const hint = sent ? 'signed &amp; sent'
+    : stopped ? 'never sent — the merchant’s 3DS failed'
+    : isLive() ? 'own card fields are off in live' : 'updates as you type';
+  el.innerHTML = cusCard + extCard + beatCardHTML({
+    id: 'beat-pay', n: n > 1 ? n : null, method: 'POST', path: '/v1/payments',
+    badge: sent ? 'signed &amp; sent' : stopped ? 'not sent' : '', badgeKind: sent ? 'ok' : stopped ? 'err' : '',
     inner: `
       ${headersHTML(st)}
-      <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${sent ? 'signed &amp; sent' : isLive() ? 'own card fields are off in live' : 'updates as you type'}</span></div>
+      <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${hint}</span>${extApplies() ? '<span class="hint"><span class="inject-key"></span>from the merchant’s 3DS provider</span>' : ''}</div>
       <div id="req-json">${renderJSONView(body)}</div>`,
   }) + fxCardHTML();
   fillCustomerSignature();
@@ -507,6 +576,53 @@ function renderRequest() {
    from customer-beat.js (which owns #req-json-cus and works under both models). */
 export function applyHighlight() {
   highlightPaths($('#req-json'), focusedId ? (FIELD_MAP[focusedId] || []) : []);
+  // The external-3DS fields stay marked — they're injected, not typed.
+  highlightPaths($('#req-json'), extApplies() ? EXT3DS_PMO_PATHS : [], 'inject-hit');
+}
+
+/* The merchant → its 3DS server exchange, SIMULATED and outside Rapyd: the
+   AReq it sends (summarised, masked PAN) and the provider's result (EMV
+   names, dummy values), then how those land in Rapyd's fields — or why
+   Rapyd is never called. Shown whenever the external provider applies. */
+function extCardHTML(n) {
+  const ext = extFor(state.reference);
+  if (!ext && !extApplies()) return '';
+  let request = ext?.request;
+  if (!request) {
+    const cred = isReturning() ? activeCredential() : null;
+    const digits = card.number.replace(/\D/g, '');
+    const charge = customerCharge();
+    request = authRequestSummary({
+      last4: cred ? cred.last4 : digits.slice(-4), brand: cred ? cred.brand : brandLabel(digits, null),
+      amount: String(charge.amount ?? activeProduct().amount), currency: charge.currency,
+      merchant: VERTICALS[state.vertical].merchant,
+    });
+  }
+  const phase = ext?.phase || 'draft';
+  let result;
+  if (phase === 'draft') {
+    result = `<div class="ext-wait">Runs first when the shopper pays — before any Rapyd call.</div>`;
+  } else if (phase === 'authenticating') {
+    result = `<div class="ext-wait">Waiting on the provider’s page…</div>`;
+  } else {
+    const passed = phase === 'passed';
+    result = `
+      <div class="req-bodylabel"><p class="eng-label">Result</p><span class="hint">dummy values</span></div>
+      ${renderJSONView(ext.result)}
+      <div class="beat-foot">${passed
+        ? `<code>transStatus: "Y"</code> → the merchant calls Rapyd with the results in <code>payment_method_options</code>:
+           <ul class="ext-map">${EXT3DS_FIELD_MAP.map(([rapyd, prov]) => `<li><code>${esc(rapyd)}</code> ← ${esc(prov)}</li>`).join('')}</ul>`
+        : `<code>transStatus: "N"</code> → the merchant stops here. <b>No POST /v1/payments</b> — Rapyd never sees this attempt.`}</div>`;
+  }
+  return beatCardHTML({
+    id: 'beat-ext3ds', n, method: '3DS', path: 'Merchant → its 3DS server', sim: true,
+    badge: 'Simulated', badgeKind: 'sim',
+    inner: `
+      <div class="ext-who"><span class="sim-badge">Simulated</span>Outside Rapyd — the merchant’s own 3DS server. Not a Rapyd call.</div>
+      <div class="req-bodylabel"><p class="eng-label">Authentication request</p><span class="hint">AReq, summarised</span></div>
+      ${renderJSONView(request)}
+      ${result}`,
+  });
 }
 
 /* ── Response panel ──────────────────────────────────────────
@@ -520,7 +636,15 @@ function paintResponsePanel() {
   if (!el) return;
   const cusCard = customerResponseCardHTML();
   let payCard = '';
-  if (responseSending) {
+  if (!responseSending && !lastResponse && extStopped()) {
+    // The merchant's 3DS failed — there IS no Rapyd response, and saying so
+    // is the point.
+    payCard = beatCardHTML({
+      id: 'beat-pay-res', n: cusCard ? 2 : null, method: 'POST', path: '/v1/payments',
+      badge: 'not sent', badgeKind: 'err',
+      inner: `<div class="beat-foot">The merchant’s 3DS provider returned <code>transStatus: "N"</code>, so the merchant stopped before calling Rapyd — no request, no payment, nothing in Rapyd’s records or the ledger.</div>`,
+    });
+  } else if (responseSending) {
     payCard = beatCardHTML({
       id: 'beat-pay-res', n: cusCard ? 2 : null, method: 'POST', path: '/v1/payments',
       badge: 'sending…', badgeKind: 'live',
@@ -672,6 +796,7 @@ async function pay() {
     if (!ok) { delete btn.dataset.busy; btn.disabled = false; btn.textContent = btnLabel; return; }
   }
 
+  const ext = extApplies(); // decided at the click — the profile may change during the challenge
   state.reference = newReference(`pb_${state.vertical}`); // unguessable — it's the webhook read key
   const reference = state.reference; // the payment this click owns, whatever state.reference becomes
   payRef = reference;
@@ -697,6 +822,53 @@ async function pay() {
       aft: !!p.aft, is_direct_purchase: p.aft ? isDirectPurchase() : null,
       note,
     };
+
+    // External 3DS: the merchant's own provider answers BEFORE anything is
+    // recorded or sent. Only a pass continues to Rapyd.
+    if (ext) {
+      const profile = state.profile;
+      extAuth = {
+        reference, phase: 'authenticating', result: null,
+        request: authRequestSummary({
+          last4, brand: network, amount: String(charge.amount ?? p.amount), currency: charge.currency, merchant: v.merchant,
+        }),
+      };
+      lastResponse = null;
+      setActiveTab('request');
+      renderRequest();
+      setStatus('3DS · merchant’s provider', 'action');
+      const choice = await runExternal3DS({
+        merchant: v.merchant, amount: chargeText(charge), card: `${network || 'Card'} •••• ${last4 || '····'}`,
+      });
+      // Abandoned (the flow reset under it) — nothing was sent, nothing to undo.
+      if (!choice || state.reference !== reference) return;
+      setAddress(v.domain, pagePath('checkout')); // back on the merchant's site
+      if (state.profile !== profile || !usesExternal3DS(state)) {
+        // The SE switched MID mid-challenge: this authentication was for
+        // another merchant account — start the checkout again.
+        extAuth = null;
+        setStatus('Awaiting input', 'idle');
+        repaintSite();
+        toast('Sandbox credentials changed during 3DS — pay again', 'err');
+        return;
+      }
+      const result = simulateExternal3DS(choice, network);
+      const { callRapyd } = ext3dsDecision(result);
+      extAuth = { ...extAuth, phase: callRapyd ? 'passed' : 'failed', result };
+      if (!callRapyd) {
+        // The merchant stops: no Rapyd call, so nothing in the ledger either —
+        // the ledger mirrors payments that exist at Rapyd, and this one never will.
+        renderRequest();
+        paintResponsePanel();
+        setStatus('3DS failed · Rapyd not called', 'error');
+        renderError({ status: '3DS' }, {
+          note: 'We couldn’t verify this payment with your bank — no charge was made. Try again, or use a different card.',
+        });
+        return;
+      }
+      renderProcessing('Verified by your bank', 'Completing your payment…');
+    }
+
     ledger.recordPayment(reference, {
       model: 'own-fields', vertical: state.vertical, amount: p.amount, currency: p.currency,
       requested_currency: fx.enabled ? fx.requestedCurrency : null, fixed_side: fx.enabled ? fx.fixedSide : null,
@@ -931,6 +1103,8 @@ function wirePayRegion() {
 
 export function mount() {
   sent = false;
+  abandonExternal3DS(); // a provider page left on screen by a reset never answers now
+  extAuth = null;
   if (isLive()) wipeCard(); // nothing typed in sandbox survives into live
   useDifferentCard = false; // returning view is the default whenever credentials exist
   wirePayRegion();

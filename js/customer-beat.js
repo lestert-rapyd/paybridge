@@ -106,13 +106,15 @@ const asText = (v) => esc(String(v ?? '').replace(/&amp;/g, '&'));
 
 /** The card shell every beat uses — the flows pass their own inner block
     (`inner` is HTML and the caller's to escape; everything else is text). */
-export function beatCardHTML({ id, n, method, path, badge, badgeKind = '', inner }) {
+export function beatCardHTML({ id, n, method, path, badge, badgeKind = '', inner, sim = false }) {
+  // `sim`: a SIMULATED step outside Rapyd (external 3DS) — dashed card, its
+  // own pill colour; the caller also passes the "Simulated" badge.
   return `
-    <details class="beat-card" id="${esc(id)}" ${isOpen(id) ? 'open' : ''}>
+    <details class="beat-card${sim ? ' sim' : ''}" id="${esc(id)}" ${isOpen(id) ? 'open' : ''}>
       <summary class="beat-head">
         <span class="beat-chev">▸</span>
         ${n ? `<span class="beat-n">${esc(n)}</span>` : ''}
-        <span class="method-pill ${esc(String(method).toLowerCase())}">${esc(String(method).toUpperCase())}</span>
+        <span class="method-pill ${sim ? 'sim' : esc(String(method).toLowerCase())}">${esc(String(method).toUpperCase())}</span>
         <span class="req-path">${asText(path)}</span>
         ${badge ? `<span class="beat-state ${esc(badgeKind)}">${asText(badge)}</span>` : ''}
       </summary>

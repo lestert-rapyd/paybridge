@@ -62,16 +62,18 @@ export function renderJSONView(obj) {
 }
 
 /** Highlight the FULL row (line + gutter number) for the given paths —
-    Claude Code style — clearing any previous hits. */
-export function highlightPaths(container, paths = []) {
+    Claude Code style — clearing any previous hits OF THE SAME CLASS. `cls`
+    lets a second, independent highlight share the view (own-fields marks the
+    external-3DS fields with 'inject-hit' while focus keeps 'sync-hit'). */
+export function highlightPaths(container, paths = [], cls = 'sync-hit') {
   if (!container) return;
-  container.querySelectorAll('.sync-hit').forEach(e => e.classList.remove('sync-hit'));
+  container.querySelectorAll(`.${cls}`).forEach(e => e.classList.remove(cls));
   paths.forEach(p => {
     const el = container.querySelector(`.jv[data-path="${CSS.escape(p)}"]`);
     const line = el?.closest('.jsonv-line');
     if (!line) return;
-    line.classList.add('sync-hit');
+    line.classList.add(cls);
     const idx = [...line.parentElement.children].indexOf(line);
-    line.closest('.jsonv')?.querySelector('.jsonv-gutter')?.children[idx]?.classList.add('sync-hit');
+    line.closest('.jsonv')?.querySelector('.jsonv-gutter')?.children[idx]?.classList.add(cls);
   });
 }

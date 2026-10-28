@@ -25,6 +25,7 @@ import * as backOffice from './flows/back-office.js';
 import { totalsHTML } from './flows/shared.js';
 import { thumbHTML } from './site/chrome.js';
 import { SEAM_PATHS, seamPathKey, seamLinesHTML, seamStripHTML, setAddress, pagePath, isSeamOn, setSeamOn, applySeam } from './seam.js';
+import { EXT3DS_OUTCOMES, ext3dsPreset, setExt3dsPreset } from './ext3ds.js';
 
 // Patch keys that mean "the customer's flow/context actually changed" —
 // only these trigger the full client-flow reset (mount() etc). Everything
@@ -40,6 +41,9 @@ const FLOWS = { 'own-fields': ownFields, 'toolkit': toolkit };
 // The path's own description (and its seam: who hosts what, PCI scope,
 // redirects) comes from js/seam.js — one copy, shared with the engine room.
 const seamKey = () => seamPathKey(state.model, toolkit.toolkitMode());
+// The MID's 3DS provider, for the seam's 3DS line — sandbox only (live has no
+// profile, and Own Card Fields are off there).
+const seamOpts = () => ({ tds: state.env === 'sandbox' ? activeProfile().tds : null });
 // Shown INSTEAD of the seam summary in live, so the restriction is on screen, not
 // just in the SE's head (kept short — the sub-bar is one line). Own fields:
 // the backend refuses raw card data in live (LIVE_RAW_CARD_FORBIDDEN).
@@ -467,8 +471,9 @@ function toggleLeftView() {
                          the toolkit's mode (full toolkit / wallets / hosted)
      Account           · Sandbox / Live (the live-token dialog gates Live),
                          the SC1–SC3 credential picker with its feature
-                         badges, the MID's 3DS provider (read-only) and the
-                         remembered customer
+                         badges, the MID's 3DS provider (fixed by the MID;
+                         for an external provider, its simulated answer)
+                         and the remembered customer
      Payment behaviour · FX (state.fx) and the stored-credential strategy
 
    It only RE-HOMES controls that already existed (the old header pills, the
@@ -529,7 +534,7 @@ function pathHTML() {
         <label class="dc-switch"><input type="checkbox" id="dc-seam" ${isSeamOn() ? 'checked' : ''} /><span class="sr">Show seam</span></label>
       </div>
       <p class="dc-note">Outlines where Rapyd begins inside the site — turn off for a clean customer view.</p>
-      ${seamLinesHTML(key)}
+      ${seamLinesHTML(key, seamOpts())}
     </div>`;
 }
 
@@ -553,6 +558,37 @@ function credRowsHTML() {
   }).join('');
 }
 
+/* The MID's 3-D Secure provider. The PROVIDER is the MID's real configuration
+   (profiles.js, mirrored from the backend) — it isn't switchable here, because
+   forcing "external" onto a Rapyd-3DS MID (or the reverse) would show a flow
+   that MID can't actually run. What the SE CAN choose is what the simulated
+   external provider answers (js/ext3ds.js), so the run is preset before the
+   room; Rapyd-3DS MIDs keep the checkout's own "Require 3-D Secure" box. */
+function tdsCardHTML(pf) {
+  const ext = pf.tds === 'external';
+  const own = state.model === 'own-fields';
+  const outcome = ext3dsPreset();
+  return `
+    <div class="dc-card dc-tds">
+      <div class="dc-card-head">
+        <span class="dc-card-title">3-D Secure provider</span>
+        <span class="dc-pill ${ext ? '' : 'accent'}">${ext ? 'External 3DS' : 'Rapyd 3DS'}</span>
+      </div>
+      <p class="dc-note">${ext
+        ? `${esc(pf.label)} uses the merchant’s own 3DS provider (simulated). On Own Card Fields it authenticates first; a pass sends its results in <code>payment_method_options</code>, a fail never calls Rapyd.`
+        : `${esc(pf.label)} runs Rapyd’s own 3DS — when it’s required, Rapyd returns a <code>redirect_url</code> and its challenge renders inside the checkout.`}</p>
+      ${ext ? `
+        <div class="dc-field">
+          <div class="dc-label">Provider answers<span class="dc-label-note">simulated outcome</span></div>
+          <div class="dc-seg" id="dc-ext3ds">
+            ${EXT3DS_OUTCOMES.map(([val, label]) => `<button type="button" data-val="${esc(val)}" class="${outcome === val ? 'active' : ''}">${esc(label)}</button>`).join('')}
+          </div>
+        </div>
+        ${own ? '' : `<p class="dc-note">Not on the Checkout Toolkit — Rapyd hosts the card form there, so Rapyd runs 3DS itself.</p>`}` : ''}
+      <p class="dc-note fine">Set by the MID — the provider isn’t switchable here.</p>
+    </div>`;
+}
+
 function accountHTML() {
   const live = state.env === 'live';
   const pf = activeProfile();
@@ -568,15 +604,7 @@ function accountHTML() {
       ? `<p class="dc-note warn">Live charges a real card through the production account — every charge is 0.01.</p>`
       : `<div class="dc-label">Sandbox credentials<span class="dc-label-note">MID keys signing your calls</span></div>
          <div class="dc-options" id="dc-creds">${credRowsHTML()}</div>
-         <div class="dc-card dc-tds">
-           <div class="dc-card-head">
-             <span class="dc-card-title">3-D Secure provider</span>
-             <span class="dc-pill ${pf.tds === 'rapyd' ? 'accent' : ''}">${pf.tds === 'rapyd' ? 'Rapyd 3DS' : 'External 3DS'}</span>
-           </div>
-           <p class="dc-note">${pf.tds === 'rapyd'
-             ? `${esc(pf.label)} runs Rapyd’s own 3DS — the challenge renders inside the checkout.`
-             : `${esc(pf.label)} is configured for an external 3DS provider. Simulating the external authentication step is coming soon; until then this MID runs the same flows without it.`}</p>
-         </div>`}
+         ${tdsCardHTML(pf)}`}
     <div class="dc-card">
       <div class="dc-card-head"><span class="dc-card-title">Session customer</span>${cus ? `<span class="dc-pill ${remembered ? 'ok' : ''}">${remembered ? 'Remembered' : live ? 'This tab only' : 'Not saved'}</span>` : ''}</div>
       ${cus
@@ -679,7 +707,7 @@ function renderSeamStrip() {
   const host = $('#seam-strip-host');
   if (!host) return;
   const open = !!host.querySelector('details')?.open;
-  host.innerHTML = seamStripHTML(seamKey(), open);
+  host.innerHTML = seamStripHTML(seamKey(), open, seamOpts());
 }
 
 /* A remembered customer (customers.js) comes back from storage with the cards
@@ -708,6 +736,7 @@ function switchProfile(id) {
   resyncRememberedCustomer();
   renderHeaderContext();
   renderDrawer();
+  renderSeamStrip(); // the seam's 3DS line follows the MID's provider
 }
 
 /* Sandbox ⇄ Live. Live is gated server-side (X-PayBridge-Live-Token): no token
@@ -768,6 +797,9 @@ function wire() {
     if (env) { switchEnv(env.dataset.env); return; }
     const prof = t.closest('#dc-creds button[data-profile]');
     if (prof) { switchProfile(prof.dataset.profile); return; }
+    // External 3DS: the simulated provider's default answer — read when Pay runs.
+    const ext = t.closest('#dc-ext3ds button[data-val]');
+    if (ext) { setExt3dsPreset(ext.dataset.val); renderDrawer(); return; }
     if (t.closest('#dc-forget')) {
       // Demo-side forget — the cus_*** keeps existing at Rapyd (worth saying);
       // this browser just stops remembering it. Every subscriber repaints.

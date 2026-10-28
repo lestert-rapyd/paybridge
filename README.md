@@ -41,10 +41,31 @@ The frame's address bar follows the journey: the merchant's domain and page;
 on the hosted path, **Continue to payment** still opens Rapyd's real page in a
 new tab, and the frame switches to the session's `redirect_url` host
 (`sandboxcheckout.rapyd.net` in sandbox, the live host in live) with a labelled
-stand-in; it comes back to `merchant/checkout/complete` (the skinned success /
-decline screen, driven by the trusted terminal event as before) or
+stand-in; it comes back to `merchant/checkout/complete` (the skinned success
+screen, driven by the trusted terminal event as before) or
 `merchant/checkout/cancel` (the stand-in's "Back to merchant" link, or the
-real `cancel/` page reporting back over a same-origin `BroadcastChannel`).
+real `cancel/` page reporting back over a same-origin `BroadcastChannel`). A
+decline while the shopper is still on Rapyd's page stays there — Rapyd's
+address, the stand-in marked "Declined on Rapyd's page" — because that's what
+the shopper really sees; only a decline after they're back lands on the
+merchant's checkout.
+
+### External 3DS (simulated)
+
+A MID set up for an external 3DS provider (`SC2`, `js/profiles.js`
+`tds: 'external'`) runs the merchant's **own** 3DS first, on Own Card Fields
+(`js/ext3ds.js`). Pay opens a neutral issuer page in the frame (its own grey
+"Merchant's 3DS provider (simulated)" marker — not the skin, not Rapyd) with
+Pass / Fail and a Frictionless shortcut; the engine room shows the
+merchant → 3DS-server exchange as a dashed **Simulated** card with dummy
+results. A pass sends the real `POST /v1/payments` with
+`payment_method_options` `3d_version` / `cavv` / `eci` / `ds_trans_id`
+(highlighted in the body; no `3d_required` — the checkout's "Require 3-D
+Secure" box is withdrawn on these MIDs). A fail stops before Rapyd: no call,
+no ledger entry, a skinned "We couldn't verify this payment with your bank"
+decline. The toolkit and hosted page don't apply — Rapyd hosts the card form
+there (the seam explainer says so). Field names:
+docs.rapyd.net/en/creating-a-card-payment-with-3ds-authentication---external-3ds.html.
 
 ## Running locally
 
@@ -112,8 +133,9 @@ One drawer, toggled by the header button or the `` ` `` key (Esc closes):
 - **Account** — Sandbox / Live (live asks for its token first, see below), the
   sandbox credential picker over three MIDs (`SC1`–`SC3`, `js/profiles.js`) with
   their AFT / `network_reference_id` badges, the MID's 3DS provider (Rapyd vs
-  external — read-only; simulating external 3DS is not built yet), and the session
-  customer with **Forget saved customer**.
+  external — fixed by the MID; for an external provider, the simulated provider's
+  default answer: Challenge / Frictionless / Fail), and the session customer with
+  **Forget saved customer**.
 - **Payment behaviour** — FX (`requested_currency`, who bears it, the live quote)
   and the stored-credential strategy.
 
@@ -204,6 +226,7 @@ shown as declined. Everything rendered into HTML goes through `ui.js esc()`.
 | `js/classify.js` | Webhook classification and the trust rule. |
 | `js/screens.js` | Post-payment screens (processing, 3DS, success, error, hosted cancel). |
 | `js/seam.js` | The integration seam per path (`SEAM_PATHS`), seam markers + Show seam, the frame's address bar. |
+| `js/ext3ds.js` | External 3DS (simulated): when it applies, the dummy provider result, the `payment_method_options` block and the call/no-call decision. |
 | `js/api.js` | The only network layer: backend wrappers, idempotency keys, live token. Never throws. |
 | `js/signing.js` | Display-only request signing + key redaction for the engine room. |
 | `js/json-view.js` | Line-numbered, escaped JSON viewer with field↔path highlighting. |
@@ -228,7 +251,8 @@ modules directly (which is why `ui.js`, `api.js`, `sync.js`, `classify.js` and
 It covers `ui.esc`, `json-view` escaping, `sync.brandLabel` / `currencyDecimals` / `validAmount`,
 `classify.isTrusted` / `isTrustedFor`, `api.newReference`,
 `ledger.refundedTotals` / `ordersFor`, the bag (`site/cart.js`), the built-in
-skins, the integration seam (`seam.js` paths and the hosted address), and the remembered-customer persistence (`customers.js` serialize /
+skins, the integration seam (`seam.js` paths, the hosted address and the 3DS line), external 3DS
+(`ext3ds.js` — the `payment_method_options` block, and a fail never calling Rapyd), and the remembered-customer persistence (`customers.js` serialize /
 restore — never a PAN/CVV, never live — against an in-memory storage stand-in),
 and makes no network calls. The flows themselves are not unit-tested.
 

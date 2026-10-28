@@ -18,7 +18,8 @@ import { markResultShown, landOn } from './steps.js';
 import { clearCart } from './site/cart.js';
 import { siteHeaderHTML } from './site/chrome.js';
 import { isSignedIn } from './site/session.js';
-import { seamWrapHTML, SEAM_LABELS } from './seam.js';
+import { seamWrapHTML, SEAM_LABELS, seamExtWrapHTML, setAddress } from './seam.js';
+import { EXT3DS_ISSUER } from './ext3ds.js';
 
 const host = () => document.getElementById('checkout');
 const set3DSWidth = (on) => document.querySelector('.browser')?.classList.toggle('wide-3ds', on);
@@ -148,6 +149,73 @@ export function render3DS(url) {
     </div>`;
 }
 
+/* ── External 3DS: the merchant's own provider (SIMULATED) ──────
+   A MID set up for an external 3DS provider (js/ext3ds.js) authenticates
+   BEFORE any Rapyd call. This page stands in for that provider's challenge —
+   an issuer page on the issuer's domain, so it is neither the merchant's skin
+   nor Rapyd: fixed neutral greys and a slate accent (css .x3ds-*), its own
+   grey seam marker (seamExtWrapHTML), never the Rapyd one.
+
+   `info` = { merchant, amount, card } (plain text, escaped here). `auto` =
+   null for a challenge (the shopper picks: Pass / Fail, or the simulator's
+   Frictionless shortcut), or 'frictionless' / 'fail' to answer by itself
+   after a beat — the SE's preset (drawer). `onChoice(choice)` gets an
+   ext3ds.js EXT3DS_CHOICES value, once, and only while this page is up. */
+const SHIELD_SVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.2-2.9 7.7-7 9-4.1-1.3-7-4.8-7-9V6l7-3z"></path><path d="M9 12l2 2 4-4"></path></svg>`;
+let x3dsToken = 0;
+export function renderExternal3DS(info, { auto = null, onChoice } = {}) {
+  set3DSWidth(true);
+  resetWide();
+  setOffstage(null);
+  const token = ++x3dsToken;
+  const issuer = EXT3DS_ISSUER;
+  setAddress(issuer.host, issuer.path, false); // the issuer's domain: not the merchant's, not Rapyd's
+  const facts = [['Merchant', info.merchant], ['Amount', info.amount], ['Card', info.card]]
+    .map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('');
+  const body = auto
+    ? `
+      <div class="x3ds-title">Checking with your bank…</div>
+      <p class="x3ds-sub">${esc(issuer.name)} is confirming this purchase. This only takes a moment.</p>
+      <div class="x3ds-facts">${facts}</div>
+      <div class="x3ds-wait"><span class="x3ds-spin"></span>Authenticating</div>`
+    : `
+      <div class="x3ds-title">Verify it’s you</div>
+      <p class="x3ds-sub">${esc(issuer.name)} wants to confirm this purchase. In a real challenge you’d enter a one-time code or approve it in your banking app.</p>
+      <div class="x3ds-facts">${facts}</div>
+      <div class="x3ds-actions">
+        <button type="button" class="x3ds-btn" data-x3ds="challenge-fail">Fail</button>
+        <button type="button" class="x3ds-btn primary" data-x3ds="challenge-pass">Pass</button>
+      </div>
+      <button type="button" class="x3ds-link" data-x3ds="frictionless">Frictionless — authenticate without a challenge</button>`;
+  host().innerHTML = `
+    <div class="x3ds-stage">
+      ${seamExtWrapHTML(`
+        <div class="x3ds" id="x3ds">
+          <div class="x3ds-head">
+            <span class="x3ds-shield">${SHIELD_SVG}</span>
+            <div class="x3ds-brand"><b>${esc(issuer.name)}</b><span>Verified by ${esc(issuer.name)}</span></div>
+            <span class="x3ds-sim">Simulator</span>
+          </div>
+          <div class="x3ds-body">${body}</div>
+          <div class="x3ds-foot">Simulated authentication — no real bank is contacted.</div>
+        </div>`)}
+    </div>`;
+  let done = false;
+  const choose = (choice) => {
+    // Once, and only while THIS page is the one on screen (a reset or a newer
+    // render must not answer for it).
+    if (done || token !== x3dsToken || !document.getElementById('x3ds')) return;
+    done = true;
+    onChoice?.(choice);
+  };
+  if (auto) {
+    setTimeout(() => choose(auto === 'fail' ? 'frictionless-fail' : 'frictionless'), 1400);
+    return;
+  }
+  host().querySelectorAll('[data-x3ds]').forEach((btn) =>
+    btn.addEventListener('click', () => choose(btn.dataset.x3ds)));
+}
+
 /* Receipt rows. Values are set in the UI face, not mono, and are not
    click-to-copy: a receipt is something a shopper reads, and the mono +
    "Copied ✓" treatment made it read as a debug dump. The ids the SE needs —
@@ -237,7 +305,10 @@ export function renderSuccess(event = {}) {
   wireReset();
 }
 
-export function renderError(event = {}) {
+/* `opts.note` replaces the decline sentence — the external-3DS stop uses it
+   ("We couldn't verify this payment with your bank"). Always a literal from
+   the caller, never gateway text. */
+export function renderError(event = {}, opts = {}) {
   set3DSWidth(false);
   resetWide();
   setOffstage(null);
@@ -247,7 +318,7 @@ export function renderError(event = {}) {
   // One sentence, always ours. The gateway's own message (and any SDK error that
   // reached this far) is engine-room material — printing it here put strings like
   // "Failed to fetch" in front of the shopper.
-  const note = 'Your card was declined — no charge was made. Try a different card, or contact your bank if it keeps happening.';
+  const note = opts.note || 'Your card was declined — no charge was made. Try a different card, or contact your bank if it keeps happening.';
   host().innerHTML = sitePage(`
     <div class="screen error">
       ${badgeHTML('err')}

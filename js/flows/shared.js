@@ -183,7 +183,10 @@ export async function sendIdempotent(call, body, { onRetry } = {}) {
    was started for, so the ledger update can't land on a newer one. */
 /* `onShown(success)` runs just before the terminal screen paints, only when
    it does (this payment still owns the screen) — the hosted flow uses it to
-   move the address bar back to the merchant's return page (js/seam.js). */
+   move the address bar back to the merchant's return page (js/seam.js). On a
+   failure it may return true to say it painted the frame itself (a decline
+   that stays on Rapyd's hosted page) — the merchant's decline screen is then
+   skipped; the ledger is updated either way. */
 export function terminalHandler({ reference, paidLabel = 'Paid', slot = null, hooks = {}, onShown = null }) {
   return (ev) => {
     if (!isTrusted(ev)) return;
@@ -194,7 +197,11 @@ export function terminalHandler({ reference, paidLabel = 'Paid', slot = null, ho
       ledger.updateStatus(reference, { status: 'completed', phase: 'completed' });
       slot?.harvest(ev, hooks);
     } else {
-      if (current) { onShown?.(false); setStatus('Failed', 'error'); renderError(ev); }
+      if (current) {
+        const painted = onShown?.(false) === true;
+        setStatus('Failed', 'error');
+        if (!painted) renderError(ev);
+      }
       ledger.updateStatus(reference, { status: 'failed', phase: 'failed' });
       slot?.clear(reference); // nothing was authorised for reuse
     }

@@ -151,7 +151,8 @@ cards, four sections:
    and the **Show seam** card (§5.3) with the path's seam explainer.
 3. **Account** — Sandbox / Live (Live opens the live-token dialog when this tab has no token), the
    SC1–SC3 credentials with redacted keys and AFT/NRID badges, the MID's **3-D Secure provider**
-   (Rapyd vs External, read-only — external-3DS simulation is not built yet and says so), and the
+   (Rapyd vs External — fixed by the MID, never switchable; for External a "Provider answers"
+   segment, Challenge / Frictionless / Fail, presets the simulated provider — §5.4), and the
    **session customer** with "Forget saved customer".
 4. **Payment behaviour** — FX (`requested_currency`, who bears it, the live quote preview — quoted only
    on the checkout page) and the stored-credential strategy (`save_payment_method`, `recurrence_type`,
@@ -185,9 +186,32 @@ panels: path · SAQ tag; open → card form / PCI / redirects, then Merchant vs 
   session's `redirect_url` host (e.g. `sandboxcheckout.rapyd.net/?token=…`) while the hosted page is
   up — the bar gets the Rapyd outline and a "Rapyd" pill; `merchant.tld/checkout/complete` or
   `/checkout/cancel` on return (the merchant's skinned result / cancelled screens).
+- **Hosted decline.** A decline while the shopper is on Rapyd's page keeps the frame there (Rapyd's
+  address, the stand-in titled "Declined on Rapyd's page"); its back link still returns to the
+  merchant's cancel page. Only a decline after the return lands on the merchant's checkout.
 - **Hosted stand-in** (`.hp-*`). Rapyd's real page opens in a new tab; the frame shows a neutral
   stand-in in the demo's fixed greys (not the skin, not a copy of Rapyd's page) with "Reopen payment
   page ↗" and "‹ Back to merchant" (what Rapyd's back link does — `cancel_checkout_url`).
+
+
+### 5.4 External 3DS (`js/ext3ds.js`) — simulated
+On a MID with an external 3DS provider (SC2), Own Card Fields' Pay runs the merchant's own provider
+before any Rapyd call.
+
+- **Provider page** (`.x3ds-*`, `screens.js renderExternal3DS`). An issuer page on the issuer's domain
+  (`acs.example-bank.test`): white card, fixed neutral greys and a slate `#334155` accent after the
+  storefront prototype's 3DS screen — never skin tokens, never `--rapyd`. "Verified by Example Bank",
+  a SIMULATOR tag, merchant / amount / card facts, **Fail** / **Pass**, and a "Frictionless" text
+  link. With the drawer preset on Frictionless or Fail it shows "Checking with your bank…" and answers
+  itself. Its seam marker is `.seam-ext` — a grey dashed outline + grey "Merchant's 3DS provider
+  (simulated)" pill, under Show seam like the Rapyd ones, never the Rapyd marker.
+- **Engine room.** A `beat-card.sim` (dashed edge, amber `3DS` pill, **Simulated** badge) above the
+  payment: "Outside Rapyd — the merchant's own 3DS server", the AReq (masked PAN) and the dummy result
+  (EMV names), then either the Rapyd-field mapping or "No POST /v1/payments". The four injected
+  `payment_method_options` rows carry `.inject-hit` (amber edge; legend `.inject-key`) — a separate
+  class from focus's `.sync-hit`.
+- **Fail.** The merchant's skinned decline with "We couldn't verify this payment with your bank"; the
+  payment card reads "not sent", the response panel says no request was made; no ledger entry.
 
 ## 6. Voice: the shopper / SE split (a hard rule)
 
@@ -239,8 +263,10 @@ reason it exists is the SE's line.
 | `fx-` / `cur-` | FX preview + the currency picker |
 | `tk-` / `tkc-` | toolkit stage + its config panel |
 | `screen-` / `cs-` / `bank-` / `tds-` | result screens, result badge, bank-app mock, 3DS |
+| `x3ds-` / `seam-ext` | the external 3DS provider's simulated page and its marker |
 | `bo-` | back office |
 | `req-` / `eng-` / `beat-` / `jsonv` / `wh-` / `cl-` | engine room |
+| `sim-` / `ext-` / `inject-` | simulated (outside-Rapyd) cards, injected-field highlight |
 | `pb-` | notices, banner |
 | `ds-` | `design-system.html` page chrome only |
 
@@ -257,6 +283,9 @@ catalog, copy, `kycAtSignup`). Layout never forks per skin. Keep the built-in id
 
 ## 10. History
 
+- **2026-10 — external 3DS (simulated).** `js/ext3ds.js`, the issuer page (`.x3ds-*`, `.seam-ext`), the
+  engine room's Simulated card (`.beat-card.sim`, `.inject-hit`), the drawer's live 3DS card, the
+  seam's 3DS line, the hosted decline that stays on Rapyd's page.
 - **2026-10 — integration seam.** `js/seam.js`, `.seam-rapyd` markers + Show seam, the engine room's
   seam strip, the hosted redirect played in the address bar, the merchant's cancelled screen,
   `--rapyd` / `--rapyd-soft`.
