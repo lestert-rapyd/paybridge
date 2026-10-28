@@ -18,9 +18,10 @@
    known yet is settled ONLY via Retrieve (which checks the reference).
    ───────────────────────────────────────────────────────────── */
 
-import { fetchWebhooksBatch, retrievePayment } from './api.js';
+import { fetchWebhooksBatch, retrievePayment, retrievePayout } from './api.js';
 import { classify, isTrustedFor } from './classify.js';
 import { state } from './state.js';
+import { payoutOutcome } from './site/wallet.js';
 
 const entries = new Map(); // reference -> entry
 const listeners = new Set();
@@ -97,13 +98,15 @@ export async function refreshPayment(reference) {
 }
 
 /** Wallet balance, derived (never stored) — folds completed payments as
-    credits and completed refunds as debits, per currency. Recomputed on
+    credits and completed refunds and payouts as debits, per currency. Recomputed on
     every notify(), so it's reactive to refunds by construction. */
 export function walletBalances() {
   const bal = {};
   const add = (cur, amt) => { if (cur && amt != null) bal[cur] = (bal[cur] || 0) + amt; };
   for (const e of entries.values()) {
     if (e.status !== 'completed') continue;
+    // a completed payout left the wallet (same currency both sides — no FX leg)
+    if (e.kind === 'payout') { add(e.currency, -num(e.amount)); continue; }
     const s = e.settled;
     // credit the leg that actually landed in the wallet
     if (s?.merchant_requested_amount != null) add(s.merchant_requested_currency, s.merchant_requested_amount);
@@ -247,6 +250,63 @@ export function updateRefund(paymentReference, refundReference, patch) {
   notify();
 }
 
+/** A withdrawal (Rapyd card payout), recorded when the wallet page sends it.
+    { vertical, amount, currency, profile, env, customer_id, method_type,
+      destination: { kind: 'token'|'test', label } }. Shares the payment
+    entries' shape where it overlaps (status / phase / created_at / refunds:
+    []) so every ledger reader can iterate it; ordersFor() skips it (kind). */
+export function recordPayout(reference, { vertical, amount, currency, profile, env, customer_id, method_type, destination }) {
+  entries.set(reference, {
+    reference,
+    kind: 'payout',
+    vertical,
+    payout_id: null,
+    amount,
+    currency,
+    method_type: method_type || null,
+    destination: destination || null,
+    customer_id: typeof customer_id === 'string' && /^cus_/.test(customer_id) ? customer_id : null,
+    profile: profile || state.profile,
+    env: env || state.env,
+    rapyd_status: null,  // Rapyd's own word (Created / Completed / Error …)
+    status: 'pending',   // 'pending' | 'completed' | 'failed'
+    phase: 'created',
+    refunds: [],
+    created_at: Date.now(),
+  });
+  notify();
+  ensurePolling();
+}
+
+/** Merge a Rapyd payout object (the create response or GET /v1/payouts/{id})
+    into its entry. Only OUR signed calls come through here — and a payout
+    object for a different payout (wrong id; or, before the id is known, a
+    different reference — unless `own`: the create call's answer for this
+    very entry) is ignored. Returns whether anything changed. */
+function settlePayout(e, p, own = false) {
+  if (!p || typeof p !== 'object') return false;
+  if (e.payout_id && p.id !== e.payout_id) return false;
+  if (!e.payout_id && !own && p.merchant_reference_id !== e.reference) return false;
+  let changed = false;
+  if (p.id && !e.payout_id) { e.payout_id = p.id; changed = true; }
+  if (p.status && p.status !== e.rapyd_status) { e.rapyd_status = p.status; changed = true; }
+  const outcome = payoutOutcome(p.status);
+  if (isOpen(e) && outcome !== 'pending') { e.status = outcome; e.phase = outcome; changed = true; }
+  return changed;
+}
+
+/** The create call's answer (`own: true` — our signed call for this entry)
+    or a Retrieve Payout. */
+export function applyPayoutObject(reference, payoutObj, { own = false } = {}) {
+  const e = entries.get(reference);
+  if (e?.kind === 'payout' && settlePayout(e, payoutObj, own)) notify();
+}
+
+/* Webhook events last seen per payout reference — the wallet page's
+   engine room shows them (display only; settlement is the poller's). */
+const seenEvents = new Map(); // reference -> events[]
+export function eventsFor(reference) { return seenEvents.get(reference) || []; }
+
 /* ── Poller ──────────────────────────────────────────────────
    Every 4s: read the webhooks filed under each still-open reference
    (newest first, chunked by api.js to the backend's 20-ref cap) and
@@ -263,6 +323,7 @@ const ACTIVE_WINDOW_MS = 30 * 60 * 1000;
 const CLIENT_WATCH_MS = 5 * 60 * 1000;      // webhooks.js's own watch window
 const BACKOFF_MS = [15000, 30000, 60000, 120000];
 const FAIL_STATUS = ['ERR', 'EXP', 'CAN', 'DEC'];
+const PAYOUT_EVENT_TAIL_MS = 2 * 60 * 1000;
 let polling = false;
 
 // Confirmation bookkeeping lives off-entry (state.ledger stays plain data).
@@ -299,6 +360,12 @@ function activeRefs() {
     // settled FX truth — the client flow's own watcher may flip status to
     // completed (via updateStatus) before the poller sees the webhook, and
     // the wallet needs e.settled regardless of who confirmed first.
+    if (e.kind === 'payout') {
+      // open, or just settled by its own create response — keep reading its
+      // events a little longer so PAYOUT_COMPLETED still reaches the engine room
+      if (fresh(e, now) && (isOpen(e) || now - e.created_at < PAYOUT_EVENT_TAIL_MS)) refs.push({ ref: e.reference, at: e.created_at });
+      continue;
+    }
     if (fresh(e, now) && (isOpen(e) || (e.status === 'completed' && !e.settled))) {
       refs.push({ ref: e.reference, at: e.created_at });
     }
@@ -371,6 +438,19 @@ async function confirmPayment(e, hint) {
   } catch { /* transient — the backoff retries */ } finally { releaseConfirm(e); }
 }
 
+/** Retrieve Payout with the env + MID that created it; settlePayout checks
+    the object is this entry's payout. */
+async function confirmPayout(e, hintId = null) {
+  try {
+    // a claim may only supply the id while we have none — settlePayout then
+    // requires the payout to carry this entry's reference
+    const id = e.payout_id || hintId;
+    if (!id) return;
+    const { ok, data } = await retrievePayout(id, e.env || state.env, e.profile || state.profile);
+    if (ok && !data?.error && data?.data && settlePayout(e, data.data)) notify();
+  } catch { /* transient — the backoff retries */ } finally { releaseConfirm(e); }
+}
+
 const refundList = (p) => (Array.isArray(p?.refunds) ? p.refunds : Array.isArray(p?.refunds?.data) ? p.refunds.data : []);
 
 /** Confirm a refund from its parent payment: Rapyd's payment object lists
@@ -416,6 +496,20 @@ async function pollOnce(refs) {
   const followUps = [];
 
   for (const e of entries.values()) {
+    if (e.kind === 'payout') {
+      if (!wanted.has(e.reference)) continue;
+      const events = byRef[e.reference] || [];
+      if (events.length !== eventsFor(e.reference).length) { seenEvents.set(e.reference, events); changed = true; }
+      if (!isOpen(e)) continue;
+      const { success, failure, claims } = terminal(events, { env: e.env, id: e.payout_id });
+      const claim = nextClaim(e, claims);
+      if (success) { e.status = 'completed'; e.phase = 'completed'; e.rapyd_status = success.status || 'Completed'; changed = true; }
+      else if (failure) { e.status = 'failed'; e.phase = 'failed'; e.rapyd_status = failure.status || e.rapyd_status; changed = true; }
+      else if ((e.payout_id || claim?.payment_id) && claimConfirm(e, claim ? eventKey(claim) : null)) {
+        followUps.push(() => confirmPayout(e, claim?.payment_id || null));
+      }
+      continue;
+    }
     if (wanted.has(e.reference)) {
       const events = byRef[e.reference] || [];
       const { success, failure, claims } = terminal(events, { env: e.env, id: e.payment_id });

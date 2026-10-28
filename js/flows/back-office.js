@@ -17,6 +17,8 @@
      · fire refund    → response + REFUND_COMPLETED card     (Response, Webhooks)
      · customer view  → GET /v1/customers/{id}, the saved-cards list, and the
                         original POST /v1/customers beat (customer-beat.js)
+     · click a payout → GET /v1/payouts/{id} (the merchant site's withdrawals —
+                        ledger kind 'payout'; the other side of a deposit)
 
    Amounts follow the product-wide convention: 3-letter ISO code, no
    currency symbol (matches the API and the checkout tile).
@@ -34,7 +36,7 @@
 import { state } from '../state.js';
 import { VERTICALS } from '../verticals.js';
 import {
-  createRefund, createDirectPayment, retrievePayment, retrieveCustomer, fetchWebhooksBatch,
+  createRefund, createDirectPayment, retrievePayment, retrieveCustomer, retrievePayout, fetchWebhooksBatch,
   newIdempotencyKey, newReference,
 } from '../api.js';
 import { profileEwallet } from '../profiles.js';
@@ -46,7 +48,7 @@ import { brandLabel, currencyDecimals, validAmount } from '../sync.js';
 import { eventCardHTML } from '../webhooks.js';
 import {
   getLedger, getEntry, subscribeLedger, recordPayment, recordRefund, updateRefund,
-  setPaymentId, updateStatus, applyPaymentObject, walletBalances, refundedTotals,
+  setPaymentId, updateStatus, applyPaymentObject, applyPayoutObject, walletBalances, refundedTotals,
   refreshPayment,
 } from '../ledger.js';
 import * as customers from '../customers.js';
@@ -120,7 +122,8 @@ function renderWallet() {
   if (!el) return;
   const bal = walletBalances();
   const curs = Object.keys(bal);
-  const count = getLedger().filter((e) => e.status === 'completed').length;
+  const count = getLedger().filter((e) => e.kind !== 'payout' && e.status === 'completed').length;
+  const payouts = getLedger().filter((e) => e.kind === 'payout' && e.status === 'completed').length;
 
   // Every currency held this session, one figure each at equal visual weight —
   // no "primary" currency, since a multi-currency wallet has no single headline.
@@ -132,7 +135,7 @@ function renderWallet() {
     <div class="bo-wallet-card">
       <div class="bo-wallet-ballabel">Wallet balance</div>
       <div class="bo-wallet-bals">${rows}</div>
-      <div class="bo-wallet-meta">${count} payment${count === 1 ? '' : 's'} this session</div>
+      <div class="bo-wallet-meta">${count} payment${count === 1 ? '' : 's'}${payouts ? ` · ${payouts} payout${payouts === 1 ? '' : 's'}` : ''} this session</div>
     </div>`;
 }
 
@@ -145,7 +148,29 @@ function eligibilityChip(entry) {
   return pill(`PARTIAL · ${fmt(t.refunded)}/${fmt(t.total)}`, 'pending');
 }
 
+/* A withdrawal from the merchant site — money OUT of the wallet. Clicking it
+   retrieves the payout (GET /v1/payouts/{id}); it has no refund detail view. */
+function payoutTileHTML(entry) {
+  const status = entry.status === 'completed' ? pill('PAYOUT · COMPLETED', 'success')
+    : entry.status === 'failed' ? pill(`PAYOUT · ${String(entry.rapyd_status || 'FAILED').toUpperCase()}`, 'failure')
+    : pill(`PAYOUT · ${String(entry.rapyd_status || PHASE_LABEL[entry.phase] || 'pending').toUpperCase()}`, 'pending');
+  const clickable = !!entry.payout_id;
+  return `
+    <div class="bo-tile payout ${clickable ? 'clickable-payout' : 'inert'}" data-payout-ref="${esc(entry.reference)}">
+      <div class="bo-tile-main">
+        <div class="bo-tile-ref">${esc(entry.reference)}</div>
+        <div class="bo-tile-sub">${esc(entry.destination?.label || 'Card')} <span class="bo-mit-badge">${esc(entry.method_type || 'card payout')}</span></div>
+      </div>
+      <div class="bo-tile-amts">
+        <div class="bo-tile-paid">− ${money(entry.amount, entry.currency)}</div>
+      </div>
+      <div class="bo-tile-status">${status}</div>
+      ${clickable ? `<span class="bo-tile-chev">›</span>` : ''}
+    </div>`;
+}
+
 function tileHTML(entry) {
+  if (entry.kind === 'payout') return payoutTileHTML(entry);
   const v = VERTICALS[entry.vertical];
   const fx = isFx(entry);
   const s = entry.settled || {};
@@ -171,7 +196,7 @@ function tileHTML(entry) {
 function listHTML() {
   const entries = getLedger();
   return `
-    <div class="bo-section-label">Payments this session</div>
+    <div class="bo-section-label">${entries.some((e) => e.kind === 'payout') ? 'Payments & payouts this session' : 'Payments this session'}</div>
     <div class="bo-tiles">${entries.map(tileHTML).join('')}</div>
     <div class="bo-list-note">Refunds are order-based — open a payment to refund it against its captured FX position.</div>`;
 }
@@ -808,6 +833,33 @@ function renderBodyKeepingFocus() {
   if (sel) { try { el?.setSelectionRange(sel[0], sel[1]); } catch { /* not a text input */ } }
 }
 
+/* GET /v1/payouts/{id} for a payout tile — signed with the env + MID that
+   created it, painted like the payment retrieve; the result also settles the
+   ledger entry (our own signed call). */
+async function retrievePayoutTile(reference) {
+  const entry = getEntry(reference);
+  if (!entry?.payout_id || state.leftView !== 'backoffice') return;
+  const mySeq = ++actionSeq;
+  const path = `/v1/payouts/${entry.payout_id}`;
+  const el = $('#panel-request');
+  if (el) {
+    const st = newSaltTimestamp();
+    el.innerHTML = `
+      <div class="req-headline"><span class="method-pill get">GET</span><span class="req-path">${esc(path)}</span></div>
+      ${headersHTML(st)}
+      <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">back office · retrieve payout</span></div>
+      <div class="jsonv"><div class="jsonv-body"><span class="jv-empty">— GET has no request body —</span></div></div>`;
+    fillSignature(el, 'get', path, st, null);
+  }
+  setActiveTab('response');
+  paintResponse(null, true, 'RETRIEVING…', null, mySeq);
+  const { httpStatus, data } = await retrievePayout(entry.payout_id, entry.env || state.env, entry.profile || state.profile);
+  const okResp = isOk(httpStatus, data);
+  if (okResp && data?.data) applyPayoutObject(reference, data.data);
+  if (responseOwner !== mySeq) return;
+  paintResponse(data, okResp, okResp ? `PAYOUT · ${String(data.data?.status || 'RETRIEVED').toUpperCase()}` : errLabel(httpStatus, data), httpStatus, mySeq);
+}
+
 async function retrieveAndOpen(reference) {
   const entry = getEntry(reference);
   if (!entry || !entry.payment_id) return;
@@ -1294,6 +1346,8 @@ export function mount() {
     if (e.target.closest('#bo-back')) { view = 'list'; detailRef = null; refundOpen = false; lastHoverRef = null; renderBody(); renderCof(); return; }
     const tile = e.target.closest('.bo-tile.clickable');
     if (tile && view === 'list') { retrieveAndOpen(tile.dataset.ref); renderCof(); return; }
+    const payoutTile = e.target.closest('.bo-tile.clickable-payout');
+    if (payoutTile && view === 'list') { retrievePayoutTile(payoutTile.dataset.payoutRef); return; }
 
     // customer on file
     if (e.target.closest('#bo-cof-open')) {

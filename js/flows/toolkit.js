@@ -212,7 +212,7 @@ function expressBody(cred) {
   if (tds) pmo['3d_required'] = true;
   if (p.aft) {
     pmo.aft = true;
-    pmo.is_direct_purchase = true;
+    pmo.is_direct_purchase = p.is_direct_purchase ?? true; // false for a wallet deposit (site/wallet.js)
     pmo.purpose_code = p.purpose_code;
     pmo.special_condition_indicator = p.special_condition_indicator;
   }
@@ -1031,7 +1031,7 @@ async function expressCharge(cred) {
     last4: cred.last4, network: cred.brand, fx: fxSnapshot(),
     customer_id: customers.getCustomerId(),
     initiation_type: 'customer_present',
-    aft: !!p.aft, is_direct_purchase: p.aft ? true : null,
+    aft: !!p.aft, is_direct_purchase: p.aft ? (p.is_direct_purchase ?? true) : null,
     note: p.successNote || v.successNote,
   };
   ledger.recordPayment(reference, {

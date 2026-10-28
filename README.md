@@ -67,6 +67,49 @@ decline. The toolkit and hosted page don't apply — Rapyd hosts the card form
 there (the seam explainer says so). Field names:
 docs.rapyd.net/en/creating-a-card-payment-with-3ds-authentication---external-3ds.html.
 
+### Merchant wallet (deposit / withdraw)
+
+Gambling, forex and crypto merchants run a deposit / withdraw journey, so the
+**rapyd.spin** (gambling) and **rapyd.coin** (crypto) packs opt in to a
+**Wallet** page (`js/packs.js` `wallet` rule; rapyd.shop's home pack keeps it
+off — its prototype's store credit was refund credit spent at checkout, not a
+cash-out balance). Signed-in shoppers see a Wallet nav item:
+
+- **Balance** — the merchant's own ledger of what the shopper holds (store
+  credit / a player or trading balance), *not* a Rapyd wallet: deposits land in
+  the MID's collection wallet and withdrawals are paid out of it. It is derived
+  from this tab's ledger (`js/site/wallet.js walletBalance`): completed deposits
+  (only a trusted outcome completes them) minus their refunds minus every payout
+  that hasn't failed (in-flight ones are reserved). A withdrawal can never
+  exceed the available balance, and amounts pass `validAmount`.
+- **Deposit** ("Deposit" for gambling/crypto; "Top up" for a pack that doesn't
+  name it) — the amount becomes the checkout's product, so the shopper pays
+  through the existing flow on the selected path (own fields, toolkit, express
+  saved card, hosted page) with the seam, FX and the live 0.01 clamp as usual.
+  Crypto deposits carry the pack's AFT indicators with `is_direct_purchase:
+  false` (they fund a balance); gambling deposits carry none, as before.
+- **Withdraw** — a real Rapyd **card payout**, three beats in the engine room:
+  `GET /v1/payout_method_types` (category card, the pack's country + currency —
+  picks e.g. `us_visa_card`), `GET /v1/payout_methods/{type}/required_fields`
+  (fills `beneficiary` / `sender`; any required field the demo has no value for
+  is named on the card) and `POST /v1/payouts` from the profile's wallet:
+  `sender_entity_type: company` (the merchant), `beneficiary_entity_type:
+  individual`, same currency both sides, `confirm_automatically: true`, a
+  `merchant_reference_id` (≤ 45 chars). The beneficiary is the shopper's
+  **saved card** (`beneficiary.card_id = card_***`) or, sandbox only, Rapyd's
+  sandbox payout card `4111 1111 1111 1111`. The ledger confirms it from a
+  verified `PAYOUT_COMPLETED` / `PAYOUT_FAILED` (signed for the payout's env and
+  about its id) or `GET /v1/payouts/{id}`; the create call's own answer counts
+  too. The back office lists payouts as their own tiles (click → retrieve).
+- **Live:** payouts move real money, so the backend refuses every live payout
+  call unless `LIVE_PAYOUTS_ENABLED=true` (default off), then applies the live
+  gate, the `LIVE_MAX_AMOUNT` cap on `payout_amount`, its allowlist and no raw
+  card (live can only pay out to a saved `card_***`).
+
+Payouts need the MID set up for them: card payouts enabled, and funds in the
+source wallet's payout currency (sandbox: *Add Funds to Wallet Account*,
+`POST /v1/account/deposit`, or the Client Portal) — see `rapyd-backend/README.md`.
+
 ## Running locally
 
 It's a static site — vanilla ES modules, no build step, no dependencies.
@@ -203,16 +246,18 @@ shown as declined. Everything rendered into HTML goes through `ui.js esc()`.
 | `index.html` | Shell: header (wordmark + drawer button), the two panes, the demo-controls drawer, portals (currency picker, live dialog, banner). |
 | `js/app.js` | Bootstrap: renders the shell, the demo-controls drawer (skin, path, env + credentials, FX, strategy), the price tile, live unlock, the remembered-customer re-sync. |
 | `js/state.js` | Tiny reactive store. `vertical`/`model`/`env` changes reset the client flow; most other fields are mutated directly. |
-| `js/steps.js` | Router for the merchant site: sign in / register / guest → shop → product → bag → checkout, plus Orders and Payment methods; paints the engine room per page. |
+| `js/steps.js` | Router for the merchant site: sign in / register / guest → shop → product → bag → checkout, plus Orders, Payment methods and the Wallet; paints the engine room per page. |
 | `js/identity.js` | Guest / account / returning checkout identity. |
 | `js/skins.js` | Skins — whose site it is: merchant name, descriptor, domain and the site tokens, applied by `applySkin()` to the browser frame only. Built-in: `ecommerce` (rapyd.shop), `crypto` (rapyd.coin), `gaming` (rapyd.spin). |
-| `js/packs.js` | Industry packs — what the merchant sells: catalog, copy, journey rules (`kycAtSignup`). |
+| `js/packs.js` | Industry packs — what the merchant sells: catalog, copy, journey rules (`kycAtSignup`, `wallet`). |
 | `js/verticals.js` | Skin × pack composition (`VERTICALS`), `activeProduct()` (a valid bag folds into one product here), FX-aware customer/merchant amounts. |
 | `js/site/cart.js` | The bag: lines, minor-unit totals, one-currency + subscription-alone rules, the composite product the flows charge. |
 | `js/site/chrome.js` | The site header (wordmark, nav, account, bag) and shared product-tile / money helpers. |
 | `js/site/session.js` | The merchant's own sign-in session over the session `cus_***` (no Rapyd call). |
 | `js/site/lookup.js` | "Sign in with a customer ID": `GET /v1/customers/{id}` and its engine-room cards; adopts the customer. |
 | `js/site/shop.js` | Shop (one-off / subscription tabs), product page, bag page and its checkout blockers. |
+| `js/site/wallet.js` | The Wallet's rules (pure): the pack's wallet config, the deposit product, balance arithmetic, withdraw limits + chips, payout method-type pick, beneficiary/sender filling, the `POST /v1/payouts` body. |
+| `js/site/wallet-page.js` | The Wallet page, its engine-room beats (method types → required fields → payout) and the withdraw orchestration. |
 | `js/site/account.js` | Signed-in Orders (the customer's vs this tab's guest checkouts, `ledger.ordersFor`) and Payment methods (stored credentials + the list-payment-methods sync beat, once per visit + Refresh). |
 | `js/profiles.js` | Sandbox MID registry (public identifiers only). |
 | `js/flows/own-fields.js` | Own Card Fields flow. |
@@ -221,7 +266,7 @@ shown as declined. Everything rendered into HTML goes through `ui.js esc()`.
 | `js/flows/back-office.js` | Merchant back office: session payments, refunds, customer view, MIT charges. |
 | `js/customer-beat.js` | `POST /v1/customers` as its own step. |
 | `js/customers.js` | Session customer + stored credentials, keyed per `env:profile`; remembers sandbox customers in `localStorage` (no PAN/CVV, never live). |
-| `js/ledger.js` | Session payment ledger (each payment tagged with the `cus_***` it was made under) + its settlement poller. |
+| `js/ledger.js` | Session payment ledger (each payment tagged with the `cus_***` it was made under; withdrawals as `kind: 'payout'`) + its settlement poller (payouts confirmed by verified `PAYOUT_*` or Retrieve Payout). |
 | `js/webhooks.js` | Webhook watcher for the active payment and customer; Retrieve Payment fallback. |
 | `js/classify.js` | Webhook classification and the trust rule. |
 | `js/screens.js` | Post-payment screens (processing, 3DS, success, error, hosted cancel). |
@@ -250,7 +295,8 @@ modules directly (which is why `ui.js`, `api.js`, `sync.js`, `classify.js` and
 `ledger.js` do no DOM work at import time) and reports pass/fail in the page.
 It covers `ui.esc`, `json-view` escaping, `sync.brandLabel` / `currencyDecimals` / `validAmount`,
 `classify.isTrusted` / `isTrustedFor`, `api.newReference`,
-`ledger.refundedTotals` / `ordersFor`, the bag (`site/cart.js`), the built-in
+`ledger.refundedTotals` / `ordersFor`, the bag (`site/cart.js`), the wallet
+(`site/wallet.js` — balance arithmetic, withdraw limits, the deposit product, the payout body), the built-in
 skins, the integration seam (`seam.js` paths, the hosted address and the 3DS line), external 3DS
 (`ext3ds.js` — the `payment_method_options` block, and a fail never calling Rapyd), and the remembered-customer persistence (`customers.js` serialize /
 restore — never a PAN/CVV, never live — against an in-memory storage stand-in),

@@ -814,6 +814,9 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .bo-tile.clickable { cursor: pointer; }
 .bo-tile.clickable:hover { border-color: var(--field); box-shadow: var(--shadow-pop); }
 .bo-tile.inert { opacity: .75; }
+/* a merchant-site withdrawal (ledger kind 'payout') — click = GET /v1/payouts/{id} */
+.bo-tile.clickable-payout { cursor: pointer; }
+.bo-tile.clickable-payout:hover { border-color: var(--field); box-shadow: var(--shadow-pop); }
 .bo-tile-main { flex: 1; min-width: 0; }
 .bo-tile-ref { font-family: var(--font-mono); font-size: 12px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bo-tile-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 3px; font-size: 12px; color: var(--muted); }

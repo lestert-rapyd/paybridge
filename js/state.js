@@ -26,13 +26,19 @@ export const state = {
   // verticals.js activeProduct() charges.
   cart: null,
 
+  // A wallet deposit on its way through the checkout: { vertical, amount,
+  // currency } | null — see js/site/wallet.js. Mutated DIRECTLY; while set
+  // (for the active vertical) it is what activeProduct() charges, ahead of
+  // the bag. Dropped when the shopper leaves the checkout for any other page.
+  walletDeposit: null,
+
   // Which page of the merchant site is on screen — see js/steps.js. The customer
   // beat is separated in TIME, not just in space: one page per call, so the
   // engine room only ever shows the call the current page is about. Mutated
   // DIRECTLY (never a RESET_KEY): a step change must not reset the flow, and the
   // pages repaint themselves explicitly.
   // 'account-q' (sign in / register / guest) | 'account' (register) | 'shop' |
-  // 'product' (detail) | 'bag' | 'checkout' | 'orders' | 'methods'
+  // 'product' (detail) | 'bag' | 'checkout' | 'orders' | 'methods' | 'wallet'
   step: 'account-q',
 
   // How the customer identifies at checkout: 'guest' | 'account' | 'returning'

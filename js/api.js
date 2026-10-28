@@ -190,6 +190,37 @@ export function getFxRate({ buyCurrency, sellCurrency, amount, fixedSide, env, p
   });
 }
 
+/* ── Payouts (the merchant site's Withdraw) ──────────────────
+   Live payouts are refused by the backend unless LIVE_PAYOUTS_ENABLED=true
+   (403 LIVE_PAYOUTS_DISABLED — not a live-gate error, so the token stays). */
+
+/** POST /api/create-payout → Rapyd POST /v1/payouts */
+export function createPayout(body, opts = {}) {
+  return post('/api/create-payout', body, opts);
+}
+
+/** GET /api/retrieve-payout?id=payout_xxx → Rapyd GET /v1/payouts/{id}.
+    `profile` = the sandbox MID that created the payout. */
+export function retrievePayout(id, env, profile) {
+  return request('/api/retrieve-payout', { query: { id, env, profile }, env });
+}
+
+/** GET /api/payout-method-types → Rapyd GET /v1/payout_method_types
+    (category / beneficiary_country / payout_currency filters). */
+export function listPayoutMethodTypes({ category, beneficiaryCountry, payoutCurrency, env, profile }) {
+  return request('/api/payout-method-types', {
+    query: { category, beneficiary_country: beneficiaryCountry, payout_currency: payoutCurrency, env, profile },
+    env,
+  });
+}
+
+/** GET /api/payout-required-fields → Rapyd GET
+    /v1/payout_methods/{type}/required_fields. `query` = site/wallet.js
+    requiredFieldsQuery(). */
+export function getPayoutRequiredFields(query, { env, profile } = {}) {
+  return request('/api/payout-required-fields', { query: { ...query, env, profile }, env });
+}
+
 /* ── Webhook reads (GET /api/webhooks) ───────────────────────
    Not Rapyd-proxy calls, so no live gate. These return the receiver's
    own shape rather than { ok, httpStatus, data }; `configured` is null
