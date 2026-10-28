@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>PayBridge · API Sandbox</title>
+  <title>Rapyd Demo</title>
   <!-- Backend origin, read once by js/api.js at import time. Point a staging
        deploy at another backend by editing this one line (a query param is
        deliberately NOT honoured — a crafted link could redirect the live token). -->
@@ -12,57 +12,36 @@
        itself isn't served over https (e.g. http://localhost): the hosted
        checkout's complete/cancel redirects then point at <this>/complete/. -->
   <meta name="paybridge-public-url" content="" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Epilogue:wght@400;500;600;700;800&family=Hanken+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <!-- Rapyd design language: Inter (assets/fonts, @font-face in tokens.css),
+       the Rapyd icon font, cool greys + #7437F5. No web-font CDN. -->
   <link rel="stylesheet" href="css/tokens.css" />
   <link rel="stylesheet" href="css/main.css" />
   <link rel="stylesheet" href="css/cof.css" />
+  <link rel="stylesheet" href="assets/icons/rapyd-icons.css" />
+  <link rel="stylesheet" href="css/site.css" />
 </head>
 <body>
   <div class="app">
 
-    <!-- ── Header ── -->
+    <!-- ── Header — the wordmark and the one way into the demo controls.
+         Every SE control lives in the drawer (#demo-drawer, app.js). ── -->
     <header class="topbar">
       <div class="brand">
-        <span class="brand-mark">◆</span>
-        <span class="brand-word">PayBridge</span>
-        <span class="brand-sub">API Sandbox · Live Payment Demo</span>
+        <span class="brand-word">rapyd</span>
+        <span class="brand-sub">Demo</span>
       </div>
-
-      <div class="vertical-pills" id="vertical-pills"><!-- rendered by app.js --></div>
-
-      <div class="topbar-right">
-        <!-- Sandbox/Live radio with the sandbox credential picker folded in:
-             the Sandbox button carries the active SC tag + caret and opens
-             #cred-panel (rendered by app.js). Live has a single key pair. -->
-        <div class="env-picker" id="env-picker">
-          <div class="env-switch" id="env-switch">
-            <button data-env="sandbox" class="active">Sandbox<span class="env-cred" id="env-cred-tag"></span><span class="env-caret" aria-hidden="true">▾</span></button>
-            <button data-env="live" title="Restricted — needs a live access token; charges a real card (0.01 only)">Live<svg class="env-lock" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2.5"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg></button>
-          </div>
-          <div class="cred-panel" id="cred-panel" hidden><!-- rendered by app.js --></div>
-        </div>
-      </div>
+      <span class="live-flag" id="live-flag" role="status" hidden></span>
+      <button type="button" class="drawer-btn" id="drawer-btn" aria-expanded="false" aria-controls="demo-drawer" title="Demo controls ( ` )">
+        <i class="icon-sandbox" aria-hidden="true"></i>
+        <span class="drawer-ctx" id="drawer-ctx"></span>
+        <kbd>`</kbd>
+      </button>
     </header>
-
-    <!-- ── Model sub-bar ── -->
-    <div class="subbar">
-      <div class="model-switch" id="model-switch">
-        <button class="model-btn active" data-model="own-fields">
-          <span class="mb-tag">PCI-DSS</span> Own Card Fields
-        </button>
-        <button class="model-btn" data-model="toolkit">
-          <span class="mb-tag">Hosted</span> Checkout Toolkit
-        </button>
-      </div>
-      <div class="model-desc" id="model-desc"></div>
-    </div>
 
     <!-- ── Split ── -->
     <main class="split">
 
-      <!-- LEFT: client site / back office + demo controls -->
+      <!-- LEFT: the client site / its back office -->
       <section class="pane pane-left">
         <div class="panel-eyebrow">
           <span class="eyebrow-dot dot-fe"></span>
@@ -71,13 +50,13 @@
         </div>
         <div class="left-tabs" id="left-tabs">
           <button class="left-tab active" data-view="client">Client Site</button>
-          <button class="left-tab" data-view="backoffice">Client Back Office</button>
+          <button class="left-tab" data-view="backoffice">Back Office</button>
         </div>
 
         <div class="browser">
           <div class="browser-chrome">
-            <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
-            <div class="urlbar"><span class="lock">🔒</span><span id="client-domain">shop.paybridge.com</span></div>
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            <div class="urlbar"><i class="icon-lock" aria-hidden="true"></i><span id="client-domain">rapyd.shop</span></div>
           </div>
           <div class="browser-body">
             <div class="checkout" id="checkout"><!-- rendered by app.js --></div>
@@ -115,14 +94,21 @@
     </main>
   </div>
 
-  <!-- Portal: escapes .browser's overflow:hidden, same reasoning as #offstage
-       but for a floating popover rather than an out-of-window annotation. -->
-  <div class="fx-popover" id="fx-popover" hidden></div>
-  <!-- Portal: stored-credential strategy — same escape-the-overflow reasoning
-       as #fx-popover; opened from the "Save card" row (own-fields.js). -->
-  <div class="sc-popover" id="sc-popover" hidden></div>
-  <!-- Portal: self-designed currency picker, shared by the tile's currency
-       button and the FX popover's requested_currency button — a native
+  <!-- Demo-controls drawer (app.js renderDrawer) — every SE control in one
+       place: customer (skin), integration path, account (env + credentials),
+       payment behaviour (FX + stored credentials). Toggle: the header button
+       or the ` key; Esc closes. -->
+  <aside class="demo-drawer" id="demo-drawer" aria-label="Demo controls" hidden>
+    <div class="dc-head">
+      <i class="icon-sandbox" aria-hidden="true"></i>
+      <span class="dc-title">Demo controls</span>
+      <kbd>`</kbd>
+      <button type="button" class="dc-x" id="dc-close" aria-label="Close demo controls"><i class="icon-close_2" aria-hidden="true"></i></button>
+    </div>
+    <div class="dc-body" id="dc-body"></div>
+  </aside>
+  <!-- Portal: self-designed currency picker, shared by the price tile's
+       currency button and the drawer's requested_currency button — a native
        <select>'s dropdown is OS-rendered and can't be themed. -->
   <div class="cur-dropdown" id="cur-dropdown" hidden></div>
 
@@ -133,7 +119,7 @@
     <form class="live-dialog" id="live-dialog-form" role="dialog" aria-modal="true" aria-labelledby="live-dialog-title" autocomplete="off" novalidate>
       <div class="live-dialog-head">
         <span id="live-dialog-title">Unlock live mode</span>
-        <button type="button" class="fx-popover-x" id="live-dialog-x" aria-label="Cancel — stay in sandbox">×</button>
+        <button type="button" class="dc-x" id="live-dialog-x" aria-label="Cancel — stay in sandbox"><i class="icon-close_2" aria-hidden="true"></i></button>
       </div>
       <div class="pb-notice warn">
         <b>Live is restricted.</b> It charges a real card through the production Rapyd account.
@@ -159,7 +145,7 @@
       <b id="pb-banner-title"></b>
       <span id="pb-banner-msg"></span>
     </div>
-    <button type="button" class="pb-banner-x" id="pb-banner-x" aria-label="Dismiss">×</button>
+    <button type="button" class="pb-banner-x" id="pb-banner-x" aria-label="Dismiss"><i class="icon-close_2" aria-hidden="true"></i></button>
   </div>
 
   <script type="module" src="js/app.js"></script>

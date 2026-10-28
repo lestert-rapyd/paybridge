@@ -13,6 +13,11 @@ import { VERTICALS, activeProduct } from './verticals.js';
 import { state, setState } from './state.js';
 import { esc } from './ui.js';
 import { brandLabel } from './sync.js';
+import { getEntry } from './ledger.js';
+import { markResultShown, landOn } from './steps.js';
+import { clearCart } from './site/cart.js';
+import { siteHeaderHTML } from './site/chrome.js';
+import { isSignedIn } from './site/session.js';
 
 const host = () => document.getElementById('checkout');
 const set3DSWidth = (on) => document.querySelector('.browser')?.classList.toggle('wide-3ds', on);
@@ -176,12 +181,31 @@ function badgeHTML(kind) {
     </div>`;
 }
 
+/* What the order was, from the ledger entry the flow recorded for this payment
+   (verticals.js orderItems) — "Oak Lounge Chair × 2, Walnut Monitor Riser". */
+function itemsLabel() {
+  const items = getEntry(state.reference)?.items;
+  if (!Array.isArray(items) || !items.length) return null;
+  return items.map((i) => (i.qty > 1 ? `${i.name} × ${i.qty}` : i.name)).join(', ');
+}
+
+/* The terminal screens are pages of the merchant site: its header stays on top
+   (its links reset the flow — steps.js navigate), the receipt sits below. */
+function sitePage(inner) {
+  markResultShown();
+  return `${siteHeaderHTML('checkout')}<main class="site-main site-narrow">${inner}</main>`;
+}
+
 export function renderSuccess(event = {}) {
   set3DSWidth(false);
   resetWide();
   const v = VERTICALS[state.vertical];
   const pay = event.raw?.data || {};
   const lp = state.lastPayment || {};
+  const items = itemsLabel();
+  // Paid — the bag has been bought. Emptied before the header renders, so its
+  // badge reads 0. (A decline leaves the bag alone: the shopper retries it.)
+  clearCart();
   // Product/AFT-aware copy: the flow picks the note at pay time (e.g. the
   // crypto "wallet funded, buy later" variant when is_direct_purchase=false).
   const note = lp.note || v.successNote;
@@ -190,7 +214,7 @@ export function renderSuccess(event = {}) {
   // credential mechanics (card_*** / network_reference_id / initiation_type /
   // AFT) live in the engine room, and the SE narrates them.
   // (factsHTML drops null/empty values, so absent rows simply don't render.)
-  host().innerHTML = `
+  host().innerHTML = sitePage(`
     <div class="screen success">
       ${badgeHTML('ok')}
       <div class="screen-title rise-1">${successVerb(v)} confirmed</div>
@@ -198,12 +222,16 @@ export function renderSuccess(event = {}) {
       ${note ? `<div class="screen-next rise-3">${esc(note)}</div>` : ''}
       ${factsHTML([
         ['Order', orderNumber()],
+        ['Items', items],
         ['Paid', paidLabel()],
         ['Method', cardLabel(pay, lp)],
         ['Saved card', lp.credential_label],
       ])}
-      <button class="co-cta rise-5" id="screen-reset">Continue shopping</button>
-    </div>`;
+      <div class="screen-actions rise-5">
+        ${isSignedIn() ? `<button class="cs-secondary" data-land="orders">View orders</button>` : ''}
+        <button class="co-cta site-cta" data-land="shop">Continue shopping</button>
+      </div>
+    </div>`);
   setOffstage(bankViewHTML(event)); // bank-app view lives OUTSIDE the client window
   wireReset();
 }
@@ -219,30 +247,34 @@ export function renderError(event = {}) {
   // reached this far) is engine-room material — printing it here put strings like
   // "Failed to fetch" in front of the shopper.
   const note = 'Your card was declined — no charge was made. Try a different card, or contact your bank if it keeps happening.';
-  host().innerHTML = `
+  host().innerHTML = sitePage(`
     <div class="screen error">
       ${badgeHTML('err')}
       <div class="screen-title rise-1">Payment declined</div>
       <div class="screen-sub rise-2">${esc(v.merchant)} · <strong>${esc(paidLabel())}</strong></div>
-      <div class="screen-next err rise-3">${esc(note)}</div>
+      <div class="screen-next err rise-3">${esc(note)} Your items are still in your bag.</div>
       ${factsHTML([
         ['Order', orderNumber()],
         ['Method', cardLabel(pay, lp)],
       ])}
-      <button class="co-cta rise-5" id="screen-reset">Try a different card</button>
-      <button class="cs-secondary rise-6" id="screen-back">Back to store</button>
-    </div>`;
+      <div class="screen-actions rise-5">
+        <button class="cs-secondary" data-land="bag">Back to bag</button>
+        <button class="co-cta site-cta" data-land="checkout">Try a different card</button>
+      </div>
+    </div>`);
   wireReset();
-  document.getElementById('screen-back')?.addEventListener('click', () => setState({}));
 }
 
 function successVerb(v) {
   return v.cta === 'Deposit' ? 'Deposit' : v.cta === 'Buy' ? 'Purchase' : 'Payment';
 }
 
-/* Both terminal screens' primary resets the flow. The label has to be the
-   SHOP's word for it, not the demo's: "Run another payment" was a control the
-   SE reads out, printed where a store would say "Continue shopping". */
+/* Both terminal screens' buttons reset the flow (fresh reference, fresh watch)
+   and land on a page of the site — the shop, the orders, the bag or straight
+   back into the checkout. The labels are the SHOP's words, not the demo's:
+   "Run another payment" was a control the SE reads out, printed where a store
+   would say "Continue shopping". */
 function wireReset() {
-  document.getElementById('screen-reset')?.addEventListener('click', () => setState({})); // re-render checkout fresh
+  host().querySelectorAll('[data-land]').forEach((btn) =>
+    btn.addEventListener('click', () => { landOn(btn.dataset.land); setState({}); }));
 }

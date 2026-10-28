@@ -137,6 +137,21 @@ export function refundedTotals(entry) {
   return { refunded: Math.round(refunded * 100) / 100, total, currency, remaining, count: completed.length };
 }
 
+/** The shopper's Orders page, grouped: `mine` — payments made under the
+    signed-in customer `customerId`; `guest` — this tab's guest checkouts (no
+    customer at all). Payments under some OTHER customer (one forgotten or
+    swapped out this session) belong to neither. Same merchant (vertical) and
+    environment only; newest first. Pure — tests/unit.js pins it. */
+export function ordersFor(list, { customerId = null, vertical, env } = {}) {
+  const here = (list || [])
+    .filter((e) => e && e.kind === 'payment' && e.vertical === vertical && e.env === env)
+    .sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+  return {
+    mine: customerId ? here.filter((e) => e.customer_id === customerId) : [],
+    guest: here.filter((e) => !e.customer_id),
+  };
+}
+
 /** Called right when a flow builds its outbound body — captures exactly
     what the customer was charged, independent of what the webhook later
     reports (this is what makes the FX-safe refund default correct).
@@ -148,8 +163,14 @@ export function refundedTotals(entry) {
       profile         sandbox MID that created it (retrieval/refunds must reuse it)
       env             'sandbox' | 'live' it was created in — defaults to state.env
                       NOW, so a later env switch can't send its retrieve/refund
-                      to the other environment */
-export function recordPayment(reference, { model, vertical, amount, currency, requested_currency, fixed_side, last4, brand, origin, initiation_type, credential, aft, profile, env }) {
+                      to the other environment
+      items           what was bought — [{ id, name, qty, amount, currency,
+                      billing }] (verticals.js orderItems); the shopper's
+                      Orders page (js/site/account.js) reads it. Text only.
+      customer_id     the cus_*** the payment was made under (the body's
+                      `customer`), or null for a guest checkout — what the
+                      Orders page groups by (ordersFor below). */
+export function recordPayment(reference, { model, vertical, amount, currency, requested_currency, fixed_side, last4, brand, origin, initiation_type, credential, aft, profile, env, items, customer_id }) {
   entries.set(reference, {
     reference,
     kind: 'payment',
@@ -166,6 +187,8 @@ export function recordPayment(reference, { model, vertical, amount, currency, re
     initiation_type: initiation_type || 'customer_present',
     credential: credential || null,
     aft: !!aft,
+    items: Array.isArray(items) ? items.map((i) => ({ ...i })) : null,
+    customer_id: typeof customer_id === 'string' && /^cus_/.test(customer_id) ? customer_id : null,
     profile: profile || state.profile,
     env: env || state.env,
     status: 'pending',   // 'pending' | 'completed' | 'failed'

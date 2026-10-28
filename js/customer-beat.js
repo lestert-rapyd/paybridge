@@ -28,6 +28,7 @@
    ───────────────────────────────────────────────────────────── */
 
 import { state } from './state.js';
+import { VERTICALS } from './verticals.js';
 import * as customers from './customers.js';
 import { identityMode, usesCustomer } from './identity.js';
 import { createCustomer, newIdempotencyKey } from './api.js';
@@ -64,6 +65,10 @@ function record() {
     openState.set('beat-cus', true); // back to a draft — same reasoning as above
   } else if (r.state === 'draft' && customers.getCustomerId()) {
     r.state = 'created';
+  } else if (r.state === 'created' && r.data?.data?.id && r.data.data.id !== customers.getCustomerId()) {
+    // A different customer now holds the bucket (signed in with a customer ID,
+    // or restored from a remembered session) — this create call isn't theirs.
+    Object.assign(r, { body: null, httpStatus: null, data: null, at: null });
   }
   return r;
 }
@@ -148,6 +153,9 @@ let painted = null;
 export function customerRequestCardHTML() {
   const st = beatState();
   if (st === 'idle') { painted = null; return ''; }
+  // A customer this tab didn't create (signed in with a customer ID, or
+  // remembered from an earlier session) has no create call to show.
+  if (st === 'created' && !record().body) { painted = null; return ''; }
   const body = record().body || customers.enrichedCustomerBody();
   const salt = newSaltTimestamp();
   painted = { salt, body };
@@ -309,10 +317,10 @@ const ACCOUNT_FIELDS = [
   { id: 'f-cus-country', path: 'address.country', label: 'Country',          autocomplete: 'country-name' },
   { id: 'f-cus-zip',     path: 'address.zip',     label: 'Postcode',         autocomplete: 'postal-code' },
 ];
-/** Verticals whose real-world equivalent runs KYC at signup. */
-const KYC_VERTICALS = new Set(['crypto']);
+/** KYC fields show when the active industry pack's real-world merchants run
+    KYC at signup (packs.js kycAtSignup — crypto today). */
 const visibleAccountFields = () =>
-  ACCOUNT_FIELDS.filter((f) => !f.kyc || KYC_VERTICALS.has(state.vertical));
+  ACCOUNT_FIELDS.filter((f) => !f.kyc || VERTICALS[state.vertical]?.kycAtSignup);
 
 /** The field a given id writes — used by the input handler. */
 export const accountFieldPath = (id) => ACCOUNT_FIELDS.find((f) => f.id === id)?.path || null;
@@ -345,7 +353,7 @@ export function accountCtaState() {
 }
 
 /** The signed-in account, as a row. Three homes, one template: the account
-    frame after the beat fires, frame 1's signed-in view, and the checkout
+    page after the beat fires, the sign-in page's signed-in view, and the checkout
     frame's profile strip.
 
     A storefront shows you WHO you're signed in as — a name, an email, and what
@@ -373,7 +381,9 @@ export function customerRowHTML() {
    (the lazy fallback), so the strip never implies a cus_*** that doesn't exist. */
 function stripHTML() {
   const cus = customers.getCustomerId();
-  if (cus) return customerRowHTML();
+  // Guest first: a shopper who signed out (or chose "check out as guest
+  // instead") pays as a guest even though this tab still holds a cus_***.
+  if (identityMode() !== 'guest' && cus) return customerRowHTML();
   if (identityMode() === 'guest') {
     return `
       <div class="acct-block strip" id="acct-block">
@@ -424,6 +434,12 @@ export function accountPanelHTML() {
 export function refreshAccountPanel() {
   syncAccountCta();
   const block = $('#acct-block');
+  // The sign-in page's signed-in view shows the account row itself (steps.js);
+  // a notify there (cards re-synced, a harvest) refreshes it — never removes it.
+  if (state.step === 'account-q') {
+    if (block && customers.getCustomerId()) block.outerHTML = customerRowHTML();
+    return;
+  }
   const html = accountPanelHTML();
   if (block) {
     if (html) block.outerHTML = html;

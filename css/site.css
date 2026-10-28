@@ -1,0 +1,257 @@
+/* ─────────────────────────────────────────────────────────────
+   The merchant site — the generic storefront every skin paints
+   (js/site/: header, sign-in, shop, product, bag, orders, payment
+   methods; the checkout and result screens reuse the .co-* / .screen
+   rules in main.css inside the same frame).
+
+   Styled ONLY by tokens: the accent set (text in accent uses --accent-ink,
+   which a skin whose accent fails 4.5:1 on white must darken), and the
+   site ramp (--ink … --soft-2, folded from the --site-* tokens a skin may
+   set — css/tokens.css "Merchant site"). No hex here duplicates a token; the hatched product placeholder
+   and the status badges derive from the ramps and semantic colours.
+   Rapyd surfaces (toolkit iframe, hosted page, 3DS challenge) are never
+   styled from here — they render inside the frame as Rapyd ships them.
+   ───────────────────────────────────────────────────────────── */
+
+
+/* ── Frame ─────────────────────────────────────────────────
+   One width for the whole site (the toolkit stage's), header edge to edge.
+   The 3DS width/padding rules in main.css keep winning where they apply. */
+.browser.site:not(.wide-3ds) { max-width: 980px; }
+.browser.site:not(.wide-3ds) .browser-body { padding: 0; }
+.browser.site:not(.wide-3ds) .browser-body > .screen { padding: 48px 30px 40px; }
+
+/* ── Header ──────────────────────────────────────────────── */
+.site-head {
+  display: flex; align-items: center; gap: 30px;
+  height: 62px; padding: 0 30px; border-bottom: 1px solid var(--line);
+}
+.site-head button { border: 0; background: none; padding: 0; font: inherit; color: inherit; }
+.site-head .sh-brand { font-family: var(--font-site-display, var(--font-site, var(--font-ui))); font-size: 20px; font-weight: 700; letter-spacing: -.02em; color: var(--ink); white-space: nowrap; }
+.sh-word-acc { color: var(--accent-ink); }
+.sh-navs { display: flex; gap: 24px; align-self: stretch; }
+.site-head .sh-nav {
+  display: flex; align-items: center; font-size: 14px; font-weight: 500; color: var(--muted);
+  border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap;
+}
+.site-head .sh-nav:hover { color: var(--ink); }
+.site-head .sh-nav.active { color: var(--ink); border-bottom-color: var(--accent); }
+.sh-right { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+.sh-user { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); white-space: nowrap; }
+.site-head .sh-link { font-size: 14px; font-weight: 500; color: var(--accent-ink); white-space: nowrap; }
+.site-head .sh-link:hover { text-decoration: underline; }
+.site-head .sh-bag {
+  position: relative; width: 40px; height: 40px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 17px; color: var(--ink);
+  border: 1px solid var(--field);
+}
+.site-head .sh-bag:hover { background: var(--soft); }
+.sh-bag-n {
+  position: absolute; top: -4px; right: -4px; min-width: 19px; height: 19px; padding: 0 5px;
+  border-radius: 999px; background: var(--accent); color: var(--on-accent);
+  font-size: 11px; font-weight: 700; line-height: 19px; text-align: center;
+}
+
+/* ── Page scaffolding ────────────────────────────────────── */
+.site-main { padding: 30px 30px 36px; }
+.site-narrow { max-width: 480px; margin: 0 auto; }
+.site-mid { max-width: 760px; margin: 0 auto; }
+.site-rail { padding: 18px 30px 0; }
+.browser.wide-tk .site-rail { padding: 16px 26px 4px; }
+.site-narrow .frame { margin-top: 0; }
+.site-back {
+  display: inline-flex; align-items: center; gap: 6px; margin-bottom: 18px;
+  border: 0; background: none; padding: 0; font: inherit; font-size: 14px; font-weight: 500; color: var(--muted);
+}
+.site-rail .site-back { margin-bottom: 0; }
+.site-back:hover { color: var(--ink); }
+.site-titles { margin-bottom: 22px; }
+.site-titlebar { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 26px; }
+.site-h1 { margin: 0; font-family: var(--font-site-display, var(--font-site, var(--font-ui))); font-size: 34px; font-weight: 600; line-height: 1.12; letter-spacing: -.02em; color: var(--ink); }
+.site-sub { margin: 8px 0 0; font-size: 17px; font-weight: 300; line-height: 1.35; color: var(--muted); }
+.co-h1 { font-size: 30px; }
+.site-main .co-tagline { margin-top: 8px; }
+
+/* The site's buttons are the checkout's (.co-cta / .cs-secondary); these only
+   adjust their placement. */
+.site-cta { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 0; }
+.site-cta.compact { width: auto; height: 46px; padding: 0 26px; margin-top: 6px; }
+.site-link-btn {
+  display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 0;
+  font: inherit; font-size: 13px; font-weight: 500; color: var(--muted); cursor: pointer;
+}
+.site-link-btn:hover { color: var(--err-deep); }
+.site-link-btn.accent { color: var(--accent-ink); }
+.site-link-btn.accent:hover { color: var(--accent-ink); text-decoration: underline; }
+
+.site-note {
+  display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: var(--r-md);
+  background: var(--accent-soft); font-size: 14px; line-height: 1.45; color: var(--text);
+}
+.site-note i { color: var(--accent-ink); margin-top: 1px; }
+.site-alert {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  margin-top: 14px; padding: 12px 14px; border-radius: var(--r-md);
+  background: var(--warn-soft); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  font-size: 13px; line-height: 1.45; color: var(--text);
+}
+.site-empty {
+  display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center;
+  padding: 44px 24px; border: 1px dashed var(--field-strong); border-radius: var(--r-lg);
+  font-size: 15px; line-height: 1.5; color: var(--text);
+}
+.site-empty img { height: 88px; }
+.site-empty > div { max-width: 380px; }
+
+/* Neutral product placeholder — hatched from the site's soft ramp. */
+.ph {
+  background: repeating-linear-gradient(135deg, var(--soft-2) 0 10px, var(--soft) 10px 20px);
+  display: grid; place-items: center;
+}
+.shop-thumb.ph::after, .pdp-thumb.ph::after {
+  content: 'product shot'; font-family: var(--font-mono); font-size: 11px; color: var(--faint);
+}
+
+/* ── Sign in ─────────────────────────────────────────────── */
+.site-form { display: flex; flex-direction: column; gap: 12px; }
+.site-form .acct-field { display: flex; flex-direction: column; gap: 6px; }
+.site-form .co-input input { font-family: inherit; }
+.site-form .co-cta { margin-top: 6px; }
+.site-or { display: flex; align-items: center; gap: 14px; margin: 22px 0 18px; font-size: 13px; color: var(--faint); }
+.site-or::before, .site-or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+
+/* Sign in with a customer ID — a quiet disclosure under the sign-in choices
+   (it reaches a customer that exists at Rapyd but not in this tab). */
+.site-cusid { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.site-cusid > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; color: var(--link); }
+.site-cusid > summary::-webkit-details-marker { display: none; }
+.site-cusid > summary::after { content: '▾'; font-size: 10px; transition: transform .15s ease; }
+.site-cusid[open] > summary::after { transform: rotate(180deg); }
+.site-cusid > summary:hover { color: var(--link-hover); }
+.site-cusid-row { display: flex; gap: 8px; margin-top: 12px; }
+.site-cusid-row .co-input { flex: 1; height: 44px; }
+.site-cusid .acct-err { margin-top: 10px; }
+/* the Rapyd soft button (purple text on a tinted fill) */
+.site-btn-soft {
+  flex: none; height: 44px; padding: 0 18px; border: 0; border-radius: var(--r-md);
+  background: var(--accent-soft); color: var(--accent-ink); font: inherit; font-size: 14px; font-weight: 500;
+}
+.site-btn-soft:hover:not(:disabled) { background: var(--accent-hover); }
+.site-btn-soft:disabled { opacity: .55; cursor: not-allowed; }
+
+/* ── Shop ────────────────────────────────────────────────── */
+.shop-tabs { display: flex; gap: 22px; border-bottom: 1px solid var(--line); }
+.shop-tab {
+  border: 0; background: none; padding: 0 0 10px; margin-bottom: -1px; cursor: pointer;
+  font: inherit; font-size: 15px; font-weight: 500; color: var(--faint);
+  border-bottom: 2px solid transparent; display: flex; align-items: center; gap: 6px;
+}
+.shop-tab.active { color: var(--ink); border-bottom-color: var(--accent); }
+.shop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 28px 20px; }
+.shop-card {
+  display: flex; flex-direction: column; gap: 3px; text-align: left; cursor: pointer;
+  border: 0; background: none; padding: 0; font: inherit; color: inherit;
+}
+.shop-shot { position: relative; aspect-ratio: 1 / 1; border-radius: var(--r-md); overflow: hidden; margin-bottom: 10px; }
+.shop-thumb {
+  width: 100%; height: 100%; display: grid; place-items: center; font-size: 54px; color: #fff;
+  transition: transform .2s ease;
+}
+.shop-card:hover .shop-thumb { transform: scale(1.03); }
+.shop-badge {
+  position: absolute; top: 10px; left: 10px; display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border-radius: 999px; background: var(--surface); color: var(--accent-ink);
+  font-size: 12px; font-weight: 500; line-height: 1;
+}
+.shop-badge.inline { position: static; margin-top: 7px; background: var(--accent-soft); align-self: flex-start; }
+.shop-name { font-size: 15px; font-weight: 500; line-height: 1.35; color: var(--ink); }
+.shop-cat { font-size: 13px; color: var(--muted); }
+.shop-price { font-size: 14px; font-weight: 500; color: var(--ink); margin-top: 3px; }
+
+/* ── Product page ────────────────────────────────────────── */
+.pdp { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 36px; align-items: start; }
+.pdp-thumb { aspect-ratio: 1 / 1; border-radius: var(--r-lg); display: grid; place-items: center; font-size: 110px; color: #fff; }
+.pdp-info { display: flex; flex-direction: column; gap: 18px; padding-top: 4px; }
+.pdp-cat { font-size: 14px; color: var(--muted); margin-bottom: -10px; }
+.pdp-name { font-size: 32px; }
+.pdp-price { font-size: 20px; font-weight: 500; color: var(--ink); margin-top: -8px; }
+.pdp-copy { padding-top: 18px; border-top: 1px solid var(--line); }
+.pdp-tagline { font-size: 16px; font-weight: 600; color: var(--ink); margin-bottom: 8px; }
+.pdp-copy p { margin: 0; font-size: 15px; line-height: 1.6; color: var(--text); }
+.pdp-specs { border-top: 1px solid var(--line); }
+.pdp-specs > div { display: flex; justify-content: space-between; gap: 16px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.pdp-specs span { color: var(--muted); }
+.pdp-specs b { font-weight: 500; color: var(--ink); text-align: right; }
+
+/* ── Bag ─────────────────────────────────────────────────── */
+.bag { display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start; }
+.bag-lines { flex: 2 1 340px; min-width: 0; border-top: 1px solid var(--line); }
+.bag-line { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 18px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+.bag-thumb { aspect-ratio: 1 / 1; border-radius: var(--r-md); display: grid; place-items: center; font-size: 34px; color: #fff; }
+.bag-main { display: flex; flex-direction: column; justify-content: space-between; gap: 14px; min-width: 0; }
+.bag-top { display: flex; justify-content: space-between; gap: 14px; }
+.bag-top > div:first-child { display: flex; flex-direction: column; min-width: 0; }
+.bag-name { font-size: 16px; font-weight: 500; color: var(--ink); }
+.bag-desc { font-size: 13px; color: var(--muted); margin-top: 3px; }
+.bag-amt { font-size: 15px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+.bag-ctl { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.bag-qty { display: inline-flex; align-items: center; height: 34px; border: 1px solid var(--field); border-radius: var(--r-sm); overflow: hidden; }
+.bag-qty button { width: 34px; height: 100%; border: 0; background: none; font: inherit; font-size: 16px; color: var(--text); cursor: pointer; }
+.bag-qty button:hover:not(:disabled) { background: var(--soft); }
+.bag-qty button:disabled { color: var(--faint); cursor: not-allowed; }
+.bag-qty span { min-width: 26px; text-align: center; font-size: 14px; font-weight: 600; color: var(--ink); }
+.bag-qty-fixed { font-size: 13px; color: var(--muted); }
+.bag-sum {
+  flex: 1 1 250px; min-width: 0; padding: 20px 20px 18px;
+  background: var(--soft); border: 1px solid var(--line); border-radius: var(--r-lg);
+}
+.bag-sum-h { font-size: 16px; font-weight: 600; color: var(--ink); margin-bottom: 14px; }
+.bag-sum .co-line.total .co-total-amt { font-size: 20px; }
+.bag-sum .co-cta { margin-top: 16px; height: 50px; }
+.bag-sum .cs-secondary { height: 44px; background: transparent; }
+
+/* ── Orders + payment methods ────────────────────────────── */
+.ord-group + .ord-group { margin-top: 28px; }
+.ord-group-h { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 13px; font-weight: 600; color: var(--text); }
+.ord-group-n { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--soft-2); color: var(--muted); font-size: 11.5px; font-weight: 600; line-height: 20px; text-align: center; }
+.ord-empty { padding: 16px; border: 1px dashed var(--field); border-radius: var(--r-md); font-size: 13.5px; color: var(--muted); }
+.ord-list { display: flex; flex-direction: column; gap: 10px; }
+.site-titles .pm-refresh { margin-top: 10px; }
+.site-link-btn:disabled { opacity: .55; cursor: default; text-decoration: none; }
+.ord-row, .pm-row {
+  display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 16px; align-items: center;
+  padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--r-md);
+}
+.ord-thumb { aspect-ratio: 1 / 1; border-radius: var(--r-sm); display: grid; place-items: center; font-size: 24px; color: #fff; }
+.ord-name, .pm-num { font-size: 15px; font-weight: 500; color: var(--ink); overflow-wrap: anywhere; }
+.ord-meta, .pm-exp { font-size: 12.5px; color: var(--muted); margin-top: 4px; font-variant-numeric: tabular-nums; }
+.ord-items { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+.ord-badge { padding: 6px 11px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+.ord-badge.ok   { background: var(--ok-soft); color: var(--ok-deep); }
+.ord-badge.info { background: var(--info-soft); color: color-mix(in srgb, var(--info) 70%, #000); }
+.ord-badge.bad  { background: var(--err-soft); color: var(--err-deep); }
+.ord-badge.mute { background: var(--soft-2); color: var(--text); }
+.pm-mark {
+  height: 40px; border-radius: var(--r-xs); border: 1px solid var(--line); background: var(--soft);
+  display: grid; place-items: center; font-size: 12px; font-weight: 700; letter-spacing: .04em; color: var(--text);
+}
+
+/* ── Result screens as site pages ────────────────────────── */
+.site-main .screen { padding: 18px 0 8px; }
+.screen-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; width: 100%; margin-top: 24px; }
+.screen-actions .co-cta, .screen-actions .cs-secondary { margin-top: 0; height: 50px; }
+
+/* ── Narrow frames (the pane on a laptop) ────────────────── */
+@container (max-width: 620px) {
+  .site-head { gap: 16px; padding: 0 18px; }
+  .sh-navs { gap: 14px; }
+  .sh-user { display: none; }
+  .site-main { padding: 22px 18px 28px; }
+  .site-rail { padding: 16px 18px 0; }
+  .site-h1 { font-size: 28px; }
+  .shop-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 22px 14px; }
+  .pdp { gap: 22px; }
+  .pdp-thumb { aspect-ratio: 16 / 9; font-size: 72px; }
+  .sh-lg { display: none; }
+}
+@container (min-width: 621px) { .sh-sm { display: none; } }

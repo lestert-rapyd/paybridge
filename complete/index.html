@@ -3,46 +3,40 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Payment complete · PayBridge</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Epilogue:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <title>Payment complete · Rapyd Demo</title>
+  <link rel="stylesheet" href="../css/tokens.css" />
   <style>
     * { box-sizing: border-box; margin: 0; }
     body {
-      min-height: 100vh; display: grid; place-items: center;
-      font-family: 'Epilogue', system-ui, sans-serif;
-      background: #f2ede4; color: #17140f; padding: 24px;
+      min-height: 100vh; display: grid; place-items: center; padding: 24px;
+      font-family: var(--font-ui); background: var(--app-bg); color: var(--ink);
+      -webkit-font-smoothing: antialiased;
     }
     .card {
-      background: #fff; border: 1px solid #e4ddd1; border-radius: 18px;
-      box-shadow: 0 18px 50px rgba(23,20,15,.10);
-      padding: 46px 42px; max-width: 440px; width: 100%; text-align: center;
+      width: 100%; max-width: 440px; padding: 44px 40px; text-align: center;
+      background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl); box-shadow: var(--shadow-pop);
     }
+    .brand { display: flex; align-items: baseline; justify-content: center; gap: 8px; margin-bottom: 28px; }
+    .brand-word { font-size: 20px; font-weight: 700; letter-spacing: -.03em; }
+    .brand-word::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-left: 2px; border-radius: 50%; background: var(--accent); }
+    .brand-sub { font-size: 14px; font-weight: 500; color: var(--muted); padding-left: 8px; border-left: 1px solid var(--line); }
     .badge {
-      width: 66px; height: 66px; border-radius: 50%; display: grid; place-items: center;
-      font-size: 32px; color: #fff; margin: 0 auto 18px;
-      background: linear-gradient(135deg, #12b76a, #0e9f5b);
-      box-shadow: 0 8px 24px rgba(18,183,106,.35);
+      width: 64px; height: 64px; margin: 0 auto 18px; border-radius: 50%; display: grid; place-items: center;
+      font-size: 28px; color: #fff; background: var(--ok);
     }
-    h1 { font-family: 'Anton', sans-serif; font-weight: 400; font-size: 30px; letter-spacing: .02em; }
-    p { font-size: 14px; color: #6d675c; line-height: 1.55; margin-top: 12px; }
+    h1 { font-size: 28px; font-weight: 600; letter-spacing: -.02em; }
+    p { margin-top: 12px; font-size: 15px; line-height: 1.55; color: var(--muted); }
     a.btn {
-      display: inline-block; margin-top: 26px; padding: 14px 28px; border-radius: 10px;
-      background: linear-gradient(135deg, #5600ef, #a855f7); color: #fff;
-      font-family: 'Anton', sans-serif; font-size: 15px; letter-spacing: .04em; text-decoration: none;
+      display: inline-flex; align-items: center; height: 48px; margin-top: 26px; padding: 0 26px;
+      border-radius: var(--r-md); background: var(--accent); color: var(--on-accent);
+      font-size: 15px; font-weight: 500; text-decoration: none;
     }
-    .brand { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 26px; }
-    .brand-mark {
-      width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center;
-      background: linear-gradient(135deg, #5600ef, #a855f7); color: #fff; font-size: 11px;
-    }
-    .brand-word { font-family: 'Anton', sans-serif; font-size: 18px; letter-spacing: .04em; }
+    a.btn:hover { filter: brightness(1.08); }
   </style>
 </head>
 <body>
   <main class="card">
-    <div class="brand"><span class="brand-mark">◆</span><span class="brand-word">PayBridge</span></div>
+    <div class="brand"><span class="brand-word">rapyd</span><span class="brand-sub">Demo</span></div>
     <div class="badge">✓</div>
     <h1>Payment complete</h1>
     <p>Your payment went through. You can close this tab — the confirmation webhook is already on its way to the demo.</p>

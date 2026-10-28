@@ -48,7 +48,7 @@ export function productTotalsHTML(p = activeProduct()) {
 }
 
 /* The fx_rates quote, as a card. Recorded in verticals.js by app.js's debounced
-   fetcher; shown by both flows so the call the FX popover makes is inspectable
+   fetcher; shown by both flows so the call the FX controls make is inspectable
    like any other beat instead of living only on the storefront. */
 export function fxCardHTML() {
   const b = getFxBeat();

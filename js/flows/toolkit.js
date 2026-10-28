@@ -20,12 +20,12 @@
    webhooks.js). The toolkit's own failure/expired browser events
    end the payment too, and update the ledger like success does.
 
-   This is the flow to use in LIVE: the card never touches PayBridge
+   This is the flow to use in LIVE: the card never touches this demo
    (own-fields refuses to collect one in live).
    ───────────────────────────────────────────────────────────── */
 
 import { state } from '../state.js';
-import { VERTICALS, activeProduct, customerCharge, fxSnapshot, productCta } from '../verticals.js';
+import { VERTICALS, activeProduct, customerCharge, fxSnapshot, productCta, orderItems } from '../verticals.js';
 import { createCheckoutSession, createDirectPayment, newReference } from '../api.js';
 import { profileEwallet } from '../profiles.js';
 import { clientDetails } from '../client-details.js';
@@ -38,6 +38,7 @@ import * as ledger from '../ledger.js';
 import * as customers from '../customers.js';
 import { identityMode, usesCustomer, refreshIdentityChooser } from '../identity.js';
 import { stepRailHTML } from '../steps.js';
+import { thumbHTML } from '../site/chrome.js';
 import {
   accountPanelHTML, beatCardHTML, customerRequestCardHTML, customerResponseCardHTML,
   fillCustomerSignature, fireCreateCustomer, refreshAccountPanel,
@@ -56,7 +57,7 @@ let tdsFlow = 'iframe';       // iframe | redirect  (wait_on_payment_redirect)
 let payBtn = 'rapyd';         // rapyd | custom     (hide_submit_button)
 
 // FX config is shared with the direct flow: it lives on state.fx, edited via
-// the popover behind the price tile's FX corner badge (see app.js), not on a
+// the demo-controls drawer, opened from the price tile's FX badge (app.js), not on a
 // control in this page. requested_currency + fixed_side must be absent
 // entirely on a no-FX call (sending them errors it); `expiration` is computed
 // silently, never exposed as a control.
@@ -161,7 +162,7 @@ function displayBody() {
     description: p.name,
     statement_descriptor: v.descriptor,
     merchant_reference_id: state.reference || '(assigned on launch)',
-    // real pages — the vertical domains (shop.paybridge.com etc.) are display-only fiction
+    // real pages — the skin domains (rapyd.shop etc.) are display-only fiction
     complete_checkout_url: returnUrl('complete'),
     cancel_checkout_url: returnUrl('cancel'),
     custom_elements: { display_description: true, ...(cofOn ? { save_card_default: saveDefault } : {}) },
@@ -266,23 +267,18 @@ function expressHTML() {
 }
 
 function summaryHTML() {
-  const v = VERTICALS[state.vertical];
   const p = activeProduct();
-  const [c1, c2] = p.thumb;
-  const glyph = p.glyph || { ecommerce: '🪑', crypto: '₿', gaming: '🎲' }[state.vertical] || '◆';
+  // The merchant's name is in the site header above (steps.js stepRailHTML),
+  // so the summary opens on the order itself.
   return `
     <aside class="tk-summary">
-      <div class="tk-brand">
-        <span class="tk-brand-mark" style="background:linear-gradient(135deg,${c1},${c2})">${v.merchant[0]}</span>
-        <span>${v.merchant}</span>
-      </div>
       ${accountPanelHTML()}
       <div class="tk-sum-label">Your order</div>
       <div class="co-order">
-        <div class="co-thumb" style="background:linear-gradient(135deg,${c1},${c2})">${glyph}</div>
+        ${thumbHTML(p)}
         <div class="co-order-info">
-          <div class="co-order-name">${p.name}</div>
-          <div class="co-order-desc">${p.desc}</div>
+          <div class="co-order-name">${esc(p.name)}</div>
+          <div class="co-order-desc">${esc(p.desc)}</div>
         </div>
         <button type="button" class="fx-trigger${state.fx.enabled ? ' configured' : ''}" id="fx-trigger" title="Configure currency conversion">FX</button>
       </div>
@@ -351,7 +347,7 @@ function configPanelHTML() {
 
       <div class="tkc-sec">
         <div class="tkc-sec-label">Integration mode</div>
-        ${seg('mode', [['embedded', 'Full toolkit'], ['wallets', 'Wallet buttons'], ['hosted', 'Hosted page']], mode)}
+        ${seg('mode', TOOLKIT_MODES, mode)}
       </div>
 
       <div class="tkc-sec" id="tkc-paybtn">
@@ -414,13 +410,27 @@ function configPanelHTML() {
 
 export function renderPageHTML() {
   // The rail sits above the two-column stage, not inside the summary — it
-  // belongs to the page (frame 4 of four), not to the order.
+  // belongs to the page (the merchant site's header + back link), not to the order.
   return `
     ${stepRailHTML()}
     <div class="tk-checkout">
       ${summaryHTML()}
       <div class="tk-paycol" id="tk-area">${configPanelHTML()}</div>
     </div>`;
+}
+
+/** The integration mode (Full toolkit / Wallet buttons / Hosted page) — read
+    and set from the demo-controls drawer as well as the config panel here. */
+export const TOOLKIT_MODES = [['embedded', 'Full toolkit'], ['wallets', 'Wallet buttons'], ['hosted', 'Hosted page']];
+export function toolkitMode() { return mode; }
+export function setToolkitMode(m) {
+  if (!TOOLKIT_MODES.some(([v]) => v === m) || m === mode) return;
+  mode = m;
+  // Mirror into the config panel when it's on screen (pre-launch).
+  document.querySelectorAll('.tkc-seg[data-opt="mode"] button[data-val]')
+    .forEach((b) => b.classList.toggle('active', b.dataset.val === mode));
+  syncControlVisibility();
+  if ($('#tk-config')) renderRequest();
 }
 
 function syncControlVisibility() {
@@ -761,6 +771,8 @@ async function launch() {
       model: 'toolkit', vertical: state.vertical, amount: p.amount, currency: p.currency,
       requested_currency: fxOn ? state.fx.requestedCurrency : null, fixed_side: fxOn ? state.fx.fixedSide : null,
       origin: 'client', initiation_type: 'customer_present', profile: state.profile,
+      items: orderItems(p),
+      customer_id: effectiveCof() ? customers.getCustomerId() : null, // the session's `customer`
     });
     // Armed synchronously before the POST — captures this session's reference
     // and customer bucket (env:profile) against a mid-flight profile switch.
@@ -895,6 +907,8 @@ async function expressCharge(cred) {
     origin: 'client', initiation_type: 'customer_present', profile: state.profile,
     credential: { kind: 'token', label: `${cred.brand} ···${cred.last4}` },
     aft: !!p.aft,
+    items: orderItems(p),
+    customer_id: customers.getCustomerId(), // a token reuse always names its customer
   });
   cofSlot.clear(); // a token reuse saves nothing — no stale launch save may harvest from it
 
@@ -967,6 +981,7 @@ export function mount() {
       row.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
       syncControlVisibility();
       renderRequest();
+      if (row.dataset.opt === 'mode') document.dispatchEvent(new CustomEvent('demo:controls-changed'));
     });
   });
 

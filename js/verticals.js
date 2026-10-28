@@ -1,133 +1,44 @@
 /* ─────────────────────────────────────────────────────────────
-   Vertical definitions.
-   Brand stays "PayBridge" — client-side merchants are PayBridge
-   sub-brands. Only context, product framing, colours and copy change.
+   Verticals — the composed view the flows read: a skin (whose site,
+   js/skins.js) laid over an industry pack (what it sells, js/packs.js).
+   The built-in skins are Rapyd's own demo merchants (rapyd.shop,
+   rapyd.coin, rapyd.spin); a customer skin swaps the identity without
+   touching the pack.
 
-   Each vertical carries a small PRODUCT CATALOG: one-time products
-   and subscription products. The product's billing nature — not a
-   mechanical back-office switch — is what drives the stored-credential
-   intent (`recurrence_type`): one-time + save → unscheduled (card-on-
-   file, customer-present reuse); subscription → recurring (MIT charges
-   run from the back office). Crypto products additionally carry the
-   AFT indicators (aft / purpose_code / special_condition_indicator).
+   VERTICALS[id] keeps the shape every caller already reads — label,
+   dot, merchant, descriptor, domain from the skin; headline, cta,
+   successNote, kycAtSignup, products from the pack — keyed by skin id
+   (state.vertical holds the active skin id). See packs.js for how a
+   product's billing nature drives the stored-credential intent.
    ───────────────────────────────────────────────────────────── */
 
 import { state } from './state.js';
+import { SKINS, SKIN_ORDER } from './skins.js';
+import { PACKS } from './packs.js';
+import { cartLines, resolveLines, cartProblem, cartAsProduct } from './site/cart.js';
 
-export const VERTICALS = {
-  ecommerce: {
-    id: 'ecommerce',
-    label: 'Retail',
-    dot: '#5600ef',
-    merchant: 'PayBridge Shop',
-    descriptor: 'PayBridge - Shop',
-    domain: 'shop.paybridge.com',
-    headline: 'Secure checkout',
-    cta: 'Pay',
-    successNote: 'Order confirmed — we’re packing it now. Dispatch and tracking details will land in your inbox shortly.',
-    products: [
-      {
-        id: 'chair', pill: 'Lounge Chair', billing: 'one_time', glyph: '🪑',
-        thumb: ['#5600ef', '#a855f7'],
-        name: 'Oak Lounge Chair',
-        desc: 'Walnut finish · Qty 1',
-        amount: '149.00', currency: 'GBP', symbol: '£', country: 'GB',
-        delivery: 'Free',
-        successNote: 'Order confirmed — we’re packing it now. Dispatch and tracking details will land in your inbox shortly.',
-      },
-      {
-        id: 'coffee-sub', pill: 'Coffee Club', billing: 'subscription', interval: 'monthly', cta: 'Subscribe', glyph: '☕',
-        thumb: ['#7a3f12', '#c9803a'],
-        name: 'Coffee Bean Club',
-        desc: '250g single origin · monthly',
-        amount: '18.00', currency: 'GBP', symbol: '£', country: 'GB',
-        delivery: 'Free',
-        successNote: 'Subscription active — your first bag ships today. Future bags bill to this card automatically each month.',
-      },
-    ],
-  },
-
-  crypto: {
-    id: 'crypto',
-    label: 'Crypto',
-    dot: '#00ff89',
-    merchant: 'PayBridge Coin',
-    descriptor: 'PayBridge - Coin',
-    domain: 'coin.paybridge.io',
-    headline: 'Buy crypto instantly',
-    cta: 'Buy',
-    successNote: 'Top-up confirmed — ≈ 0.00075 BTC is on its way to your wallet address. Network confirmations usually take a few minutes.',
-    products: [
-      {
-        id: 'btc', pill: 'Buy BTC', billing: 'one_time', glyph: '₿',
-        aft: true, purpose_code: 'crypto_currency', special_condition_indicator: 'cryptocurrency',
-        thumb: ['#00b36b', '#00ff89'],
-        name: 'Bitcoin',
-        desc: 'You receive ≈ 0.00075 BTC',
-        amount: '50.00', currency: 'USD', symbol: '$', country: 'US',
-        delivery: null,
-        successNote: 'Purchase confirmed — ≈ 0.00075 BTC is on its way to your wallet address. Network confirmations usually take a few minutes.',
-        // is_direct_purchase: false → the AFT funds the fiat balance instead
-        fundedNote: 'Funds added — your fiat balance is topped up and held. Buy BTC whenever you’re ready, at your price.',
-      },
-      {
-        id: 'dca', pill: 'DCA Plan', billing: 'subscription', interval: 'monthly', cta: 'Start DCA', glyph: '🔁',
-        aft: true, purpose_code: 'crypto_currency', special_condition_indicator: 'cryptocurrency',
-        thumb: ['#0e7490', '#22d3ee'],
-        name: 'Bitcoin DCA Plan',
-        desc: 'Auto-buy BTC · monthly',
-        amount: '25.00', currency: 'USD', symbol: '$', country: 'US',
-        delivery: null,
-        successNote: 'DCA plan active — your first buy just executed. Future buys run automatically every month, no action needed.',
-      },
-      {
-        id: 'coinplus', pill: 'Coin+', billing: 'subscription', interval: 'monthly', cta: 'Subscribe', glyph: '⭐',
-        thumb: ['#4338ca', '#818cf8'],
-        name: 'Coin+ Platform Fee',
-        desc: 'Pro trading tier · monthly',
-        amount: '9.99', currency: 'USD', symbol: '$', country: 'US',
-        delivery: null,
-        successNote: 'Coin+ active — pro features unlocked. Your card bills automatically each month.',
-      },
-    ],
-  },
-
-  gaming: {
-    id: 'gaming',
-    label: 'iGaming',
-    dot: '#ff007a',
-    merchant: 'PayBridge Play',
-    descriptor: 'PayBridge - Play',
-    domain: 'play.paybridge.bet',
-    headline: 'Add funds to your wallet',
-    cta: 'Deposit',
-    successNote: 'Funds added — your new balance is available to play right away. Withdrawals return to this card.',
-    products: [
-      {
-        id: 'spins', pill: '50 Spins', billing: 'one_time', cta: 'Buy', glyph: '🎲',
-        thumb: ['#c4005f', '#ff007a'],
-        name: '50 Spins Pack',
-        desc: 'Credited instantly',
-        amount: '50.00', currency: 'EUR', symbol: '€', country: 'MT',
-        delivery: null,
-        successNote: 'Spins credited — good luck! Winnings withdraw back to this card.',
-      },
-      {
-        id: 'adfree', pill: 'Ad-free', billing: 'subscription', interval: 'monthly', cta: 'Subscribe', glyph: '✨',
-        thumb: ['#7f1d1d', '#ef4444'],
-        name: 'Ad-free Play',
-        desc: 'No interruptions · monthly',
-        amount: '12.00', currency: 'EUR', symbol: '€', country: 'MT',
-        delivery: null,
-        successNote: 'Ad-free active — enjoy uninterrupted play. Bills to this card automatically each month.',
-      },
-    ],
-  },
+const compose = (skin) => {
+  const pack = PACKS[skin.pack];
+  return {
+    ...pack,
+    id: skin.id,
+    pack: pack.id,
+    label: skin.label,
+    dot: skin.dot,
+    merchant: skin.merchant,
+    descriptor: skin.descriptor,
+    domain: skin.domain,
+  };
 };
 
-export const VERTICAL_ORDER = ['ecommerce', 'crypto', 'gaming'];
+export const VERTICALS = Object.fromEntries(Object.values(SKINS).map((s) => [s.id, compose(s)]));
 
-/* The active vertical's SELECTED product for the current environment.
+export const VERTICAL_ORDER = SKIN_ORDER;
+
+/* The active vertical's product for the current environment — what the flows
+   charge. A valid BAG (js/site/cart.js) wins: its lines fold into one composite
+   product whose amount is the bag total, so every flow, the price tile, FX and
+   the live clamp below keep reading this one path. With no (valid) bag,
    state.selectedProduct picks from the vertical's catalog (falling back to
    the first product — the classic one-time default — when unset or pointing
    at another vertical). An SE-edited amount/currency (the price tile) then
@@ -148,7 +59,9 @@ export function activeProduct(verticalId = state.vertical) {
 export function pricedProduct(verticalId = state.vertical) {
   const v = VERTICALS[verticalId];
   const sel = state.selectedProduct;
-  let p = (sel && sel.vertical === verticalId && v.products.find((x) => x.id === sel.productId)) || v.products[0];
+  let p = cartProduct(verticalId)
+    || (sel && sel.vertical === verticalId && v.products.find((x) => x.id === sel.productId))
+    || v.products[0];
   const override = state.productOverride;
   if (override && override.vertical === verticalId && override.productId === p.id) {
     p = { ...p, amount: override.amount, currency: override.currency };
@@ -156,51 +69,33 @@ export function pricedProduct(verticalId = state.vertical) {
   return p;
 }
 
+/** The bag's lines joined to this vertical's catalog: [{ product, qty }]. */
+export function bagLines(verticalId = state.vertical) {
+  return resolveLines(cartLines(verticalId), VERTICALS[verticalId].products);
+}
+
+/** The bag as one product, or null when it's empty or can't check out
+    (cart.js cartProblem — mixed currencies, a subscription not on its own). */
+export function cartProduct(verticalId = state.vertical) {
+  const lines = bagLines(verticalId);
+  return lines.length && !cartProblem(lines) ? cartAsProduct(lines) : null;
+}
+
+/** What a payment bought, for the ledger and the shopper's Orders page:
+    the bag's lines, or the single product as one line. Text only. */
+export function orderItems(p = activeProduct()) {
+  return p.lines || [{ id: p.id, name: p.name, qty: 1, amount: p.amount, currency: p.currency, billing: p.billing }];
+}
+
 /** The pay-button verb for the active product ("Pay" / "Subscribe" / "Start DCA"…). */
 export function productCta(verticalId = state.vertical) {
   return activeProduct(verticalId).cta || VERTICALS[verticalId].cta;
 }
 
-/** Customer-facing product chooser — the product FRAME (see js/steps.js), two
-    columns grouped by billing nature. Route-card grammar (`.bo-route`, design
-    system §04.4b): each option has a money consequence the SE has to narrate —
-    a subscription authorises later MITs, a one-time purchase doesn't — so the
-    consequence is stated on the card rather than left implicit. */
-export function productColumnsHTML(verticalId = state.vertical) {
-  const v = VERTICALS[verticalId];
-  // Only a product the SE actually PICKED reads as selected. activeProduct()
-  // falls back to the catalog's first entry, which would show an answer under a
-  // question nobody has answered yet.
-  const sel = state.selectedProduct;
-  const chosen = sel && sel.vertical === verticalId ? sel.productId : null;
-  // Shopper words for the grouping. "One-time" and "Subscription" are the
-  // billing-model taxonomy the API uses; a shop says buy once or subscribe. The
-  // price stands on its own — a card doesn't label its price "Price".
-  const col = (label, note, products) => `
-    <div class="prod-col">
-      <div class="prod-col-head">${label}<span>${note}</span></div>
-      ${products.map((p) => `
-        <button type="button" class="bo-route ${p.id === chosen ? 'active' : ''}" data-product="${p.id}">
-          <div class="bo-route-title">${p.name}${p.billing === 'subscription' ? ' <span class="ps-mo">/mo</span>' : ''}</div>
-          <div class="bo-route-note">${p.desc}</div>
-          <div class="bo-route-legs">
-            <div class="bo-route-leg"><span></span><span><b>${p.amount} ${p.currency}</b></span></div>
-          </div>
-        </button>`).join('')}
-    </div>`;
-  const of = (billing) => v.products.filter((p) => p.billing === billing);
-  const one = of('one_time'), sub = of('subscription');
-  return `
-    <div class="prod-cols">
-      ${one.length ? col('Buy once', 'one payment', one) : ''}
-      ${sub.length ? col('Subscribe', 'cancel anytime', sub) : ''}
-    </div>`;
-}
-
 /* ── The fx_rates beat ───────────────────────────────────────
    GET /v1/fx_rates fires from app.js's quote fetcher (debounced, on every FX
    edit and price keystroke) and used to have NO engine-room surface at all —
-   its entire UI was the FX popover, on the storefront, which is backwards. The
+   its entire UI was the FX controls' preview, which is backwards. The
    exchange is recorded here beside the rest of the FX logic; each flow renders
    it as a card with its own beatCardHTML, exactly like the calls it makes
    itself. Data lives here, presentation stays in the flows — no import cycle. */
