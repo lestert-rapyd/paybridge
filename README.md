@@ -67,6 +67,45 @@ decline. The toolkit and hosted page don't apply — Rapyd hosts the card form
 there (the seam explainer says so). Field names:
 docs.rapyd.net/en/creating-a-card-payment-with-3ds-authentication---external-3ds.html.
 
+### Apple Pay / Google Pay — checkout (real) vs direct (simulated)
+
+Drawer → Integration path → **Wallet integration**:
+
+- **Checkout (real)** — Apple Pay / Google Pay inside Rapyd's toolkit iframe
+  ("Wallet buttons" mode) or hosted page, unchanged: real calls, real sheet.
+- **Direct — encrypted (simulated)** — the merchant's own Apple Pay / Google Pay
+  buttons on its own checkout (Own Card Fields: above "Pay by card"; Checkout
+  Toolkit: in the order summary). The token the wallet sheet returns is
+  forwarded unchanged in `payment_method.digital_wallet.details.token`; Rapyd
+  decrypts it.
+- **Direct — decrypted (simulated)** — the merchant decrypts the token with its
+  own keys and sends `details.decrypted_data` (DPAN + cryptogram + ECI) and
+  `details.brand_data`. The card is then on the merchant's servers, so it's
+  offered on **Own Card Fields only** (disabled with the reason on the toolkit).
+
+Both direct variants are sandbox-only and **nothing is sent** — not to Apple,
+Google, the backend or Rapyd (`js/direct-wallet.js` builds the payloads,
+`js/flows/direct-wallet.js` drives the page). The click opens a neutral,
+OS-like wallet sheet marked "Simulated" (grey third-party seam marker); the
+engine room shows the whole sequence — Apple / Google / merchant steps as
+one-line boxes *outside Rapyd* with a link to Apple's / Google's own docs
+(merchant ID and certificates, merchant validation, the sheet, gateway vs
+DIRECT tokenization, token decryption), then the simulated `POST /v1/payments`
+in full (field guide, 3DS note, body with the wallet's data highlighted) and a
+simulated response. Every value is obviously fake (`SIMULATED-…` strings,
+base64 that decodes to `SIMULATED-…`, the 4111 test DPAN, `payment_SIMULATED_…`).
+The success screen is the skin's, with a "Simulated — no payment was made" tag;
+no ledger entry (the ledger mirrors payments that exist at Rapyd), the bag is
+kept. The buttons use the wallet's name as text on a black button — no
+official Apple / Google artwork is embedded.
+
+Field names: docs.rapyd.net — creating-a-payment-with-apple-pay--encrypted-,
+creating-a-payment-with-apple-pay--decrypted-,
+creating-a-payment-with-google-pay---encrypted-,
+creating-a-payment-with-google-pay---decrypted-,
+creating-a-google-pay--payment-on-a-customized-checkout-page and
+retrieve-apple-pay-session (`.html`).
+
 ### Merchant wallet (deposit / withdraw)
 
 Gambling, forex and crypto merchants run a deposit / withdraw journey, so the
@@ -171,8 +210,9 @@ One drawer, toggled by the header button or the `` ` `` key (Esc closes):
 
 - **Customer** — which merchant skin is on screen.
 - **Integration path** — Own Card Fields / Checkout Toolkit, the toolkit's
-  mode (full toolkit, wallet buttons, hosted page), and **Show seam** with the
-  path's seam explainer.
+  mode (full toolkit, wallet buttons, hosted page), the **Wallet integration**
+  (Checkout (real) / Direct — encrypted / Direct — decrypted, the direct ones
+  simulated), and **Show seam** with the path's seam explainer.
 - **Account** — Sandbox / Live (live asks for its token first, see below), the
   sandbox credential picker over three MIDs (`SC1`–`SC3`, `js/profiles.js`) with
   their AFT / `network_reference_id` badges, the MID's 3DS provider (Rapyd vs
@@ -271,6 +311,8 @@ shown as declined. Everything rendered into HTML goes through `ui.js esc()`.
 | `js/classify.js` | Webhook classification and the trust rule. |
 | `js/screens.js` | Post-payment screens (processing, 3DS, success, error, hosted cancel). |
 | `js/seam.js` | The integration seam per path (`SEAM_PATHS`), seam markers + Show seam, the frame's address bar. |
+| `js/direct-wallet.js` | Direct Apple Pay / Google Pay (simulated): the wallet-integration choice and where it applies, the obviously-fake encrypted / decrypted payloads, the `POST /v1/payments` body builder, the simulated response and the Apple / Google / merchant step list. |
+| `js/flows/direct-wallet.js` | The merchant's own wallet buttons, the simulated wallet sheet, the engine-room sequence and the simulated success. |
 | `js/ext3ds.js` | External 3DS (simulated): when it applies, the dummy provider result, the `payment_method_options` block and the call/no-call decision. |
 | `js/api.js` | The only network layer: backend wrappers, idempotency keys, live token. Never throws. |
 | `js/signing.js` | Display-only request signing + key redaction for the engine room. |
@@ -298,7 +340,9 @@ It covers `ui.esc`, `json-view` escaping, `sync.brandLabel` / `currencyDecimals`
 `ledger.refundedTotals` / `ordersFor`, the bag (`site/cart.js`), the wallet
 (`site/wallet.js` — balance arithmetic, withdraw limits, the deposit product, the payout body), the built-in
 skins, the integration seam (`seam.js` paths, the hosted address and the 3DS line), external 3DS
-(`ext3ds.js` — the `payment_method_options` block, and a fail never calling Rapyd), and the remembered-customer persistence (`customers.js` serialize /
+(`ext3ds.js` — the `payment_method_options` block, and a fail never calling Rapyd), the direct
+wallet payloads (`direct-wallet.js` — encrypted / decrypted shapes, decrypted refused off the PCI
+path, the fake markers), and the remembered-customer persistence (`customers.js` serialize /
 restore — never a PAN/CVV, never live — against an in-memory storage stand-in),
 and makes no network calls. The flows themselves are not unit-tested.
 

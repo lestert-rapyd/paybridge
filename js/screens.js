@@ -265,19 +265,25 @@ function sitePage(inner) {
   return `${siteHeaderHTML('checkout')}<main class="site-main site-narrow">${inner}</main>`;
 }
 
-export function renderSuccess(event = {}) {
+/* `opts.simulated` — a direct Apple Pay / Google Pay SIMULATION
+   (flows/direct-wallet.js): nothing was paid, so the bag is kept, there is no
+   order number or bank statement, and the receipt carries a small neutral
+   "Simulated — no payment was made" tag for the SE. `opts.items` stands in
+   for the ledger's items (a simulation records no ledger entry). */
+export function renderSuccess(event = {}, opts = {}) {
   set3DSWidth(false);
   resetWide();
+  const sim = !!opts.simulated;
   const v = VERTICALS[state.vertical];
   const pay = event.raw?.data || {};
   const lp = state.lastPayment || {};
-  const items = itemsLabel();
+  const items = sim ? (opts.items || null) : itemsLabel();
   // A wallet deposit (js/site/wallet.js) bought nothing from the bag — the
   // bag stays as it was, and the receipt leads back to the wallet.
   const dep = depositFor();
   // Paid — the bag has been bought. Emptied before the header renders, so its
   // badge reads 0. (A decline leaves the bag alone: the shopper retries it.)
-  if (!dep) clearCart();
+  if (!dep && !sim) clearCart();
   // Product/AFT-aware copy: the flow picks the note at pay time (e.g. the
   // crypto "wallet funded, buy later" variant when is_direct_purchase=false).
   const note = lp.note || v.successNote;
@@ -289,11 +295,12 @@ export function renderSuccess(event = {}) {
   host().innerHTML = sitePage(`
     <div class="screen success">
       ${badgeHTML('ok')}
+      ${sim ? `<div class="screen-sim rise-1">Simulated — no payment was made</div>` : ''}
       <div class="screen-title rise-1">${esc(dep ? dep.cta : successVerb(v))} confirmed</div>
       <div class="screen-sub rise-2">${esc(v.merchant)} · <strong>${esc(paidLabel())}</strong></div>
       ${note ? `<div class="screen-next rise-3">${esc(note)}</div>` : ''}
       ${factsHTML([
-        ['Order', orderNumber()],
+        ['Order', sim ? null : orderNumber()],
         ['Items', items],
         ['Paid', paidLabel()],
         ['Method', cardLabel(pay, lp)],
@@ -307,7 +314,8 @@ export function renderSuccess(event = {}) {
              <button class="co-cta site-cta" data-land="shop">Continue shopping</button>`}
       </div>
     </div>`);
-  setOffstage(bankViewHTML(event)); // bank-app view lives OUTSIDE the client window
+  // bank-app view lives OUTSIDE the client window — a simulation charged nothing
+  setOffstage(sim ? null : bankViewHTML(event));
   wireReset();
 }
 

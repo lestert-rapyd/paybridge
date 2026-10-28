@@ -222,6 +222,28 @@ before any Rapyd call.
 - **Fail.** The merchant's skinned decline with "We couldn't verify this payment with your bank"; the
   payment card reads "not sent", the response panel says no request was made; no ledger entry.
 
+### 5.5 Direct Apple Pay / Google Pay (`js/direct-wallet.js`, `js/flows/direct-wallet.js`) — simulated
+Drawer → Integration path → **Wallet integration**: Checkout (real) / Direct — encrypted / Direct —
+decrypted. The direct variants are sandbox-only; decrypted is Own Card Fields only (disabled with its
+reason elsewhere).
+
+- **Merchant buttons** (`.dw-express`, `.dw-btn`). On the merchant's own checkout — above "Pay by card"
+  (Own Card Fields, with an "or pay by card" rule) or in the toolkit's order summary (stacked). Black,
+  8px radius, white wallet NAME as text in the platform face — no official Apple / Google artwork is
+  embedded; a real integration uses the wallets' own button assets.
+- **Wallet sheet** (`.dw-sheet`). Apple's / Google's surface, after the storefront prototype's
+  `walletSheet`: a 420px white sheet over a dimmed page, Cancel in `#4877EF`, Card / Pay / Total rows,
+  a `#171717` Confirm button (fingerprint for Apple, lock for Google), a SIMULATED tag and a footnote.
+  Fixed neutral values — never skin tokens, never `--rapyd`; grey `.seam-ext` marker "Apple Pay sheet
+  (simulated)".
+- **Engine room.** A "Simulated" intro line, then one box per Apple / Google / merchant step
+  (`.dw-step` — dashed, grey left edge, "Apple · outside Rapyd" pill, ONE line + the wallet's docs
+  link; the merchant's decrypt step carries a red "PCI scope" pill; steps not reached yet are faded),
+  then the `beat-card.sim` POST /v1/payments with the field guide, a 3DS line, the body (the wallet's
+  data marked `.inject-hit`) and the Rapyd doc link; the response panel holds the simulated answer.
+- **Result.** The skinned success screen with a small neutral `.screen-sim` tag "Simulated — no payment
+  was made"; no order number, no bank-statement view, the bag is kept, no ledger entry.
+
 ## 6. Voice: the shopper / SE split (a hard rule)
 
 Two audiences share the screen.

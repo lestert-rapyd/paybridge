@@ -16,6 +16,11 @@
                   redirect to Rapyd's page, then the merchant's
                   complete / cancel page
 
+   Apple Pay / Google Pay add a "Wallets" line per path (WALLET_SEAMS):
+   Checkout (real) keeps them inside Rapyd's surfaces; the simulated
+   direct variants put the merchant's own buttons + Apple's / Google's
+   sheet on the merchant's page (js/direct-wallet.js).
+
    PCI wording, checked against:
      · docs.rapyd.net/en/create-checkout-page.html — the hosted page
        "can be used by all clients without the need for PCI certification"
@@ -121,6 +126,39 @@ export function seamExtWrapHTML(inner, label = EXT_TDS_LABEL) {
   return `<div class="seam-ext" data-seam="${esc(label)}">${inner}</div>`;
 }
 
+/* ── Apple Pay / Google Pay on the seam ──────────────────────
+   The wallet integration (js/direct-wallet.js) moves the seam for wallet
+   payments only. Checkout (real): the wallet buttons are Rapyd's — inside
+   its toolkit iframe or hosted page. Direct (simulated): the buttons are
+   the merchant's own, the payment sheet is Apple's / Google's (a third
+   party in the frame — the grey .seam-ext marker, like the external 3DS
+   provider), and the merchant calls POST /v1/payments itself. Encrypted:
+   Rapyd decrypts server-side, no card data at the merchant. Decrypted: the
+   merchant holds the wallet's keys and the DPAN — PCI. Text only. */
+export const WALLET_SEAMS = {
+  checkout: {
+    label: 'Checkout (real)',
+    line: 'Apple Pay / Google Pay sit inside Rapyd’s toolkit iframe or hosted page — Rapyd runs the sheet, validation and decryption.',
+    ownFields: 'Apple Pay / Google Pay come with Rapyd’s toolkit or hosted page — this page has no wallet buttons of its own.',
+  },
+  encrypted: {
+    label: 'Direct — encrypted (simulated)',
+    line: 'The merchant’s own button opens Apple’s / Google’s sheet on the merchant’s page; the merchant forwards the encrypted token and Rapyd decrypts it server-side — no card data at the merchant.',
+  },
+  decrypted: {
+    label: 'Direct — decrypted (simulated)',
+    line: 'The merchant’s own button and Apple’s / Google’s sheet; the merchant holds the wallet’s decryption keys and sends Rapyd the DPAN + cryptogram — card data on its servers, PCI scope (Own Card Fields only).',
+  },
+};
+/** The seam's wallet line for a path, given the effective wallet integration. */
+export function seamWalletLine(key, wallet) {
+  const w = WALLET_SEAMS[wallet];
+  if (!w) return null;
+  return key === 'own-fields' && w.ownFields ? w.ownFields : w.line;
+}
+/** The tag on the simulated wallet sheet in the frame (grey marker). */
+export const walletSheetLabel = (walletLabel) => `${walletLabel} sheet (simulated)`;
+
 const TOOLKIT_KEYS = new Set(['embedded', 'wallets', 'hosted']);
 /** state.model + the toolkit's integration mode → a SEAM_PATHS key. */
 export function seamPathKey(model, toolkitMode) {
@@ -195,20 +233,25 @@ export function seamWrapHTML(inner, label, extraClass = '') {
 }
 
 /** The SE-facing explainer for a path — drawer and engine room share it.
-    `tds` is the MID's 3DS provider ('rapyd' | 'external' | null in live). */
-export function seamLinesHTML(key, { tds = null } = {}) {
+    `tds` is the MID's 3DS provider ('rapyd' | 'external' | null in live);
+    `wallet` the effective wallet integration (direct-wallet.js) or null. */
+export function seamLinesHTML(key, { tds = null, wallet = null } = {}) {
   const p = SEAM_PATHS[key] || SEAM_PATHS['own-fields'];
   const tdsLine = seamTdsLine(key, tds);
+  const walletLine = seamWalletLine(key, wallet);
+  const direct = wallet === 'encrypted' || wallet === 'decrypted';
   return `
     <ul class="seam-lines">
       <li><b>Card form</b><span>${esc(p.form)}</span></li>
       <li><b>PCI</b><span>${esc(p.pci)}</span></li>
       <li><b>Redirects</b><span>${esc(p.redirect)}</span></li>
       ${tdsLine ? `<li><b>3DS</b><span>${esc(tdsLine)}</span></li>` : ''}
+      ${walletLine ? `<li><b>Wallets</b><span>${esc(walletLine)}</span></li>` : ''}
     </ul>
     <div class="seam-owners">
-      <div><span class="seam-who merchant">Merchant</span>${esc(p.merchant.join(' · '))}</div>
-      <div><span class="seam-who rapyd">Rapyd</span>${esc(p.rapyd.join(' · '))}</div>
+      <div><span class="seam-who merchant">Merchant</span>${esc(p.merchant.join(' · '))}${direct ? esc(` · Apple Pay / Google Pay buttons${wallet === 'decrypted' ? ' · token decryption (PCI)' : ''}`) : ''}</div>
+      ${direct ? `<div><span class="seam-who third">Apple / Google</span>${esc('Payment sheet · merchant validation · the token')}</div>` : ''}
+      <div><span class="seam-who rapyd">Rapyd</span>${esc(p.rapyd.join(' · '))}${wallet === 'encrypted' ? esc(' · token decryption') : ''}</div>
     </div>`;
 }
 
