@@ -163,14 +163,17 @@ python3 -m http.server 8000
 ### Backend
 
 The page needs a running `rapyd-backend`. Its origin is read once, at import
-time, from a meta tag in `index.html`:
+time, from two meta tags in `index.html`:
 
 ```html
 <meta name="paybridge-backend" content="https://rapyd-backend.vercel.app" />
+<meta name="paybridge-backend-staging" content="https://rapyd-backend-git-staging-rapyd-se.vercel.app" />
 ```
 
-Edit that one line to point a staging deploy (or `http://localhost:3000` for
-the backend's local Express server) somewhere else. A query parameter is
+`staging.rapyd.shop` and Vercel preview deployments (`*.vercel.app`) use the
+staging one; every other host (rapyd.shop, localhost) uses the production one
+(`js/api.js` `pickBackend`). Edit the production line to `http://localhost:3000`
+to run against the backend's local Express server. A query parameter is
 deliberately **not** honoured — a crafted link could otherwise redirect the
 demo, and the live token, to someone else's server. If the backend sets
 `ALLOWED_ORIGINS`, the frontend's origin must be in that list.
