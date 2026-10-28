@@ -25,9 +25,11 @@
    case, not an edge case.
 
    The panel holds TWO sections, in beat order: the customer beat's
-   CUSTOMER_* events above the payment's. Both are painted from here so
-   there stays exactly ONE writer of #panel-webhooks (this module's poll
-   re-runs every 2.5s and would otherwise clobber a second writer).
+   CUSTOMER_* events above the payment's — plus, on a page that registers
+   one (the wallet's PAYOUT_* events, js/site/wallet-page.js via steps.js),
+   a third below them. All are painted from here so there stays exactly ONE
+   writer of #panel-webhooks (this module's poll re-runs every 2.5s and
+   would otherwise clobber a second writer).
 
    CUSTOMER_* events carry no merchant_reference_id, so the receiver
    files them under the cus_*** id — the customer poll reads
@@ -412,6 +414,11 @@ function paymentSectionHTML() {
 /** Repaint the whole panel from both sections. Exported so app.js can restore
     it after renderBackend() wipes the panel on a flow reset (the customer
     survives a reset, so its section has to come back). */
+/* A page's own extra section (markup, '' for none) — registered once by the
+   steps router, so this module never imports the page that owns it. */
+let extraSection = () => '';
+export function setExtraWebhookSection(fn) { extraSection = typeof fn === 'function' ? fn : () => ''; }
+
 export function repaintWebhooks() {
   // Back office has its own renderer for the same shared DOM targets — while
   // it's the active left tab, this watcher keeps polling/tracking terminal
@@ -420,7 +427,7 @@ export function repaintWebhooks() {
   if (state.leftView && state.leftView !== 'client') return;
   const el = $('#panel-webhooks');
   if (!el) return;
-  const html = customerSectionHTML() + paymentSectionHTML();
+  const html = customerSectionHTML() + paymentSectionHTML() + extraSection();
   if (!html) return; // nothing to say yet — leave app.js's empty state alone
   el.innerHTML = html;
 }

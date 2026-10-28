@@ -17,6 +17,19 @@
    To add an industry: copy a pack, give it its own catalog and copy,
    and point a skin at it (skins.js `pack`).
 
+   `wallet` (journey rule) — the merchant site's Wallet page (js/site/
+   wallet.js): a balance the shopper deposits into (a real payment through
+   the checkout) and withdraws from (a real Rapyd card payout). Gambling and
+   crypto merchants run exactly this deposit / withdraw journey, so those
+   packs opt in; `null` keeps the page and its nav item off. Fields:
+     currency, country  what the balance is held in; the payout's
+                        payout/sender currency and beneficiary/sender country
+     chips              suggested deposit amounts
+     depositLabel       the shopper's verb ('Deposit'; 'Top up' when absent)
+     aft                the deposit carries the pack's AFT indicators — only
+                        where the flows already apply AFT (crypto), and then
+                        as is_direct_purchase:false (it funds a balance)
+
    Optional product fields the merchant site (js/site/) reads when present:
    `cat` (shop-card category), `tagline` + `about` (product page copy),
    `specs` ([label, value] rows). `thumb: null` renders the neutral
@@ -33,6 +46,10 @@ export const PACKS = {
     cta: 'Buy',
     successNote: 'Top-up confirmed — ≈ 0.00075 BTC is on its way to your wallet address. Network confirmations usually take a few minutes.',
     kycAtSignup: true,
+    wallet: {
+      currency: 'USD', country: 'US', chips: ['25.00', '50.00', '100.00', '250.00'], depositLabel: 'Deposit',
+      aft: { purpose_code: 'crypto_currency', special_condition_indicator: 'cryptocurrency' },
+    },
     products: [
       {
         id: 'btc', pill: 'Buy BTC', billing: 'one_time', glyph: '₿',
@@ -74,6 +91,9 @@ export const PACKS = {
     cta: 'Deposit',
     successNote: 'Funds added — your new balance is available to play right away. Withdrawals return to this card.',
     kycAtSignup: false,
+    // No AFT: the igaming catalog never carried it (gambling deposits are
+    // ordinary purchases under the merchant's gaming MCC).
+    wallet: { currency: 'EUR', country: 'MT', chips: ['10.00', '20.00', '50.00', '100.00'], depositLabel: 'Deposit', aft: null },
     products: [
       {
         id: 'spins', pill: '50 Spins', billing: 'one_time', cta: 'Buy', glyph: '🎲',
@@ -104,6 +124,13 @@ export const PACKS = {
     cta: 'Pay',
     successNote: 'We’ve got your order and are packing it now! Dispatch and tracking details will land in your inbox shortly.',
     kycAtSignup: false,
+    // Off. The rapyd.shop prototype's "store credit" was refund credit a
+    // retailer spends at checkout — not a balance a shopper deposits into and
+    // cashes out to a card, which is a gambling / forex / crypto journey (and
+    // a retailer paying out to cards would be an unusual Rapyd setup to demo).
+    // Opting in is one line: { currency: 'GBP', country: 'GB', chips: […] }
+    // — the copy then reads "Top up".
+    wallet: null,
     products: [
       {
         id: 'oak', pill: 'Lounge Chair', billing: 'one_time', thumb: null, cat: 'Furniture',

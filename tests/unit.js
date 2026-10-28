@@ -12,8 +12,10 @@
    api.js reference/idempotency generators and ledger.refundedTotals —
    plus the merchant site's bag (site/cart.js) and how its total reaches
    the flows (verticals.js activeProduct), the remembered-customer
-   persistence (customers.js — never a PAN/CVV, never live) and the Orders
-   page's grouping (ledger.ordersFor).
+   persistence (customers.js — never a PAN/CVV, never live), the Orders
+   page's grouping (ledger.ordersFor) and the Wallet (site/wallet.js — the
+   balance arithmetic, the withdraw limits, the deposit product and the
+   Create Payout body builder).
    ───────────────────────────────────────────────────────────── */
 
 import { esc } from '../js/ui.js';
@@ -23,7 +25,7 @@ import { renderJSONView, highlightPaths } from '../js/json-view.js';
 import { refundedTotals, settlementOf, ordersFor } from '../js/ledger.js';
 // api.js has no top-level I/O (BACKEND_URL only reads a <meta>); only the
 // two pure generators are exercised — nothing here calls request().
-import { newReference, newIdempotencyKey } from '../js/api.js';
+import { newReference, newIdempotencyKey, pickBackend } from '../js/api.js';
 // The bag rules (pure, catalog passed in) and the one path the flows read it
 // through — verticals.js activeProduct(). Neither touches the DOM or network.
 import {
@@ -46,6 +48,14 @@ import {
   usesExternal3DS, simulateExternal3DS, externalTdsOptions, ext3dsDecision, EXT3DS_CHOICES,
   EXT3DS_PMO_PATHS, EXT3DS_PLACEHOLDER, DUMMY_CAVV, ext3dsPreset, setExt3dsPreset, authRequestSummary,
 } from '../js/ext3ds.js';
+
+// The Wallet's rules — pure (balance, limits, payout body); nothing here
+// records into the ledger (its poller would fetch).
+import {
+  DEPOSIT_ID, SANDBOX_PAYOUT_CARD, walletConfig, depositProduct, setPendingDeposit, clearPendingDeposit,
+  walletEntries, walletBalance, depositProblem, withdrawProblem, withdrawChips, pickPayoutMethodType,
+  fallbackPayoutMethodType, fillParties, payoutBody, requiredFieldsQuery, payoutOutcome, isDepositEntry,
+} from '../js/site/wallet.js';
 
 /* ── Tiny harness ── */
 const cases = [];
@@ -701,6 +711,176 @@ test('ext3ds: SE preset, AReq summary and the seam line', () => {
   const w = seamExtWrapHTML('<i></i>');
   ok(w.includes('seam-ext') && !w.includes('seam-rapyd') && w.includes('simulated'), 'own grey marker, not Rapyd\'s');
   ok(!EXT_TDS_LABEL.startsWith('Rapyd'), 'never labelled Rapyd');
+});
+
+/* ── Wallet (site/wallet.js) ── */
+test('wallet: packs opt in — gambling + crypto deposit/withdraw, home off', () => {
+  const g = walletConfig('igaming'), c = walletConfig('crypto');
+  eq([g.currency, g.country, g.depositLabel, g.aft], ['EUR', 'MT', 'Deposit', null]);
+  eq([c.currency, c.country, c.depositLabel], ['USD', 'US', 'Deposit']);
+  eq(c.aft, { purpose_code: 'crypto_currency', special_condition_indicator: 'cryptocurrency' });
+  eq(walletConfig('home'), null, 'home runs no wallet');
+  eq(walletConfig('nope'), null);
+});
+
+test('wallet: a pending deposit is what the checkout charges (ahead of the bag)', () => {
+  const base = { vertical: 'gaming', env: 'sandbox', productOverride: null, selectedProduct: null, walletDeposit: null,
+    cart: { vertical: 'gaming', lines: [{ productId: 'spins', qty: 1 }] } };
+  withState(base, () => {
+    eq(activeProduct().id, 'spins', 'no deposit → the bag');
+    setPendingDeposit('gaming', '25.00', 'EUR');
+    const p = activeProduct();
+    eq([p.id, p.amount, p.currency, p.billing, p.cta, p.deposit, p.aft], [DEPOSIT_ID, '25.00', 'EUR', 'one_time', 'Deposit', true, false]);
+    eq(orderItems(p)[0].id, DEPOSIT_ID, 'the ledger item marks it a deposit');
+    withState({ env: 'live' }, () => eq(activeProduct().amount, '0.01', 'live clamp still applies'));
+    clearPendingDeposit();
+    eq(activeProduct().id, 'spins');
+  });
+  withState({ ...base, vertical: 'crypto', cart: null, walletDeposit: { vertical: 'crypto', amount: '50.00', currency: 'USD' } }, () => {
+    const p = activeProduct();
+    eq([p.aft, p.purpose_code, p.special_condition_indicator, p.is_direct_purchase], [true, 'crypto_currency', 'cryptocurrency', false],
+      'crypto deposits keep the AFT indicators, funding a balance');
+  });
+  withState({ ...base, vertical: 'ecommerce', cart: null, walletDeposit: { vertical: 'ecommerce', amount: '5.00', currency: 'GBP' } }, () => {
+    ok(activeProduct().id !== DEPOSIT_ID, 'a pack without a wallet ignores a deposit');
+  });
+  withState({ ...base, walletDeposit: { vertical: 'crypto', amount: '5.00', currency: 'USD' } }, () => {
+    eq(activeProduct().id, 'spins', 'a deposit for another skin is ignored');
+  });
+  eq(depositProduct(walletConfig('igaming'), { amount: '10.00' }).currency, 'EUR');
+});
+
+const W = { customerId: 'cus_me', vertical: 'gaming', env: 'sandbox' };
+const dep = (amount, status, extra = {}) => ({ kind: 'payment', vertical: 'gaming', env: 'sandbox', customer_id: 'cus_me',
+  items: [{ id: DEPOSIT_ID, name: 'Wallet deposit', qty: 1 }], amount, currency: 'EUR', status, refunds: [], created_at: 1, ...extra });
+const po = (amount, status, extra = {}) => ({ kind: 'payout', vertical: 'gaming', env: 'sandbox', customer_id: 'cus_me',
+  amount, currency: 'EUR', status, refunds: [], created_at: 2, ...extra });
+
+test('wallet: balance = trusted deposits − refunds − every payout that hasn\'t failed', () => {
+  const list = [
+    dep('50.00', 'completed', { refunds: [{ status: 'completed', amount: 5, currency: 'EUR' }, { status: 'pending', amount: 9, currency: 'EUR' }] }),
+    dep('20.00', 'pending'),                 // not yet trusted → incoming only
+    dep('10.00', 'failed'),                  // declined → nothing
+    po('10.00', 'completed'),
+    po('7.50', 'pending'),                   // reserved while in flight
+    po('3.00', 'failed'),                    // failed payout gives the money back
+    dep('99.00', 'completed', { customer_id: 'cus_other' }),
+    dep('99.00', 'completed', { vertical: 'crypto' }),
+    dep('99.00', 'completed', { env: 'live' }),
+    dep('99.00', 'completed', { currency: 'USD' }),
+    { kind: 'payment', vertical: 'gaming', env: 'sandbox', customer_id: 'cus_me', items: [{ id: 'spins' }], amount: '50.00', currency: 'EUR', status: 'completed', refunds: [] },
+  ];
+  eq(walletBalance(list, W, 'EUR'), { available: '27.50', incoming: '20.00', outgoing: '7.50', currency: 'EUR' });
+  eq(walletEntries(list, W).length, 7, 'only this shopper\'s deposits + payouts here (other currencies listed, not counted)');
+  eq(walletEntries(list, { ...W, customerId: null }), [], 'a guest has no wallet');
+  ok(isDepositEntry(list[0]) && !isDepositEntry(list[10]), 'a shop purchase is not a deposit');
+  eq(walletBalance([po('5.00', 'completed')], W, 'EUR').available, '0.00', 'never negative');
+  eq(walletBalance([dep('0.10', 'completed'), dep('0.20', 'completed')], W, 'EUR').available, '0.30', 'minor units — no float drift');
+});
+
+test('wallet: withdraw limits (validAmount + never above the available balance)', () => {
+  eq(withdrawProblem('27.50', '27.50', 'EUR'), null);
+  eq(withdrawProblem('27.51', '27.50', 'EUR').code, 'balance');
+  ok(/27\.50 EUR/.test(withdrawProblem('30', '27.50', 'EUR').message), 'names the limit');
+  for (const bad of ['', '0', '-1', '27.505', '1e1', 'abc']) eq(withdrawProblem(bad, '27.50', 'EUR')?.code, 'amount', bad);
+  eq(withdrawProblem('1', '0.00', 'EUR').code, 'empty');
+  eq(withdrawProblem('5', '10', 'JPY'), null);
+  eq(withdrawProblem('5.5', '10', 'JPY').code, 'amount', 'JPY has no decimals');
+  eq(depositProblem('25', 'EUR'), null);
+  eq(depositProblem('25.001', 'EUR').code, 'amount');
+});
+
+test('wallet: withdraw chips — 10 / 20 when covered, plus All', () => {
+  eq(withdrawChips('27.50', 'EUR'), [{ label: '10', amount: '10.00' }, { label: '20', amount: '20.00' }, { label: 'All', amount: '27.50' }]);
+  eq(withdrawChips('15.00', 'EUR').map((c) => c.label), ['10', 'All']);
+  eq(withdrawChips('20.00', 'EUR').map((c) => c.label), ['10', 'All'], 'All covers the exact 20');
+  eq(withdrawChips('5', 'EUR'), [{ label: 'All', amount: '5.00' }]);
+  eq(withdrawChips('0.00', 'EUR'), []);
+});
+
+test('wallet: payout method type from GET /v1/payout_method_types', () => {
+  const list = [
+    { payout_method_type: 'us_debit_visa_card', category: 'card' },
+    { payout_method_type: 'us_visa_card', category: 'card' },
+    { payout_method_type: 'us_mastercard_card', category: 'card' },
+    { payout_method_type: 'us_amex_card', category: 'card', status: 0 },
+    { payout_method_type: 'us_ach_bank', category: 'bank' },
+    { payout_method_type: 'mt_visa_card', category: 'card' },
+  ];
+  eq(pickPayoutMethodType(list, { country: 'US', brand: 'Visa' }), 'us_visa_card');
+  eq(pickPayoutMethodType(list, { country: 'US', brand: 'Mastercard' }), 'us_mastercard_card');
+  eq(pickPayoutMethodType(list, { country: 'US', brand: 'Amex' }), 'us_debit_visa_card', 'unavailable (status 0) is skipped');
+  eq(pickPayoutMethodType(list, { country: 'MT', brand: 'Mastercard' }), 'mt_visa_card');
+  eq(pickPayoutMethodType(list, { country: 'GB', brand: 'Visa' }), null);
+  eq(pickPayoutMethodType(null, { country: 'US' }), null);
+  eq(fallbackPayoutMethodType('MT', 'Visa'), 'mt_visa_card');
+});
+
+test('wallet: beneficiary/sender from required fields — saved card_id, else the sandbox test card', () => {
+  const required = {
+    beneficiary_required_fields: [
+      { name: 'first_name', is_required: true }, { name: 'card_number', is_required: true },
+      { name: 'card_expiration_month', is_required: true }, { name: 'email', is_required: true },
+      { name: 'phone_number', is_required: true }, { name: 'date_of_birth', is_required: false },
+    ],
+    sender_required_fields: [
+      { name: 'company_name', is_required: true }, { name: 'city', is_required: true }, { name: 'identification_value', is_required: true },
+    ],
+  };
+  const identity = customers.getIdentity();
+  const tok = fillParties(required, { dest: { kind: 'token', card_id: 'card_abc' }, identity, merchant: 'rapyd.coin', country: 'US' });
+  eq(tok.beneficiary.card_id, 'card_abc');
+  ok(!('card_number' in tok.beneficiary), 'a token never carries a PAN');
+  eq([tok.beneficiary.first_name, tok.beneficiary.email], [identity.name.split(' ')[0], identity.email]);
+  eq(tok.missing, { beneficiary: ['phone_number'], sender: ['identification_value'] });
+  eq([tok.sender.company_name, tok.sender.city], ['rapyd.coin', 'New York']);
+  const tc = fillParties(required, { dest: { kind: 'test' }, identity, merchant: 'rapyd.spin', country: 'MT' });
+  eq([tc.beneficiary.card_number, tc.beneficiary.card_expiration_month], [SANDBOX_PAYOUT_CARD.card_number, '12']);
+  eq(tc.sender.city, 'Valletta');
+  const bare = fillParties(null, { dest: { kind: 'token', card_id: 'card_x' }, identity, merchant: 'm', country: 'US' });
+  eq(Object.keys(bare.beneficiary).sort(), ['card_id', 'first_name', 'last_name'], 'no lookup → the documented card_id minimum');
+  eq(bare.sender, { company_name: 'm' });
+});
+
+test('wallet: Create Payout body', () => {
+  const b = payoutBody({
+    amount: '12.50', currency: 'EUR', country: 'MT', methodType: 'mt_visa_card',
+    beneficiary: { card_id: 'card_abc', first_name: 'J', last_name: 'T' }, sender: { company_name: 'rapyd.spin' },
+    reference: 'wd_1_abc', description: 'Withdrawal to Visa •••• 1111', descriptor: 'R'.repeat(40), ewallet: 'ewallet_x',
+  });
+  eq(Object.keys(b), ['ewallet', 'payout_amount', 'payout_currency', 'sender_currency', 'sender_country', 'beneficiary_country',
+    'sender_entity_type', 'beneficiary_entity_type', 'payout_method_type', 'beneficiary', 'sender', 'merchant_reference_id',
+    'description', 'statement_descriptor', 'confirm_automatically']);
+  eq([b.payout_amount, b.payout_currency, b.sender_currency, b.beneficiary_country, b.sender_entity_type, b.beneficiary_entity_type],
+    [12.5, 'EUR', 'EUR', 'MT', 'company', 'individual']);
+  eq([b.statement_descriptor.length, b.confirm_automatically], [35, true]);
+  const liveBody = payoutBody({ amount: '0.01', currency: 'USD', country: 'US', methodType: 'us_visa_card', beneficiary: {}, sender: {}, reference: 'r', description: 'd', ewallet: null });
+  ok(!('ewallet' in liveBody) && !('statement_descriptor' in liveBody), 'no wallet (live injects it) / no descriptor when none');
+  ok(newReference('wd').length <= 45, 'payout references fit Create Payout\'s 45-char limit');
+  eq(requiredFieldsQuery({ methodType: 'us_visa_card', country: 'US', currency: 'USD', amount: '10' }), {
+    payout_method_type: 'us_visa_card', sender_country: 'US', sender_currency: 'USD', beneficiary_country: 'US',
+    payout_currency: 'USD', sender_entity_type: 'company', beneficiary_entity_type: 'individual', payout_amount: '10',
+  });
+});
+
+test('wallet: Rapyd payout status → ledger outcome', () => {
+  eq(['Completed', 'Created', 'Pending', 'Confirmation', 'Hold', 'Error', 'Declined', 'Canceled', 'Expired', 'Returned', undefined].map(payoutOutcome),
+    ['completed', 'pending', 'pending', 'pending', 'pending', 'failed', 'failed', 'failed', 'failed', 'failed', 'pending']);
+  eq(classify({ type: 'PAYOUT_COMPLETED' }), 'success');
+  eq(classify({ type: 'PAYOUT_FAILED' }), 'failure');
+});
+
+test('pickBackend: staging hosts use the staging backend, all others production', () => {
+  const urls = { production: 'https://prod.example/', staging: 'https://stage.example' };
+  eq(pickBackend({ hostname: 'rapyd.shop', ...urls }), 'https://prod.example');
+  eq(pickBackend({ hostname: 'www.rapyd.shop', ...urls }), 'https://prod.example');
+  eq(pickBackend({ hostname: 'localhost', ...urls }), 'https://prod.example');
+  eq(pickBackend({ hostname: 'staging.rapyd.shop', ...urls }), 'https://stage.example');
+  eq(pickBackend({ hostname: 'project-abc-rapyd-se.vercel.app', ...urls }), 'https://stage.example');
+  eq(pickBackend({ hostname: 'evil-vercel.app.example.com', ...urls }), 'https://prod.example');
+  // no staging configured → production; nothing configured → the default
+  eq(pickBackend({ hostname: 'staging.rapyd.shop', production: 'https://prod.example' }), 'https://prod.example');
+  eq(pickBackend({ hostname: 'rapyd.shop' }), 'https://rapyd-backend.vercel.app');
 });
 
 test('no network calls were made', () => {

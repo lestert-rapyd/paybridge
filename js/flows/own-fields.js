@@ -149,7 +149,14 @@ function currentMode() {
   const modes = modesFor(activeCredential());
   return modes.includes(chargeMode) ? chargeMode : (modes[0] || null);
 }
-const isDirectPurchase = () => (isSubscription() ? true : directPurchase);
+// A wallet deposit fixes it at false — it funds the shopper's balance (the
+// product says so: site/wallet.js depositProduct), so there's no fork to show.
+const isDirectPurchase = () => {
+  const p = activeProduct();
+  if (p.is_direct_purchase === false) return false;
+  return isSubscription() ? true : directPurchase;
+};
+const showsDirectPurchase = (p) => p.aft && !isSubscription() && p.is_direct_purchase !== false;
 
 /* ── External 3DS (js/ext3ds.js) ─────────────────────────────
    The merchant's own provider authenticates only a card the merchant HOLDS: a
@@ -354,7 +361,7 @@ function returningHTML() {
           <div class="cof-cvv-note">Just confirm it’s you — your card is on file.</div>
         </div>` : `
         ${mode === 'nrid' ? '' : `<div class="cof-nocvv">No card details needed — we’ll use your saved card.</div>`}`}
-      ${p.aft ? directPurchaseHTML() : ''}
+      ${showsDirectPurchase(p) ? directPurchaseHTML() : ''}
       ${tdsBoxHTML()}
       <button class="co-cta" id="pay-btn">${esc(productCta())} ${esc(p.amount)} ${esc(p.currency)}</button>
       <div class="cof-foot"><button type="button" class="cof-link subtle" id="cof-forget">Not ${esc(first)}? Sign out</button></div>
@@ -439,7 +446,7 @@ export function renderPaymentHTML() {
       <label>Name on card</label>
       <div class="co-input"><input id="f-name" autocomplete="cc-name" placeholder="Jordan Taylor" /></div>
     </div>
-    ${p.aft && !isSubscription() ? directPurchaseHTML() : ''}
+    ${showsDirectPurchase(p) ? directPurchaseHTML() : ''}
     ${saveRowHTML()}
     ${tdsBoxHTML()}
     <button class="co-cta" id="pay-btn">${esc(productCta())} ${esc(p.amount)} ${esc(p.currency)}</button>`;
@@ -808,7 +815,7 @@ async function pay() {
     // amount/currency = what the CUSTOMER paid (converted under 'buy'), so the
     // success screen + bank statement match the checkout; fx carries the legs.
     const charge = customerCharge();
-    const note = p.aft && !isSubscription() && !directPurchase ? (p.fundedNote || p.successNote) : (p.successNote || v.successNote);
+    const note = p.aft && !isDirectPurchase() ? (p.fundedNote || p.successNote) : (p.successNote || v.successNote);
     state.lastPayment = {
       descriptor: v.descriptor, amount: charge.amount ?? p.amount, currency: charge.currency,
       last4, network, fx: fxSnapshot(),

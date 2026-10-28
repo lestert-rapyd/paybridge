@@ -9,7 +9,7 @@
    still third-party data — escaping is the renderer's job regardless.
    ───────────────────────────────────────────────────────────── */
 
-import { VERTICALS, activeProduct } from './verticals.js';
+import { VERTICALS, activeProduct, depositFor } from './verticals.js';
 import { state, setState } from './state.js';
 import { esc } from './ui.js';
 import { brandLabel } from './sync.js';
@@ -272,9 +272,12 @@ export function renderSuccess(event = {}) {
   const pay = event.raw?.data || {};
   const lp = state.lastPayment || {};
   const items = itemsLabel();
+  // A wallet deposit (js/site/wallet.js) bought nothing from the bag — the
+  // bag stays as it was, and the receipt leads back to the wallet.
+  const dep = depositFor();
   // Paid — the bag has been bought. Emptied before the header renders, so its
   // badge reads 0. (A decline leaves the bag alone: the shopper retries it.)
-  clearCart();
+  if (!dep) clearCart();
   // Product/AFT-aware copy: the flow picks the note at pay time (e.g. the
   // crypto "wallet funded, buy later" variant when is_direct_purchase=false).
   const note = lp.note || v.successNote;
@@ -286,7 +289,7 @@ export function renderSuccess(event = {}) {
   host().innerHTML = sitePage(`
     <div class="screen success">
       ${badgeHTML('ok')}
-      <div class="screen-title rise-1">${successVerb(v)} confirmed</div>
+      <div class="screen-title rise-1">${esc(dep ? dep.cta : successVerb(v))} confirmed</div>
       <div class="screen-sub rise-2">${esc(v.merchant)} · <strong>${esc(paidLabel())}</strong></div>
       ${note ? `<div class="screen-next rise-3">${esc(note)}</div>` : ''}
       ${factsHTML([
@@ -297,8 +300,11 @@ export function renderSuccess(event = {}) {
         ['Saved card', lp.credential_label],
       ])}
       <div class="screen-actions rise-5">
-        ${isSignedIn() ? `<button class="cs-secondary" data-land="orders">View orders</button>` : ''}
-        <button class="co-cta site-cta" data-land="shop">Continue shopping</button>
+        ${dep
+          ? `<button class="cs-secondary" data-land="shop">Continue shopping</button>
+             <button class="co-cta site-cta" data-land="wallet">Back to wallet</button>`
+          : `${isSignedIn() ? `<button class="cs-secondary" data-land="orders">View orders</button>` : ''}
+             <button class="co-cta site-cta" data-land="shop">Continue shopping</button>`}
       </div>
     </div>`);
   setOffstage(bankViewHTML(event)); // bank-app view lives OUTSIDE the client window
@@ -319,18 +325,19 @@ export function renderError(event = {}, opts = {}) {
   // reached this far) is engine-room material — printing it here put strings like
   // "Failed to fetch" in front of the shopper.
   const note = opts.note || 'Your card was declined — no charge was made. Try a different card, or contact your bank if it keeps happening.';
+  const dep = depositFor();
   host().innerHTML = sitePage(`
     <div class="screen error">
       ${badgeHTML('err')}
       <div class="screen-title rise-1">Payment declined</div>
       <div class="screen-sub rise-2">${esc(v.merchant)} · <strong>${esc(paidLabel())}</strong></div>
-      <div class="screen-next err rise-3">${esc(note)} Your items are still in your bag.</div>
+      <div class="screen-next err rise-3">${esc(note)}${dep ? ' Your balance hasn’t changed.' : ' Your items are still in your bag.'}</div>
       ${factsHTML([
         ['Order', orderNumber()],
         ['Method', cardLabel(pay, lp)],
       ])}
       <div class="screen-actions rise-5">
-        <button class="cs-secondary" data-land="bag">Back to bag</button>
+        ${dep ? backToWallet : `<button class="cs-secondary" data-land="bag">Back to bag</button>`}
         <button class="co-cta site-cta" data-land="checkout">Try a different card</button>
       </div>
     </div>`);
@@ -345,18 +352,21 @@ export function renderCancelled() {
   resetWide();
   setOffstage(null);
   const v = VERTICALS[state.vertical];
+  const dep = depositFor();
   host().innerHTML = sitePage(`
     <div class="screen cancelled">
       <div class="screen-title rise-1">Payment cancelled</div>
       <div class="screen-sub rise-2">${esc(v.merchant)} · <strong>${esc(paidLabel())}</strong></div>
-      <div class="screen-next rise-3">You left the payment page — nothing was charged. Your items are still in your bag.</div>
+      <div class="screen-next rise-3">You left the payment page — nothing was charged.${dep ? ' Your balance hasn’t changed.' : ' Your items are still in your bag.'}</div>
       <div class="screen-actions rise-5">
-        <button class="cs-secondary" data-land="bag">Back to bag</button>
+        ${dep ? backToWallet : `<button class="cs-secondary" data-land="bag">Back to bag</button>`}
         <button class="co-cta site-cta" data-land="checkout">Return to checkout</button>
       </div>
     </div>`);
   wireReset();
 }
+
+const backToWallet = `<button class="cs-secondary" data-land="wallet">Back to wallet</button>`;
 
 function successVerb(v) {
   return v.cta === 'Deposit' ? 'Deposit' : v.cta === 'Buy' ? 'Purchase' : 'Payment';

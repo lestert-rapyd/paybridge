@@ -236,6 +236,69 @@
   display: grid; place-items: center; font-size: 12px; font-weight: 700; letter-spacing: .04em; color: var(--text);
 }
 
+/* ── Wallet (packs with a `wallet` rule — js/site/wallet-page.js) ──
+   Balance + activity on the left, the Deposit / Withdraw panel on the
+   right; one column when the frame is narrow. Token-only like the rest. */
+.wal { display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start; max-width: 940px; margin: 0 auto; }
+.wal-main { flex: 2 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 26px; }
+.wal-main .site-titles { margin-bottom: 0; }
+.wal-balance { padding: 24px 26px; border-radius: var(--r-lg); background: var(--accent-soft); display: flex; flex-direction: column; gap: 8px; }
+.wal-balance-l { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; color: var(--accent-ink); }
+.wal-balance-v { font-family: var(--font-site-display, var(--font-site, var(--font-ui))); font-size: 40px; font-weight: 600; line-height: 1.1; letter-spacing: -.02em; color: var(--ink); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.wal-balance-x { font-size: 13px; color: var(--muted); }
+.wal-rows { display: flex; flex-direction: column; }
+.wal-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.wal-ico { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-size: 16px; background: var(--soft-2); color: var(--text); }
+.wal-ico.in { background: var(--ok-soft); color: var(--ok-deep); }
+.wal-row-name { font-size: 14px; font-weight: 500; color: var(--ink); }
+.wal-row-meta { font-size: 12.5px; color: var(--muted); margin-top: 3px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.wal-row-end { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.wal-row-amt { font-size: 14px; font-weight: 600; color: var(--ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.wal-row-amt.in { color: var(--ok-deep); }
+.wal-row-amt.void { color: var(--faint); text-decoration: line-through; }
+.wal-panel {
+  flex: 1 1 290px; min-width: 0; display: flex; flex-direction: column; gap: 16px;
+  padding: 22px; border: 1px solid var(--line); border-radius: var(--r-lg);
+}
+.wal-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 3px; border-radius: var(--r-md); background: var(--soft-2); }
+.wal-tabs button {
+  display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 38px;
+  border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted);
+  font: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
+}
+.wal-tabs button.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
+.wal-field { display: flex; flex-direction: column; gap: 8px; font-size: 13px; font-weight: 500; color: var(--text); }
+.wal-amount { display: flex; align-items: center; }
+.wal-amount input { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 18px; }
+.wal-cur { padding-left: 8px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.wal-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.wal-chips:empty { display: none; }
+.wal-chip {
+  height: 32px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--field); background: var(--surface);
+  font: inherit; font-size: 13px; font-weight: 500; color: var(--text); cursor: pointer;
+}
+.wal-chip:hover { border-color: var(--accent); }
+.wal-chip.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); }
+.wal-dests { display: flex; flex-direction: column; gap: 8px; margin-top: -8px; }
+.wal-dest {
+  display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 14px; text-align: left;
+  border: 1.5px solid var(--field); border-radius: var(--r-md); background: var(--surface);
+  font: inherit; font-size: 14px; font-weight: 500; color: var(--ink); cursor: pointer;
+}
+.wal-dest.active { border-color: var(--accent); background: var(--accent-soft); }
+.wal-radio { flex: none; width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--field); display: grid; place-items: center; }
+.wal-dest.active .wal-radio { border-color: var(--accent); }
+.wal-dest.active .wal-radio::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.wal-dest-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.wal-dest-meta { font-size: 12px; font-weight: 400; color: var(--muted); white-space: nowrap; }
+.wal-note { font-size: 13px; line-height: 1.45; color: var(--muted); }
+.wal-panel .co-cta { margin-top: 0; }
+.wal-panel .acct-err { margin-bottom: 10px; }
+.wal-result { padding: 12px 14px; border-radius: var(--r-md); font-size: 13px; line-height: 1.45; background: var(--info-soft); color: var(--text); }
+.wal-result.ok { background: var(--ok-soft); }
+.wal-result.bad { background: var(--err-soft); }
+.wal-result-t { font-weight: 600; color: var(--ink); margin-bottom: 2px; }
+
 /* ── Result screens as site pages ────────────────────────── */
 .site-main .screen { padding: 18px 0 8px; }
 .screen-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; width: 100%; margin-top: 24px; }

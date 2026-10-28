@@ -15,14 +15,32 @@
 
 const DEFAULT_BACKEND = 'https://rapyd-backend.vercel.app';
 
-/** Backend origin. Overridable per deployment via
-    <meta name="paybridge-backend" content="https://…"> — deliberately NOT
-    via a query param, which would let a crafted link point the demo (and
-    the live token) at someone else's server. */
+/** Hosts that serve the STAGING frontend: the staging domain and Vercel's
+    preview deployments. They talk to the staging backend so a branch under
+    test never sends new requests to the production backend. */
+const isStagingHost = (host) => host === 'staging.rapyd.shop' || /\.vercel\.app$/.test(host || '');
+
+/** Which backend a page on `hostname` uses: the staging origin on a staging
+    host (when one is configured), else the production origin, else the
+    default. Pure — the meta tags are read by the caller. */
+export function pickBackend({ hostname, production, staging } = {}) {
+  const url = (isStagingHost(hostname) && staging) || production || DEFAULT_BACKEND;
+  return url.trim().replace(/\/+$/, '');
+}
+
+/** Backend origin, from two meta tags in index.html —
+    <meta name="paybridge-backend"> (production) and
+    <meta name="paybridge-backend-staging"> (staging.rapyd.shop and Vercel
+    previews). Deliberately NOT a query param, which would let a crafted
+    link point the demo (and the live token) at someone else's server. */
 export const BACKEND_URL = (() => {
   if (typeof document === 'undefined') return DEFAULT_BACKEND;
-  const meta = document.querySelector('meta[name="paybridge-backend"]')?.getAttribute('content')?.trim();
-  return (meta || DEFAULT_BACKEND).replace(/\/+$/, '');
+  const meta = (name) => document.querySelector(`meta[name="${name}"]`)?.getAttribute('content')?.trim() || '';
+  return pickBackend({
+    hostname: typeof location !== 'undefined' ? location.hostname : '',
+    production: meta('paybridge-backend'),
+    staging: meta('paybridge-backend-staging'),
+  });
 })();
 
 /* ── Idempotency ─────────────────────────────────────────────
@@ -188,6 +206,37 @@ export function getFxRate({ buyCurrency, sellCurrency, amount, fixedSide, env, p
     },
     env,
   });
+}
+
+/* ── Payouts (the merchant site's Withdraw) ──────────────────
+   Live payouts are refused by the backend unless LIVE_PAYOUTS_ENABLED=true
+   (403 LIVE_PAYOUTS_DISABLED — not a live-gate error, so the token stays). */
+
+/** POST /api/create-payout → Rapyd POST /v1/payouts */
+export function createPayout(body, opts = {}) {
+  return post('/api/create-payout', body, opts);
+}
+
+/** GET /api/retrieve-payout?id=payout_xxx → Rapyd GET /v1/payouts/{id}.
+    `profile` = the sandbox MID that created the payout. */
+export function retrievePayout(id, env, profile) {
+  return request('/api/retrieve-payout', { query: { id, env, profile }, env });
+}
+
+/** GET /api/payout-method-types → Rapyd GET /v1/payout_method_types
+    (category / beneficiary_country / payout_currency filters). */
+export function listPayoutMethodTypes({ category, beneficiaryCountry, payoutCurrency, env, profile }) {
+  return request('/api/payout-method-types', {
+    query: { category, beneficiary_country: beneficiaryCountry, payout_currency: payoutCurrency, env, profile },
+    env,
+  });
+}
+
+/** GET /api/payout-required-fields → Rapyd GET
+    /v1/payout_methods/{type}/required_fields. `query` = site/wallet.js
+    requiredFieldsQuery(). */
+export function getPayoutRequiredFields(query, { env, profile } = {}) {
+  return request('/api/payout-required-fields', { query: { ...query, env, profile }, env });
 }
 
 /* ── Webhook reads (GET /api/webhooks) ───────────────────────

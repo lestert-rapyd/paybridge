@@ -159,7 +159,7 @@ export function hostedAddress(redirectUrl, env = 'sandbox') {
 /* A plausible path per site page (display only — the site is one SPA). */
 const PAGE_PATHS = {
   'account-q': '/signin', account: '/register', shop: '/', product: '/product', bag: '/bag',
-  checkout: '/checkout', orders: '/account/orders', methods: '/account/payment-methods',
+  checkout: '/checkout', orders: '/account/orders', methods: '/account/payment-methods', wallet: '/account/wallet',
   complete: '/checkout/complete', cancel: '/checkout/cancel',
 };
 export const pagePath = (page) => PAGE_PATHS[page] ?? '/';

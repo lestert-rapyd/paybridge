@@ -16,6 +16,7 @@ import { state } from './state.js';
 import { SKINS, SKIN_ORDER } from './skins.js';
 import { PACKS } from './packs.js';
 import { cartLines, resolveLines, cartProblem, cartAsProduct } from './site/cart.js';
+import { walletConfig, pendingDeposit, depositProduct } from './site/wallet.js';
 
 const compose = (skin) => {
   const pack = PACKS[skin.pack];
@@ -59,7 +60,10 @@ export function activeProduct(verticalId = state.vertical) {
 export function pricedProduct(verticalId = state.vertical) {
   const v = VERTICALS[verticalId];
   const sel = state.selectedProduct;
-  let p = cartProduct(verticalId)
+  // A wallet deposit in progress (js/site/wallet.js) is what this checkout is
+  // for — it wins over the bag, which stays untouched for later.
+  let p = depositFor(verticalId)
+    || cartProduct(verticalId)
     || (sel && sel.vertical === verticalId && v.products.find((x) => x.id === sel.productId))
     || v.products[0];
   const override = state.productOverride;
@@ -67,6 +71,19 @@ export function pricedProduct(verticalId = state.vertical) {
     p = { ...p, amount: override.amount, currency: override.currency };
   }
   return p;
+}
+
+/** The pending wallet deposit as a product, or null (no deposit, or the pack
+    runs no wallet). */
+export function depositFor(verticalId = state.vertical) {
+  const d = pendingDeposit(verticalId);
+  const cfg = d && walletConfig(VERTICALS[verticalId]?.pack);
+  return cfg ? depositProduct(cfg, d) : null;
+}
+
+/** The active skin's wallet rule (js/site/wallet.js walletConfig), or null. */
+export function activeWallet(verticalId = state.vertical) {
+  return walletConfig(VERTICALS[verticalId]?.pack);
 }
 
 /** The bag's lines joined to this vertical's catalog: [{ product, qty }]. */

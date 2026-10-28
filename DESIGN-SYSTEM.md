@@ -170,6 +170,15 @@ the account form, shop (Products / Subscriptions), product page, bag (its rules 
 under the signed-in customer's `cus_***`; "Guest checkouts this session") and **Payment methods** (synced
 once per visit, with a Refresh link). Product imagery is a hatched `.ph` placeholder.
 
+**Wallet** (signed-in, only when the pack's `wallet` rule is on — gambling and crypto; nav item between
+Orders and Payment methods): the balance card (`.wal-balance`, accent-soft fill), Activity rows
+(`.wal-row` — `icon-cash_in` on `--ok-soft` for deposits, `icon-cash_out` for withdrawals, a struck-through
+amount when it failed) and the Deposit / Withdraw panel (`.wal-panel`: segmented `.wal-tabs`, the amount
+field with its ISO code, pill `.wal-chip`s, radio `.wal-dest` rows for "Withdraw to", the CTA and a
+`.wal-result` status block — info / ok / err soft fills). The deposit verb follows the pack ("Deposit";
+"Top up" when the pack doesn't name one). Deposit hands off to the normal checkout ("Back to wallet" on
+its rail; the receipt's primary action is "Back to wallet"); Withdraw stays on the page.
+
 ### 5.3 The integration seam (`js/seam.js`)
 Where the merchant's site ends and Rapyd begins, per path — one source of truth (`SEAM_PATHS`) read by
 the drawer's Show seam card and the engine room's collapsible **seam strip** (between the tabs and the
@@ -282,6 +291,11 @@ catalog, copy, `kycAtSignup`). Layout never forks per skin. Keep the built-in id
 `crypto`, `gaming` stable — the ledger, credentials and back office key on them.
 
 ## 10. History
+
+- **2026-10 — merchant wallet.** The Wallet page (`js/site/wallet.js` rules, `wallet-page.js` page and
+  beats; `.wal-*` in `site.css`), deposits through the existing checkout, withdrawals as real card
+  payouts (three engine-room beats; PAYOUT_* events as a webhooks section), payout tiles in the back
+  office (`.bo-tile.clickable-payout`).
 
 - **2026-10 — external 3DS (simulated).** `js/ext3ds.js`, the issuer page (`.x3ds-*`, `.seam-ext`), the
   engine room's Simulated card (`.beat-card.sim`, `.inject-hit`), the drawer's live 3DS card, the

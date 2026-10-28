@@ -17,6 +17,12 @@
      checkout  · the cart (owned by app.js/flow)      → POST /v1/payments …
      orders    · the shopper's orders (ledger.js)     → no call
      methods   · saved cards (customers.js)           → GET …/payment_methods
+     wallet    · balance, deposit, withdraw            → deposit: the checkout's
+                 (packs with a `wallet` rule only)        POST /v1/payments …;
+                                                          withdraw: GET payout
+                                                          method types → GET
+                                                          required fields →
+                                                          POST /v1/payouts
 
    This module is the router: it draws pages 1–3 and the account pages
    from the js/site/ builders, paints the engine room for them, and
@@ -24,16 +30,18 @@
 
    Two invariants this module must not break:
 
-   · A page change writes #panel-request ONLY — except the two pages whose
+   · A page change writes #panel-request ONLY — except the pages whose
      subject IS a response (the register page's POST /v1/customers, the
-     payment-methods page's list call). #panel-response and #panel-webhooks
+     payment-methods page's list call, the wallet page's payout once one
+     was sent — whose PAYOUT_* events webhooks.js paints as a section of
+     its own while the wallet is on screen). #panel-response and #panel-webhooks
      otherwise keep the last real call and its events.
    · A page change never calls setActiveTab(). Only the SE firing a call
      moves the tab (design system §5: never steal the tab mid-narration).
    ───────────────────────────────────────────────────────────── */
 
 import { state, setState } from './state.js';
-import { VERTICALS } from './verticals.js';
+import { VERTICALS, activeWallet, depositFor } from './verticals.js';
 import { setIdentityMode, identityChooserHTML, promoteToReturning } from './identity.js';
 import {
   accountPanelHTML, accountCtaState, customerRowHTML, customerRequestCardHTML,
@@ -56,12 +64,19 @@ import {
 import {
   signInWithCustomerId, lookupStatus, lookupRequestCardHTML, lookupResponseCardHTML, fillLookupSignature,
 } from './site/lookup.js';
+import { clearPendingDeposit } from './site/wallet.js';
+import { repaintWebhooks, setExtraWebhookSection } from './webhooks.js';
+import {
+  walletPageHTML, refreshWalletRegions, setWalletTab, setWalletAmount, pickWalletChip, pickWalletDest,
+  startDeposit, fireWithdraw, walletRequestCardsHTML, fillWalletSignatures, walletResponseCardsHTML,
+  walletWebhooksHTML, resetWalletPage, syncWalletStatus,
+} from './site/wallet-page.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
-export const STEPS = ['account-q', 'account', 'shop', 'product', 'bag', 'checkout', 'orders', 'methods'];
+export const STEPS = ['account-q', 'account', 'shop', 'product', 'bag', 'checkout', 'orders', 'methods', 'wallet'];
 /* Pages that need a signed-in shopper; anyone else lands on sign-in. */
-const MEMBERS_ONLY = new Set(['orders', 'methods']);
+const MEMBERS_ONLY = new Set(['orders', 'methods', 'wallet']);
 
 /* Whether the sign-in page has actually been answered — state.identityMode
    defaults to 'guest', which would otherwise render as a choice the SE never
@@ -92,7 +107,11 @@ export function repaintSite() { if (state.leftView === 'client') repaintClient()
 
 export function goStep(step) {
   if (!STEPS.includes(step)) return;
+  if (step === 'wallet' && !activeWallet()) step = 'shop'; // this pack runs no wallet
   if (MEMBERS_ONLY.has(step) && !isSignedIn()) step = 'account-q';
+  // A wallet deposit only lives on its checkout — any other page drops it, so
+  // the bag (and the shop) charge what they say again.
+  if (step !== 'checkout') clearPendingDeposit();
   resultShown = false;
   signinError = null;
   cusIdError = null;
@@ -128,9 +147,15 @@ export function resetSteps() {
   answered = false;
   signinError = null;
   resultShown = false;
+  const landed = landing;
   let next = landing || 'account-q';
   landing = null;
+  if (next === 'wallet' && !activeWallet()) next = 'shop';
   if (MEMBERS_ONLY.has(next) && !isSignedIn()) next = 'shop';
+  if (next !== 'checkout') clearPendingDeposit();
+  // A real reset (skin / path / env) forgets the last withdrawal's beats; a
+  // result screen's "Back to wallet" keeps them (a landing was requested).
+  if (!landed) resetWalletPage();
   state.step = next;
 }
 
@@ -140,10 +165,12 @@ const onward = () => (cartCount() ? 'bag' : 'shop');
 
 /* ── Pages ───────────────────────────────────────────────── */
 
-/** The checkout page's top: the site header plus its way back. Shared with
-    app.js's own-fields shell and the toolkit's stage. */
+/** The checkout page's top: the site header plus its way back (to the bag, or
+    to the wallet for a deposit). Shared with app.js's own-fields shell and the
+    toolkit's stage. */
 export function stepRailHTML() {
-  return `${siteHeaderHTML('checkout')}<div class="site-rail">${backLinkHTML('bag', 'Back to bag')}</div>`;
+  const back = depositFor() ? backLinkHTML('wallet', 'Back to wallet') : backLinkHTML('bag', 'Back to bag');
+  return `${siteHeaderHTML('checkout')}<div class="site-rail">${back}</div>`;
 }
 
 function signedInHTML() {
@@ -237,6 +264,7 @@ export function frameHTML() {
     case 'bag':      return bagPageHTML();
     case 'orders':   return ordersPageHTML();
     case 'methods':  return methodsPageHTML();
+    case 'wallet':   return walletPageHTML();
     default:         return accountQPageHTML();
   }
 }
@@ -308,10 +336,27 @@ export function renderStepPanels() {
     return;
   }
 
+  if (state.step === 'wallet') { paintWalletPanels(); return; }
+
   // shop / product / bag / orders — browsing calls nothing; earlier beats stay inspectable.
   req.innerHTML = customerRequestCardHTML() || emptyRequestHTML();
   fillCustomerSignature();
 }
+
+/* The wallet page: the withdrawal's beats (or the prepared POST /v1/payouts on
+   the Withdraw tab) own Request; Response and Webhooks only once a withdrawal
+   has answered — before that they keep the last real call's. */
+function paintWalletPanels() {
+  const req = $('#panel-request');
+  const res = $('#panel-response');
+  req.innerHTML = walletRequestCardsHTML() || customerRequestCardHTML() || emptyRequestHTML();
+  fillWalletSignatures();
+  fillCustomerSignature();
+  const resCards = walletResponseCardsHTML();
+  if (res && resCards) res.innerHTML = resCards;
+  repaintWebhooks(); // webhooks.js stays the one writer — the payout section is registered below
+}
+setExtraWebhookSection(() => (state.step === 'wallet' ? walletWebhooksHTML() : ''));
 
 /* The Request tab's own resting state, matching app.js's other empty panels. */
 function emptyRequestHTML() {
@@ -346,9 +391,13 @@ export function refreshSiteHeader() {
   if (head) head.outerHTML = siteHeaderHTML(state.step);
 }
 
-/* Orders follow the ledger (a payment settling, a refund landing). */
+/* Orders follow the ledger (a payment settling, a refund landing); the wallet
+   repaints its ledger-driven regions (never the amount being typed) and its
+   engine room (a payout settling, PAYOUT_* events arriving). */
 subscribeLedger(() => {
-  if (state.step === 'orders' && state.leftView === 'client') repaintClient();
+  if (state.leftView !== 'client') return;
+  if (state.step === 'orders') repaintClient();
+  if (state.step === 'wallet') { refreshWalletRegions(); paintWalletPanels(); syncWalletStatus(); }
 });
 
 /* ── Wiring — document-delegated once at module load, like the rest of the
@@ -421,6 +470,34 @@ document.addEventListener('click', (e) => {
   if (rm) { removeLine(rm.dataset.remove); repaintClient(); return; }
   if (t.closest('#site-checkout')) {
     if (!bagBlocker()) goStep('checkout');
+    return;
+  }
+
+  // Wallet.
+  const wtab = t.closest('[data-wal-tab]');
+  if (wtab) { setWalletTab(wtab.dataset.walTab); repaintClient(); return; }
+  const chip = t.closest('[data-wal-chip]');
+  if (chip) {
+    pickWalletChip(chip.dataset.walChip);
+    const input = $('#wal-amount');
+    if (input) input.value = chip.dataset.walChip;
+    refreshWalletRegions();
+    paintWalletPanels();
+    return;
+  }
+  const dest = t.closest('[data-wal-dest]');
+  if (dest) { pickWalletDest(dest.dataset.walDest); refreshWalletRegions(); paintWalletPanels(); return; }
+  if (t.closest('#wal-deposit')) {
+    if (startDeposit()) goStep('checkout');
+    else refreshWalletRegions();
+    return;
+  }
+  if (t.closest('#wal-withdraw')) {
+    fireWithdraw(() => {
+      if (state.step !== 'wallet' || state.leftView !== 'client') return;
+      refreshWalletRegions();
+      paintWalletPanels();
+    });
   }
 });
 
@@ -446,9 +523,16 @@ async function lookupCustomer() {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
   if (e.target.id === 'site-cusid') { $('#site-cusid-go')?.click(); return; }
+  if (e.target.id === 'wal-amount') { ($('#wal-deposit') || $('#wal-withdraw'))?.click(); return; }
   if (!e.target.closest?.('#checkout .site-form')) return;
   $('#site-signin')?.click();
 });
 document.addEventListener('input', (e) => {
   if (e.target.id === 'site-cusid') cusIdDraft = e.target.value;
+  if (e.target.id === 'wal-amount') {
+    setWalletAmount(e.target.value);
+    // only the regions that follow the amount — the input keeps its caret
+    refreshWalletRegions();
+    if (state.leftView === 'client') paintWalletPanels();
+  }
 });

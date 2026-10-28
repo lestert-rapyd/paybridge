@@ -15,7 +15,7 @@
    ───────────────────────────────────────────────────────────── */
 
 import { state } from '../state.js';
-import { VERTICALS } from '../verticals.js';
+import { VERTICALS, activeWallet, depositFor } from '../verticals.js';
 import * as customers from '../customers.js';
 import { esc } from '../ui.js';
 import { currencyDecimals } from '../sync.js';
@@ -23,7 +23,7 @@ import { cartCount } from './cart.js';
 import { isSignedIn } from './session.js';
 
 /* Which nav item a page lights up. */
-const NAV_OF = { shop: 'shop', product: 'shop', bag: 'shop', checkout: 'shop', orders: 'orders', methods: 'methods' };
+const NAV_OF = { shop: 'shop', product: 'shop', bag: 'shop', checkout: 'shop', orders: 'orders', methods: 'methods', wallet: 'wallet' };
 
 /** "rapyd.shop" → rapyd + accented ".shop"; a name without a dot is one word.
     Both halves are escaped text. */
@@ -37,7 +37,8 @@ export function wordmarkHTML(merchant) {
 /** The site header. `page` is the step being drawn (state.step by default). */
 export function siteHeaderHTML(page = state.step) {
   const v = VERTICALS[state.vertical];
-  const active = NAV_OF[page] || null;
+  // a wallet deposit's checkout belongs to the Wallet, not the shop
+  const active = page === 'checkout' && depositFor() ? 'wallet' : NAV_OF[page] || null;
   const signedIn = isSignedIn();
   const n = cartCount();
   // `label` is literal markup from this function (a long and a short form) — never data.
@@ -49,7 +50,9 @@ export function siteHeaderHTML(page = state.step) {
       <button type="button" class="sh-brand" data-nav="shop" title="${esc(v.merchant)}">${wordmarkHTML(v.merchant)}</button>
       <nav class="sh-navs">
         ${nav('shop', 'Shop')}
-        ${signedIn ? nav('orders', 'Orders') + nav('methods', '<span class="sh-lg">Payment methods</span><span class="sh-sm">Cards</span>') : ''}
+        ${signedIn ? nav('orders', 'Orders') : ''}
+        ${signedIn && activeWallet() ? nav('wallet', 'Wallet') : ''}
+        ${signedIn ? nav('methods', '<span class="sh-lg">Payment methods</span><span class="sh-sm">Cards</span>') : ''}
       </nav>
       <div class="sh-right">
         ${signedIn
