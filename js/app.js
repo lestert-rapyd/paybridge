@@ -24,6 +24,7 @@ import * as toolkit from './flows/toolkit.js';
 import * as backOffice from './flows/back-office.js';
 import { totalsHTML } from './flows/shared.js';
 import { thumbHTML } from './site/chrome.js';
+import { SEAM_PATHS, seamPathKey, seamLinesHTML, seamStripHTML, setAddress, pagePath, isSeamOn, setSeamOn, applySeam } from './seam.js';
 
 // Patch keys that mean "the customer's flow/context actually changed" —
 // only these trigger the full client-flow reset (mount() etc). Everything
@@ -36,11 +37,10 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 const FLOWS = { 'own-fields': ownFields, 'toolkit': toolkit };
 
-const MODEL_DESC = {
-  'own-fields': "Merchant collects the card and calls POST /v1/payments directly — a PCI-DSS path.",
-  'toolkit':    "Rapyd's iframe collects the card — zero PCI scope for the merchant.",
-};
-// Shown INSTEAD of MODEL_DESC in live, so the restriction is on screen, not
+// The path's own description (and its seam: who hosts what, PCI scope,
+// redirects) comes from js/seam.js — one copy, shared with the engine room.
+const seamKey = () => seamPathKey(state.model, toolkit.toolkitMode());
+// Shown INSTEAD of the seam summary in live, so the restriction is on screen, not
 // just in the SE's head (kept short — the sub-bar is one line). Own fields:
 // the backend refuses raw card data in live (LIVE_RAW_CARD_FORBIDDEN).
 const LIVE_DESC = {
@@ -349,6 +349,10 @@ function renderCheckout() {
   off.innerHTML = '';
   off.hidden = true;
 
+  // Every site page is on the merchant's domain — the hosted flow moves the
+  // address to Rapyd's (and back) itself (js/seam.js).
+  setAddress(v.domain, pagePath(state.step));
+
   if (!isCheckout()) {
     host.innerHTML = frameHTML();
     $('.browser').classList.remove('wide-tk', 'wide-3ds');
@@ -504,19 +508,29 @@ function pathHTML() {
   const live = state.env === 'live';
   const seg = (val, label, tag) =>
     `<button type="button" data-model="${val}" class="${state.model === val ? 'active' : ''}"><span class="dc-seg-tag">${tag}</span>${label}</button>`;
+  const key = seamKey();
+  // The toolkit's PCI tag doesn't depend on its mode (all three are SAQ A).
   return `
     <div class="dc-seg dc-seg-lg" id="dc-model">
-      ${seg('own-fields', 'Own Card Fields', 'PCI-DSS')}
-      ${seg('toolkit', 'Checkout Toolkit', 'Hosted')}
+      ${seg('own-fields', 'Own Card Fields', esc(SEAM_PATHS['own-fields'].tag))}
+      ${seg('toolkit', 'Checkout Toolkit', esc(SEAM_PATHS.embedded.tag))}
     </div>
-    <p class="dc-note ${live ? 'warn' : ''}">${esc((live ? LIVE_DESC : MODEL_DESC)[state.model])}</p>
+    <p class="dc-note ${live ? 'warn' : ''}">${esc(live ? LIVE_DESC[state.model] : SEAM_PATHS[key].summary)}</p>
     ${state.model === 'toolkit' ? `
       <div class="dc-field">
         <div class="dc-label">Toolkit mode<code>integration_mode</code></div>
         <div class="dc-seg" id="dc-tkmode">
           ${toolkit.TOOLKIT_MODES.map(([val, label]) => `<button type="button" data-val="${val}" class="${toolkit.toolkitMode() === val ? 'active' : ''}">${label}</button>`).join('')}
         </div>
-      </div>` : ''}`;
+      </div>` : ''}
+    <div class="dc-card dc-seam">
+      <div class="dc-card-head">
+        <span class="dc-card-title">Show seam</span>
+        <label class="dc-switch"><input type="checkbox" id="dc-seam" ${isSeamOn() ? 'checked' : ''} /><span class="sr">Show seam</span></label>
+      </div>
+      <p class="dc-note">Outlines where Rapyd begins inside the site — turn off for a clean customer view.</p>
+      ${seamLinesHTML(key)}
+    </div>`;
 }
 
 function credRowsHTML() {
@@ -653,9 +667,19 @@ function renderHeaderContext() {
 function syncControlStates() {
   document.documentElement.dataset.vertical = state.vertical;
   applySkin(state.vertical);
-  $('#client-domain').textContent = VERTICALS[state.vertical].domain;
+  setAddress(VERTICALS[state.vertical].domain, pagePath(state.step));
   renderHeaderContext();
   renderDrawer();
+  renderSeamStrip();
+}
+
+/* The engine room's seam strip (js/seam.js) — follows the path and the
+   toolkit's mode; keeps its open/closed state across repaints. */
+function renderSeamStrip() {
+  const host = $('#seam-strip-host');
+  if (!host) return;
+  const open = !!host.querySelector('details')?.open;
+  host.innerHTML = seamStripHTML(seamKey(), open);
 }
 
 /* A remembered customer (customers.js) comes back from storage with the cards
@@ -728,7 +752,7 @@ function wire() {
   // Other modules ask for the drawer (own-fields' "Strategy" link) or tell it
   // their controls changed (the strategy deck, the toolkit's own mode switch).
   document.addEventListener('demo:open-controls', e => openDrawer(e.detail?.section));
-  document.addEventListener('demo:controls-changed', () => renderDrawer());
+  document.addEventListener('demo:controls-changed', () => { renderDrawer(); renderSeamStrip(); });
   customers.subscribeCustomers(() => renderDrawer());
 
   const drawer = $('#demo-drawer');
@@ -739,7 +763,7 @@ function wire() {
     const model = t.closest('#dc-model button[data-model]');
     if (model) { if (model.dataset.model !== state.model) setState({ model: model.dataset.model }); return; }
     const tk = t.closest('#dc-tkmode button[data-val]');
-    if (tk) { toolkit.setToolkitMode(tk.dataset.val); renderDrawer(); return; }
+    if (tk) { toolkit.setToolkitMode(tk.dataset.val); renderDrawer(); renderSeamStrip(); return; }
     const env = t.closest('#dc-env button[data-env]');
     if (env) { switchEnv(env.dataset.env); return; }
     const prof = t.closest('#dc-creds button[data-profile]');
@@ -759,6 +783,8 @@ function wire() {
   });
   drawer.addEventListener('change', e => {
     if (e.target.id === 'fx-enable') { state.fx.enabled = e.target.checked; refreshAfterEdit(); }
+    // Show seam: CSS-only, so a live iframe / 3DS / hosted view isn't re-rendered.
+    if (e.target.id === 'dc-seam') setSeamOn(e.target.checked);
   });
 
   // Price tile — delegated on #checkout (never destroyed, only its innerHTML
@@ -945,6 +971,7 @@ setHighlightHook(() => FLOWS[state.model].applyHighlight?.());
 
 document.documentElement.dataset.vertical = state.vertical;
 applySkin(state.vertical);
+applySeam();
 wire();
 wireLiveGate();
 backOffice.mount();

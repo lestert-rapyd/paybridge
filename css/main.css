@@ -254,6 +254,55 @@ kbd {
 #rapyd-checkout { min-width: min(500px, 100%); min-height: 120px; }  /* toolkit needs ≥500px to lay out */
 #rapyd-checkout, #rapyd-checkout iframe { width: 100% !important; max-width: 100%; }
 
+/* ── Integration seam (js/seam.js) ─────────────────────────
+   Rapyd's surfaces in the frame (toolkit iframe, 3DS challenge, the hosted
+   page stand-in) are wrapped in .seam-rapyd: a dashed Rapyd-purple outline and
+   a "Rapyd · …" tag drawn AROUND the surface — nothing reaches inside it, so
+   Rapyd's iframe is never restyled. Merchant surfaces carry no mark. Only
+   while the drawer's "Show seam" is on (.browser.seam-on); off = a clean
+   customer view. Colours are --rapyd, never the skin's --accent. */
+.seam-rapyd { position: relative; }
+.browser.seam-on .seam-rapyd { outline: 1.5px dashed var(--rapyd); outline-offset: 3px; border-radius: var(--r-xs); }
+.browser.seam-on .seam-rapyd::before {
+  content: attr(data-seam); position: absolute; top: -12px; right: 10px; z-index: 3; pointer-events: none;
+  padding: 2px 8px; border-radius: var(--r-pill); background: var(--rapyd); color: #fff;
+  font: 600 10.5px/1.5 var(--font-ui); letter-spacing: .02em; white-space: nowrap;
+}
+/* full-bleed surfaces: the outline sits inside the frame's clipped edge */
+.browser.seam-on .seam-rapyd.seam-tds,
+.browser.seam-on .seam-rapyd.seam-page { outline-offset: -3px; }
+.browser.seam-on .seam-rapyd.seam-tds::before { top: 8px; }
+/* The address bar: a Rapyd domain gets the same mark */
+.urlbar #client-domain { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser.seam-on .urlbar.is-rapyd { box-shadow: inset 0 0 0 1.5px var(--rapyd); }
+.browser.seam-on .urlbar.is-rapyd::after {
+  content: 'Rapyd'; flex: none; padding: 1px 7px; border-radius: var(--r-pill);
+  background: var(--rapyd); color: #fff; font: 600 10px/1.5 var(--font-ui);
+}
+
+/* The hosted page's stand-in. Rapyd's page is on Rapyd's domain, where the
+   merchant skin stops — so it's drawn in the demo's own neutral face (fixed
+   values, not the frame's skinnable ramp), and never as a copy of Rapyd's page. */
+.hp-stage { padding: 30px 26px 34px; background: #FBFBFB; }
+.hp-away { padding: 34px 26px 30px; text-align: center; font-family: var(--font-ui); color: #454545; background: #fff; border-radius: var(--r-xs); }
+.hp-away-host { display: inline-block; padding: 3px 10px; border-radius: var(--r-pill); background: var(--rapyd-soft); color: var(--rapyd); font: 500 12px/1.5 var(--font-mono); }
+.hp-away-title { margin-top: 14px; font-size: 17px; font-weight: 600; color: #2A2A2B; }
+.hp-away-sub { max-width: 420px; margin: 8px auto 0; font-size: 13px; line-height: 1.55; color: #727272; }
+.hp-away-actions { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 20px; }
+.hp-btn { height: 40px; padding: 0 18px; border: 0; border-radius: var(--r-md); background: var(--rapyd); color: #fff; font: 500 13.5px var(--font-ui); cursor: pointer; }
+.hp-btn:hover { filter: brightness(1.08); }
+.hp-link { border: 0; background: none; padding: 4px; font: 500 12.5px var(--font-ui); color: #727272; cursor: pointer; }
+.hp-link:hover { color: #2A2A2B; text-decoration: underline; }
+
+/* Seam explainer lines (seamLinesHTML) — drawer card (light) and the engine
+   room's strip (dark, below) share the markup. */
+.seam-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.seam-lines li { display: grid; grid-template-columns: 72px 1fr; gap: 8px; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.seam-lines b { font-weight: 600; color: var(--ink); }
+.seam-owners { display: grid; gap: 5px; margin-top: 10px; font-size: 12px; line-height: 1.45; color: var(--muted); }
+.seam-who { display: inline-block; min-width: 64px; margin-right: 8px; padding: 1px 7px; border-radius: var(--r-pill); font-size: 10.5px; font-weight: 600; text-align: center; background: var(--soft-2); color: var(--text); }
+.seam-who.rapyd { background: var(--rapyd); color: #fff; }
+
 /* out-of-window annotations below the site (the shopper's bank-app view) */
 .offstage { width: 100%; max-width: 980px; margin: 14px auto 0; animation: cs-rise .5s ease-out .48s both; }
 
@@ -509,6 +558,24 @@ kbd {
 .tds-frame { flex: none; display: block; width: 100%; margin: 4px auto 0; height: clamp(380px, calc(100vh - 400px), 460px); border: 0; background: #fff; }
 
 /* ── 9 · Engine room ─────────────────────────────────────── */
+/* The integration seam strip (js/seam.js seamStripHTML) — one collapsible
+   line between the tabs and the panels. */
+.seam-strip-host { flex: none; background: var(--eng-bg); border-bottom: 1px solid var(--eng-line); }
+.seam-strip-host:empty { display: none; }
+.seam-strip > summary { list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 16px; cursor: pointer; font-size: 12.5px; color: var(--eng-muted); }
+.seam-strip > summary::-webkit-details-marker { display: none; }
+.seam-strip > summary::before { content: '▸'; font-size: 10px; color: var(--eng-faint); }
+.seam-strip[open] > summary::before { content: '▾'; }
+.seam-strip-k { font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--eng-faint); }
+.seam-strip-v { color: var(--eng-text); font-weight: 500; }
+.seam-strip-tag { margin-left: auto; padding: 1px 8px; border: 1px solid var(--eng-line); border-radius: var(--r-pill); font: 500 11px/1.5 var(--font-mono); color: var(--eng-accent); }
+.seam-strip .seam-lines, .seam-strip .seam-owners { padding: 0 16px; }
+.seam-strip .seam-owners { padding-bottom: 12px; }
+.seam-strip .seam-lines li, .seam-strip .seam-owners { color: var(--eng-muted); }
+.seam-strip .seam-lines b { color: var(--eng-text); }
+.seam-strip .seam-who { background: var(--eng-surface-2); color: var(--eng-text); }
+.seam-strip .seam-who.rapyd { background: var(--eng-accent); color: var(--eng-bg); }
+
 .rtabs { display: flex; align-items: center; gap: 20px; flex: none; padding: 0 16px; border-bottom: 1px solid var(--eng-line); background: var(--eng-bg); }
 .rtab {
   border: 0; background: transparent; color: var(--eng-muted);

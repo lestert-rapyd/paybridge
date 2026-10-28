@@ -181,17 +181,20 @@ export async function sendIdempotent(call, body, { onRetry } = {}) {
    The isTrusted() check below is belt and braces: this is the code path
    that paints "paid" and saves a card. `reference` is the payment the watch
    was started for, so the ledger update can't land on a newer one. */
-export function terminalHandler({ reference, paidLabel = 'Paid', slot = null, hooks = {} }) {
+/* `onShown(success)` runs just before the terminal screen paints, only when
+   it does (this payment still owns the screen) — the hosted flow uses it to
+   move the address bar back to the merchant's return page (js/seam.js). */
+export function terminalHandler({ reference, paidLabel = 'Paid', slot = null, hooks = {}, onShown = null }) {
   return (ev) => {
     if (!isTrusted(ev)) return;
     const success = /COMPLETED|CAPTURE/.test(String(ev.type || '').toUpperCase()) || (ev.status === 'CLO' && ev.paid);
     const current = state.reference === reference; // a reset/new payment owns the screen now
     if (success) {
-      if (current) { setStatus(paidLabel, 'ok'); renderSuccess(ev); }
+      if (current) { onShown?.(true); setStatus(paidLabel, 'ok'); renderSuccess(ev); }
       ledger.updateStatus(reference, { status: 'completed', phase: 'completed' });
       slot?.harvest(ev, hooks);
     } else {
-      if (current) { setStatus('Failed', 'error'); renderError(ev); }
+      if (current) { onShown?.(false); setStatus('Failed', 'error'); renderError(ev); }
       ledger.updateStatus(reference, { status: 'failed', phase: 'failed' });
       slot?.clear(reference); // nothing was authorised for reuse
     }

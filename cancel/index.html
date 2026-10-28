@@ -42,5 +42,11 @@
     <p>No charge was made. You can close this tab and start a new payment from the demo whenever you're ready.</p>
     <a class="btn" href="../">Back to the demo</a>
   </main>
+  <!-- Tell the demo tab the shopper is back (js/flows/toolkit.js listens on
+       the same channel): its browser frame then shows the merchant's own
+       cancel page. Same-origin only; it moves the frame, never marks a payment. -->
+  <script>
+    try { new BroadcastChannel('rapyd-demo-hosted').postMessage({ page: 'cancel' }); } catch (e) { /* unsupported — the demo follows the webhook */ }
+  </script>
 </body>
 </html>
