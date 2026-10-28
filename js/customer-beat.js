@@ -22,17 +22,19 @@
 
    Record is keyed `${env}:${profile}` like customers.js's buckets: a cus_***
    minted under one sandbox MID does not exist under another, and neither does
-   the call that made it.
+   the call that made it. The POST captures both keys when it is SENT — the SE
+   can switch profile while it's in flight, and the cus_*** must land in the
+   bucket of the MID that minted it.
    ───────────────────────────────────────────────────────────── */
 
 import { state } from './state.js';
 import * as customers from './customers.js';
 import { identityMode, usesCustomer } from './identity.js';
-import { createCustomer } from './api.js';
+import { createCustomer, newIdempotencyKey } from './api.js';
 import { renderJSONView, highlightPaths } from './json-view.js';
 import { FIELD_MAP } from './sync.js';
 import { headersHTML, fillSignature, newSaltTimestamp } from './signing.js';
-import { setActiveTab, setStatus } from './ui.js';
+import { setActiveTab, setStatus, esc } from './ui.js';
 import { setCustomerBeat } from './webhooks.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -91,16 +93,23 @@ function syncWebhooks() {
 const openState = new Map();
 const isOpen = (id) => (openState.has(id) ? openState.get(id) : true);
 
-/** The card shell every beat uses — the flows pass their own inner block. */
+/* `path` and `badge` are text that can carry API data (a cus_*** id, a Rapyd
+   error code). Some callers still pass the pre-escaped literal 'signed &amp;
+   sent', so un-escape &amp; first: the result is then escaped exactly once
+   either way, and nothing a value carries can open a tag. */
+const asText = (v) => esc(String(v ?? '').replace(/&amp;/g, '&'));
+
+/** The card shell every beat uses — the flows pass their own inner block
+    (`inner` is HTML and the caller's to escape; everything else is text). */
 export function beatCardHTML({ id, n, method, path, badge, badgeKind = '', inner }) {
   return `
-    <details class="beat-card" id="${id}" ${isOpen(id) ? 'open' : ''}>
+    <details class="beat-card" id="${esc(id)}" ${isOpen(id) ? 'open' : ''}>
       <summary class="beat-head">
         <span class="beat-chev">▸</span>
-        ${n ? `<span class="beat-n">${n}</span>` : ''}
-        <span class="method-pill ${method.toLowerCase()}">${method.toUpperCase()}</span>
-        <span class="req-path">${path}</span>
-        ${badge ? `<span class="beat-state ${badgeKind}">${badge}</span>` : ''}
+        ${n ? `<span class="beat-n">${esc(n)}</span>` : ''}
+        <span class="method-pill ${esc(String(method).toLowerCase())}">${esc(String(method).toUpperCase())}</span>
+        <span class="req-path">${asText(path)}</span>
+        ${badge ? `<span class="beat-state ${esc(badgeKind)}">${asText(badge)}</span>` : ''}
       </summary>
       <div class="beat-body">${inner}</div>
     </details>`;
@@ -199,11 +208,11 @@ export function customerResponseCardHTML() {
     badge: ok ? 'CUSTOMER CREATED' : String(r.data?.error || 'ERROR'), badgeKind: ok ? 'ok' : 'err',
     inner: `
       <div class="eng-pillrow">
-        <span class="wh-pill ${ok ? 'success' : 'failure'}">HTTP ${r.httpStatus ?? 0}</span>
-        <span class="wh-pill ${ok ? 'success' : 'failure'}">${ok ? 'CUSTOMER CREATED' : String(r.data?.error || 'ERROR')}</span>
+        <span class="wh-pill ${ok ? 'success' : 'failure'}">${r.httpStatus ? `HTTP ${esc(r.httpStatus)}` : 'NO RESPONSE'}</span>
+        <span class="wh-pill ${ok ? 'success' : 'failure'}">${ok ? 'CUSTOMER CREATED' : esc(r.data?.error || 'ERROR')}</span>
       </div>
       ${renderJSONView(r.data ?? { error: 'no response body' })}
-      ${ok && id ? `<div class="beat-foot">Every payment on this session now references <code>${id}</code> — and a saved card_*** is held under it.</div>` : ''}`,
+      ${ok && id ? `<div class="beat-foot">Every payment on this session now references <code>${esc(id)}</code> — and a saved card_*** is held under it.</div>` : ''}`,
   });
 }
 
@@ -211,12 +220,31 @@ export function customerResponseCardHTML() {
 let repaintPanels = () => {}; // set by app.js (it's the only module that knows the flows)
 export function setPanelRepainter(fn) { repaintPanels = fn; }
 
+/* Idempotency: one key per LOGICAL create. A retry after an unknown outcome
+   (no response, 5xx/timeout) with the same body reuses it, so a POST that did
+   reach Rapyd can't mint a second cus_***; a definite answer (or an edited
+   body) starts a fresh key. Kept off the record — beatRecord() is painted. */
+const idem = new WeakMap(); // record -> { key, sig }
+// A backend gate refusal (MISSING_KEYS 500, LIVE_*, UNKNOWN_PROFILE) never reached
+// Rapyd — a definite answer, so the next try is a new create.
+const isGateError = (data) => /^(LIVE_|UNKNOWN_PROFILE$|MISSING_)/.test(String(data?.error || ''));
+const unknownOutcome = (httpStatus, data) => !isGateError(data) && (!httpStatus || httpStatus >= 500);
+
 export async function fireCreateCustomer() {
   const r = record();
   if (r.state === 'sending') return false;
   if (customers.getCustomerId()) return true; // already exists — the beat is done
 
   const body = customers.enrichedCustomerBody();
+  // Captured at SEND time: the response must be filed under this MID's bucket
+  // even if the SE switches profile while the call is in flight.
+  const bucket = customers.bucketKey();
+  const env = state.env, profile = state.profile;
+  const sig = JSON.stringify([bucket, body]);
+  const prev = idem.get(r);
+  const idempotencyKey = prev && prev.sig === sig ? prev.key : newIdempotencyKey();
+  idem.set(r, { key: idempotencyKey, sig });
+
   Object.assign(r, { state: 'sending', body, httpStatus: null, data: null });
   setStatus('Creating customer…', 'processing');
   refreshAccountPanel();
@@ -224,17 +252,20 @@ export async function fireCreateCustomer() {
   repaintPanels();
   setActiveTab('request');
 
+  // api.js never throws (a transport failure is httpStatus 0 + NETWORK_ERROR);
+  // the catch is belt and braces so the beat can never stick on 'sending'.
   let httpStatus = 0, data = null;
   try {
-    ({ httpStatus, data } = await createCustomer({ ...body, env: state.env, profile: state.profile }));
+    ({ httpStatus, data } = await createCustomer({ ...body, env, profile }, { idempotencyKey }));
   } catch (err) {
-    data = { error: 'network_error', message: err.message };
+    data = { error: 'NETWORK_ERROR', message: err?.message || 'request failed' };
   }
   const id = data?.data?.id;
   r.httpStatus = httpStatus;
   r.data = data;
+  if (!unknownOutcome(httpStatus, data)) idem.delete(r); // Rapyd answered — the next try is a new create
 
-  if (httpStatus >= 400 || data?.error || !id) {
+  if (httpStatus >= 400 || !httpStatus || data?.error || !id) {
     r.state = 'error';
     setStatus('Error', 'error');
     syncWebhooks();
@@ -248,7 +279,7 @@ export async function fireCreateCustomer() {
   r.at = Date.now();
   openState.set('beat-cus', false); // its job is done — fold it away, the payment is the live one
   setStatus('Customer created', 'ok');
-  customers.setCustomerId(id);      // notifies: the chooser, the panel and the back office follow
+  customers.setCustomerId(id, { key: bucket }); // notifies: the chooser, the panel and the back office follow
   syncWebhooks();                   // starts the CUSTOMER_* watch
   refreshAccountPanel();
   repaintPanels();
@@ -257,8 +288,6 @@ export async function fireCreateCustomer() {
 }
 
 /* ── Left panel: the account step ────────────────────────── */
-const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
-
 /* The form mirrors the request body, in the body's own order — one field per
    row, so the SE can read straight across from a field to the line it writes.
    Every one is registered in sync.js FIELD_MAP, so focusing it lights that line

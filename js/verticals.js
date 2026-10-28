@@ -134,8 +134,18 @@ export const VERTICAL_ORDER = ['ecommerce', 'crypto', 'gaming'];
    overrides that product's numbers when it was captured for this same
    vertical+product — never explicitly cleared, the guard makes it fall away
    cleanly on any vertical/product change. Live still charges a real card —
-   every price collapses to one penny regardless of any edited amount. */
+   every price collapses to one penny regardless of any edited amount. That
+   clamp is a UX nicety only: the backend enforces its own LIVE_MAX_AMOUNT
+   cap, because anything client-side can be edited away. */
 export function activeProduct(verticalId = state.vertical) {
+  const p = pricedProduct(verticalId);
+  return state.env === 'live' ? { ...p, amount: '0.01' } : p;
+}
+
+/** The selected product with the SE's price override applied, BEFORE the live
+    penny clamp — what the tile reverts to when a typed amount is invalid, so a
+    live-mode edit can't bake '0.01' into the sandbox override. */
+export function pricedProduct(verticalId = state.vertical) {
   const v = VERTICALS[verticalId];
   const sel = state.selectedProduct;
   let p = (sel && sel.vertical === verticalId && v.products.find((x) => x.id === sel.productId)) || v.products[0];
@@ -143,7 +153,7 @@ export function activeProduct(verticalId = state.vertical) {
   if (override && override.vertical === verticalId && override.productId === p.id) {
     p = { ...p, amount: override.amount, currency: override.currency };
   }
-  return state.env === 'live' ? { ...p, amount: '0.01' } : p;
+  return p;
 }
 
 /** The pay-button verb for the active product ("Pay" / "Subscribe" / "Start DCA"…). */

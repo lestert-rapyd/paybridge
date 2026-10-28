@@ -22,30 +22,41 @@
      the is_direct_purchase fork is a customer-facing toggle (buy now vs
      fund the fiat wallet). MIT recurring charges live in the back office,
      NOT here.
+
+   Live mode: this flow collects NO card data at all. The PAN and CVV
+   would travel through PayBridge's own (non-PCI) backend, so in live the
+   form is replaced by a notice pointing at the Checkout Toolkit, whose
+   hosted fields keep the card inside Rapyd. The backend refuses raw card
+   data in live too (LIVE_RAW_CARD_FORBIDDEN) — this is the front door.
    ───────────────────────────────────────────────────────────── */
 
 import { state } from '../state.js';
-import { VERTICALS, activeProduct, customerCharge, chargeText, fxSnapshot, productCta, getFxBeat, fxBeatPath } from '../verticals.js';
-import { createDirectPayment } from '../api.js';
+import { VERTICALS, activeProduct, customerCharge, chargeText, fxSnapshot, productCta } from '../verticals.js';
+import { createDirectPayment, newReference } from '../api.js';
 import { profileEwallet, nridAvailable, activeProfile } from '../profiles.js';
 import { clientDetails } from '../client-details.js';
 import { renderJSONView, highlightPaths } from '../json-view.js';
-import { setActiveTab, setStatus } from '../ui.js';
+import { setActiveTab, setStatus, esc } from '../ui.js';
 import { startWebhookWatch } from '../webhooks.js';
-import { renderProcessing, render3DS, renderSuccess, renderError } from '../screens.js';
+import { renderProcessing, render3DS, renderError } from '../screens.js';
 import {
-  FIELD_MAP, detectBrand,
+  FIELD_MAP, detectBrand, brandLabel,
   formatNumber, formatExpiry, parseExpiry,
   luhn, expiryValid,
 } from '../sync.js';
 import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
 import * as ledger from '../ledger.js';
 import * as customers from '../customers.js';
-import { identityMode, usesCustomer, reusableCreds, promoteToReturning, refreshIdentityChooser } from '../identity.js';
+import { identityMode, usesCustomer, reusableCreds, refreshIdentityChooser } from '../identity.js';
 import {
   beatCardHTML, customerRequestCardHTML, customerResponseCardHTML,
   fillCustomerSignature, fireCreateCustomer, refreshAccountPanel,
 } from '../customer-beat.js';
+import {
+  fxCardHTML, paymentResponseCardHTML, amountProblem, bodyAmount,
+  LIVE_GATE_ERRORS, failureStatusText, httpsUrl, sendIdempotent, isUnknownOutcome,
+  terminalHandler, cardSaveSlot, pendingCardSave,
+} from './shared.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -62,7 +73,11 @@ let chargeMode = null;         // returning: 'cvv' | 'nrid' | 'token' (validated
 let selectedCredRef = null;    // returning: which chip is active
 let useDifferentCard = false;  // returning: fall back to the blank form
 let directPurchase = true;     // AFT is_direct_purchase (customer-facing fork)
-let pendingSave = null;        // snapshot between submit and PAYMENT_COMPLETED
+const saveSlot = cardSaveSlot(); // snapshot between submit and the trusted terminal event
+
+const isLive = () => state.env === 'live';
+/** Forget anything typed — a sandbox test PAN must not ride into a live repaint. */
+function wipeCard() { card.number = ''; card.expiry = ''; card.cvv = ''; card.name = ''; }
 
 /* ── stored-credential helpers ───────────────────────────── */
 const isSubscription = () => activeProduct().billing === 'subscription';
@@ -132,7 +147,7 @@ function displayBody() {
   const cus = customers.getCustomerId();
 
   const body = {
-    amount: Number(p.amount),
+    amount: bodyAmount(p), // raw text while invalid — the Pay button is gated on it
     currency: p.currency,
   };
   // No-FX flows must omit all three fields entirely — sending any of them
@@ -199,6 +214,9 @@ function displayBody() {
     if (effectiveSave()) fields.recurrence_type = recurrenceType();
     body.payment_method = { type, fields };
   }
+  // Live: no card data is collected here (see the header) — say so in the
+  // body rather than show an empty PAN shape.
+  if (isLive()) body.payment_method = '(not collected in live — use the Checkout Toolkit)';
 
   // Everything on this page is customer-present (CIT) — MIT lives in back office.
   body.initiation_type = 'customer_present';
@@ -243,12 +261,13 @@ function directPurchaseHTML() {
    network_reference_id are engine-room facts — they show in the request body
    and the back office, not on the storefront. */
 function chipHTML(c, active) {
+  // last4/expiry/brand can arrive from the list endpoint — escaped like any API data
   const exp = c.expiration_month && c.expiration_year ? `${c.expiration_month}/${c.expiration_year}` : '··/··';
   return `
-    <button type="button" class="cof-chip ${active ? 'active' : ''}" data-cred="${c.ref}">
-      <span class="cof-chip-brand">${c.brand || 'Card'}</span>
-      <span class="cof-chip-num">···· ${c.last4 || '····'}</span>
-      <span class="cof-chip-exp">${exp}</span>
+    <button type="button" class="cof-chip ${active ? 'active' : ''}" data-cred="${esc(c.ref)}">
+      <span class="cof-chip-brand">${esc(c.brand || 'Card')}</span>
+      <span class="cof-chip-num">···· ${esc(c.last4 || '····')}</span>
+      <span class="cof-chip-exp">${esc(exp)}</span>
     </button>`;
 }
 
@@ -261,7 +280,7 @@ function returningHTML() {
   return `
     <div class="cof-returning" id="cof-returning">
       <div class="cof-head">
-        <span class="cof-welcome">Welcome back, ${first}</span>
+        <span class="cof-welcome">Welcome back, ${esc(first)}</span>
         <button type="button" class="cof-link" id="cof-different">Use a different card</button>
       </div>
       <div class="cof-chips">${creds.map(c => chipHTML(c, c.ref === cred?.ref)).join('')}</div>
@@ -280,8 +299,8 @@ function returningHTML() {
         <input type="checkbox" id="f-tds" ${tds ? 'checked' : ''} />
         <span>Require 3-D Secure</span>
       </label>
-      <button class="co-cta" id="pay-btn">${productCta()} ${p.amount} ${p.currency}</button>
-      <div class="cof-foot"><button type="button" class="cof-link subtle" id="cof-forget">Not ${first}? Sign out</button></div>
+      <button class="co-cta" id="pay-btn">${esc(productCta())} ${esc(p.amount)} ${esc(p.currency)}</button>
+      <div class="cof-foot"><button type="button" class="cof-link subtle" id="cof-forget">Not ${esc(first)}? Sign out</button></div>
     </div>`;
 }
 
@@ -310,8 +329,22 @@ function saveRowHTML() {
     </div>`;
 }
 
+/* Live: the form never renders (see the header). The notice is the SE's cue —
+   `.pb-notice.warn` is the shared inline-notice style; the disabled #pay-btn
+   stays so app.js's charge repaint still has its target. */
+function liveBlockedHTML() {
+  const p = activeProduct();
+  return `
+    <div class="pb-notice warn" id="of-live-note" role="note">
+      <b>Own card fields are off in live.</b> They’d send the PAN and CVV through this demo’s own backend, which isn’t PCI-DSS scoped.
+      Switch to <b>Checkout Toolkit</b> for live payments — Rapyd’s hosted fields collect the card.
+    </div>
+    <button class="co-cta" id="pay-btn" disabled title="Own card fields are disabled in live mode">${esc(productCta())} ${esc(p.amount)} ${esc(p.currency)}</button>`;
+}
+
 export function renderPaymentHTML() {
   const p = activeProduct();
+  if (isLive()) return liveBlockedHTML();
   ensureStorageValid(); // the identity mode / MID may have withdrawn the active route
   if (isReturning()) return returningHTML();
   return `
@@ -343,7 +376,7 @@ export function renderPaymentHTML() {
       <input type="checkbox" id="f-tds" ${tds ? 'checked' : ''} />
       <span>Require 3-D Secure</span>
     </label>
-    <button class="co-cta" id="pay-btn">${productCta()} ${p.amount} ${p.currency}</button>`;
+    <button class="co-cta" id="pay-btn">${esc(productCta())} ${esc(p.amount)} ${esc(p.currency)}</button>`;
 }
 
 /* ── Stored-credential strategy — SE popover (portal #sc-popover) ──
@@ -364,7 +397,7 @@ function deckHTML() {
     const WHY_NO_VAULT = 'This credential returns no network_reference_id — customer-absent vault reuse isn’t possible';
     const WHY_NO_TOKEN = 'A Rapyd card_*** token is held by a customer — switch to “Create an account”';
     const stBtn = (val, label, ok, why) =>
-      `<button type="button" data-val="${val}" class="${storage === val ? 'active' : ''}"${ok ? '' : ` disabled title="${why}"`}>${label}</button>`;
+      `<button type="button" data-val="${val}" class="${storage === val ? 'active' : ''}"${ok ? '' : ` disabled title="${esc(why)}"`}>${label}</button>`;
     return `
       <div class="se-row">
         <div class="se-lab">Storage<code>save_payment_method</code></div>
@@ -383,8 +416,8 @@ function deckHTML() {
       ${needsCustomer ? `
       <div class="sc-cust">
         <div class="sc-cust-head">Rapyd customer<span class="se-deck-hint">prerequisite · created first</span></div>
-        <div class="sc-cust-body">Saves under <code>${customers.getCustomerId() || 'cus_***'}</code>.</div>
-        <div class="sc-cust-id"><code>${id.name}</code><code>${id.email}</code></div>
+        <div class="sc-cust-body">Saves under <code>${esc(customers.getCustomerId() || 'cus_***')}</code>.</div>
+        <div class="sc-cust-id"><code>${esc(id.name)}</code><code>${esc(id.email)}</code></div>
       </div>` : `
       <div class="sc-cust vault">
         <div class="sc-cust-body">Merchant vault — no <code>cus_***</code>.</div>
@@ -393,7 +426,7 @@ function deckHTML() {
             carries a reason). What it may not do is stage-direct the SE to another
             surface — "pick SC2 via the Sandbox picker", "switch to Create an
             account" — which is their line, and it was printing it for them. */''}
-      ${!nridOk ? `<div class="se-warn">${activeProfile().label} returns no <code>network_reference_id</code> — vault reuse unavailable.</div>` : ''}
+      ${!nridOk ? `<div class="se-warn">${esc(activeProfile().label)} returns no <code>network_reference_id</code> — vault reuse unavailable.</div>` : ''}
       ${!avail.token ? `<div class="se-warn">Guest checkout has no <code>cus_***</code> — token route unavailable.</div>` : ''}`;
   }
   const cred = activeCredential();
@@ -402,7 +435,7 @@ function deckHTML() {
     return `
       <div class="se-row">
         <div class="se-lab">Charge with<code>payment_method</code></div>
-        <div class="se-fixed"><code>${cred.card_id || 'card_***'}</code><span class="se-note">Rapyd token — no card data in the request</span></div>
+        <div class="se-fixed"><code>${esc(cred.card_id || 'card_***')}</code><span class="se-note">Rapyd token — no card data in the request</span></div>
       </div>`;
   }
   const nridOk = !!cred.network_reference_id && nridAvailable();
@@ -415,7 +448,7 @@ function deckHTML() {
       <div class="se-lab">Reuse mode<code>payment_method.fields</code></div>
       <div class="se-seg" data-opt="mode">
         <button type="button" data-val="cvv" class="${mode === 'cvv' ? 'active' : ''}">PAN + CVV</button>
-        <button type="button" data-val="nrid" class="${mode === 'nrid' ? 'active' : ''}" ${nridOk ? '' : `disabled title="${nridTitle}"`}>PAN + network_reference_id</button>
+        <button type="button" data-val="nrid" class="${mode === 'nrid' ? 'active' : ''}" ${nridOk ? '' : `disabled title="${esc(nridTitle)}"`}>PAN + network_reference_id</button>
       </div>
     </div>`;
 }
@@ -463,22 +496,6 @@ function syncNameInheritance() {
   }
 }
 
-/* The fx_rates quote, as a card. Recorded in verticals.js by app.js's debounced
-   fetcher; shown here so the call the FX popover makes is inspectable like any
-   other beat instead of living only on the storefront. */
-function fxCardHTML() {
-  const b = getFxBeat();
-  if (!b) return '';
-  const ok = b.httpStatus >= 200 && b.httpStatus < 400 && !b.data?.error;
-  return beatCardHTML({
-    id: 'beat-fx', method: 'GET', path: fxBeatPath(),
-    badge: ok ? 'quoted' : 'failed', badgeKind: ok ? 'ok' : 'err',
-    inner: `
-      <div class="eng-pillrow"><span class="wh-pill ${ok ? 'success' : 'failure'}">HTTP ${b.httpStatus}</span></div>
-      ${renderJSONView(b.data ?? { error: 'no response body' })}`,
-  });
-}
-
 /* ── Request panel ───────────────────────────────────────────
    Two stacked beat cards: the customer create (owned by customer-beat.js,
    absent for a guest) above this flow's payment. The customer card used to be
@@ -495,7 +512,7 @@ function renderRequest() {
     badge: sent ? 'signed &amp; sent' : '', badgeKind: sent ? 'ok' : '',
     inner: `
       ${headersHTML(st)}
-      <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${sent ? 'signed &amp; sent' : 'updates as you type'}</span></div>
+      <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${sent ? 'signed &amp; sent' : isLive() ? 'own card fields are off in live' : 'updates as you type'}</span></div>
       <div id="req-json">${renderJSONView(body)}</div>`,
   }) + fxCardHTML();
   fillCustomerSignature();
@@ -511,15 +528,6 @@ export function applyHighlight() {
 /* ── Response panel ──────────────────────────────────────────
    Same two-card stack as the request: the customer create's response (owned by
    customer-beat.js) above this flow's payment response. */
-function respBadge(httpStatus, data) {
-  const d = data?.data;
-  if (d?.status === 'CLO' && d?.paid) return ['PAID · CLO', 'success'];
-  if (d?.status === 'ACT')           return ['ACTION · ACT', 'pending'];
-  if (data?.error)                   return [String(data.error), 'failure'];
-  if (d?.status)                     return [d.status, 'pending'];
-  return [`HTTP ${httpStatus}`, httpStatus < 400 ? 'success' : 'failure'];
-}
-const BADGE_KIND = { success: 'ok', failure: 'err', pending: 'live' };
 let lastResponse = null;      // persisted so switching back from back office can repaint without resetting anything
 let responseSending = false;
 
@@ -536,17 +544,7 @@ function paintResponsePanel() {
     });
   } else if (lastResponse) {
     const { httpStatus, data } = lastResponse;
-    const [badge, kind] = respBadge(httpStatus, data);
-    payCard = beatCardHTML({
-      id: 'beat-pay-res', n: cusCard ? 2 : null, method: 'POST', path: '/v1/payments',
-      badge, badgeKind: BADGE_KIND[kind] || '',
-      inner: `
-        <div class="eng-pillrow">
-          <span class="wh-pill ${httpStatus < 400 ? 'success' : 'failure'}">HTTP ${httpStatus}</span>
-          <span class="wh-pill ${kind}">${badge}</span>
-        </div>
-        ${renderJSONView(data ?? { error: 'no response body' })}`,
-    });
+    payCard = paymentResponseCardHTML({ id: 'beat-pay-res', n: cusCard ? 2 : null, httpStatus, data });
   }
   if (!cusCard && !payCard) return; // nothing sent yet — leave app.js's empty state
   el.innerHTML = cusCard + payCard;
@@ -568,6 +566,13 @@ export function refreshRightPanel() {
   paintResponsePanel();
 }
 
+/** app.js calls this (FLOWS[model].refreshSummary) after every tile / FX edit
+    has repainted the totals and the pay button's label — re-run the gates,
+    since the amount may have just become invalid (or valid again). */
+export function refreshSummary() {
+  refreshPayValidity();
+}
+
 /** Profile switch (SC1/SC2/SC3): credentials re-key per MID, NRID gating and
     the body's ewallet change — repaint without resetting the flow. */
 export function refreshProfile() {
@@ -585,70 +590,68 @@ export function refreshProfile() {
   renderScPopover();
 }
 
-/* ── Terminal (webhook or fallback) → left screen ────────── */
-function handleTerminal(ev) {
-  // ev is a terminal PAYMENT_COMPLETED/PAYMENT_FAILED webhook, or the poll
-  // fallback's status object (CLO+paid) when no webhook was delivered.
-  const success = /COMPLETED|CAPTURE/.test((ev.type || '').toUpperCase()) || (ev.status === 'CLO' && ev.paid);
-  if (success) {
-    setStatus('Paid · CLO', 'ok'); renderSuccess(ev);
-    ledger.updateStatus(state.reference, { status: 'completed', phase: 'completed' });
-    harvestCredentials(ev);
-  } else {
-    setStatus('Failed', 'error'); renderError(ev);
-    ledger.updateStatus(state.reference, { status: 'failed', phase: 'failed' });
-    pendingSave = null; // nothing was authorised for reuse
-  }
-}
-
-/** Pull the stored credential(s) out of the PAYMENT_COMPLETED webhook.
-    card_*** arrives as the payment's payment_method; network_reference_id in
-    payment_method_data. The list endpoint then silently backfills anything
-    the webhook didn't carry (expiry etc.). */
-function harvestCredentials(ev) {
-  const ps = pendingSave;
-  pendingSave = null;
-  const d = ev.raw?.data;
-  if (!ps || !d) return;
-  const pmd = d.payment_method_data || {};
-  const nri = pmd.network_reference_id || null;
-  if (ps.vault) {
-    const ref = customers.addVaultCredential({
-      ...ps.snapshot,
-      recurrence_type: ps.recurrence_type, aft: ps.aft,
-      origin_vertical: state.vertical, origin_model: 'own-fields', origin_product: ps.origin_product,
-    });
-    if (nri) customers.setNetworkReferenceId(ref, nri);
-  }
-  if (ps.token) {
-    const cardId =
-      (typeof d.payment_method === 'string' && /^card_/.test(d.payment_method) && d.payment_method) ||
-      (typeof pmd.id === 'string' && /^card_/.test(pmd.id) && pmd.id) || null;
-    if (cardId) {
-      const ref = customers.upsertTokenCredential({
-        card_id: cardId, type: pmd.type || ps.snapshot.type, brand: ps.snapshot.brand,
-        last4: pmd.last4 || ps.snapshot.last4,
-        expiration_month: ps.snapshot.expiration_month, expiration_year: ps.snapshot.expiration_year,
-        recurrence_type: ps.recurrence_type, aft: ps.aft,
-        origin_vertical: state.vertical, origin_model: 'own-fields', origin_product: ps.origin_product,
-      });
-      if (nri) customers.setNetworkReferenceId(ref, nri);
-    }
-    customers.refreshTokens(); // silent backfill — the webhook harvest is primary
-  }
-  // A card is now on file, so the natural next state is "Returning customer" —
-  // the arc's concluding phase (and what the view used to do implicitly).
-  promoteToReturning();
-}
+/* ── Terminal (trusted webhook or Retrieve) → left screen ─────
+   Built per payment by shared.js terminalHandler(): webhooks.js only fires it
+   with a TRUSTED event — a signature-verified PAYMENT_COMPLETED/FAILED, or its
+   retrieve-derived status event (which carries the full payment as raw.data,
+   so the card_*** / network_reference_id harvest works from either). */
+const onTerminalFor = (reference) => terminalHandler({ reference, paidLabel: 'Paid · CLO', slot: saveSlot });
 
 /* ── Submit ──────────────────────────────────────────────── */
+/** A failure the Pay path didn't anticipate (a throwing renderer, say) — the
+    click handler's promise would otherwise reject unhandled and leave the
+    button stuck on "Processing…". */
+let payRef = null;         // the reference the in-flight pay() created — a crash marks only that one
+let payDispatched = false; // the POST went out — from here the payment may exist at Rapyd
+
+const payCta = () => `${productCta()} ${chargeText(customerCharge())}${isSubscription() ? ' /mo' : ''}`;
+
+function payCrashed(err) {
+  console.error('own-fields pay failed:', err);
+  sent = false;
+  // pay() set busy before its first await; a throw ahead of its try/finally
+  // would otherwise leave Pay disabled on "Processing…" until a remount
+  // (refreshPayValidity bails while busy is set).
+  const btn = $('#pay-btn');
+  if (btn) delete btn.dataset.busy;
+  try {
+    if (btn) btn.textContent = payCta();
+    refreshPayValidity();
+  } catch { /* the crash may be in these very renderers — the error UI below still matters */ }
+  renderResponse(0, { error: 'CLIENT_ERROR', message: err?.message || String(err) });
+  setStatus('Error', 'error');
+  renderError({ status: 'ERR' });
+  // Only a payment that never left the browser is known to have failed. Once
+  // dispatched it may still settle — the ledger poller (by reference) and the
+  // armed save slot are left to finish it rather than being cut off here. No
+  // payRef = the crash came before this click armed anything, so an earlier
+  // payment's pending save is left alone.
+  if (payRef && !payDispatched) {
+    ledger.updateStatus(payRef, { status: 'failed', phase: 'error' });
+    saveSlot.clear(payRef);
+  }
+}
+
 async function pay() {
   const btn = $('#pay-btn');
+  if (!btn || btn.dataset.busy) return;
+  payRef = null;
+  payDispatched = false;
+  if (isLive()) return; // defence in depth — the live page renders no form and a disabled button
   const v = VERTICALS[state.vertical];
   const p = activeProduct();
   const returning = isReturning();
   const cred = returning ? activeCredential() : null;
   const mode = returning ? currentMode() : null;
+
+  // Amount gate — never send '' (Number('') = 0) or more decimals than the currency has.
+  const badAmount = amountProblem(p);
+  if (badAmount) {
+    refreshPayValidity();
+    $('#tile-amount')?.focus();
+    toast(badAmount, 'err');
+    return;
+  }
 
   if (returning && mode === 'cvv' && !card.cvv) {
     $('#f-cvv')?.focus();
@@ -668,6 +671,7 @@ async function pay() {
 
   const btnLabel = btn.textContent;
   btn.disabled = true;
+  btn.dataset.busy = '1'; // a double click must not start a second logical payment
   btn.textContent = 'Processing…';
   setStatus('Processing…', 'processing');
 
@@ -681,14 +685,15 @@ async function pay() {
     && (identityMode() === 'account' || (effectiveSave() && storage !== 'vault'));
   if (needsCustomer) {
     const ok = await fireCreateCustomer();
-    if (!ok) { btn.disabled = false; btn.textContent = btnLabel; return; }
+    if (!ok) { delete btn.dataset.busy; btn.disabled = false; btn.textContent = btnLabel; return; }
   }
 
-  state.reference = `pb_${state.vertical}_${Date.now()}`;
+  state.reference = newReference(`pb_${state.vertical}`); // unguessable — it's the webhook read key
+  const reference = state.reference; // the payment this click owns, whatever state.reference becomes
+  payRef = reference;
   {
     const digits = card.number.replace(/\D/g, '');
-    const brandName = detectBrand(card.number).brand; // 'VISA' | 'MASTERCARD' | ''
-    const network = cred ? cred.brand : (brandName ? brandName[0] + brandName.slice(1).toLowerCase() : null);
+    const network = cred ? cred.brand : brandLabel(digits, null);
     const last4 = cred ? cred.last4 : digits.slice(-4);
     const fx = state.fx;
     // amount/currency = what the CUSTOMER paid (converted under 'buy'), so the
@@ -708,7 +713,7 @@ async function pay() {
       aft: !!p.aft, is_direct_purchase: p.aft ? isDirectPurchase() : null,
       note,
     };
-    ledger.recordPayment(state.reference, {
+    ledger.recordPayment(reference, {
       model: 'own-fields', vertical: state.vertical, amount: p.amount, currency: p.currency,
       requested_currency: fx.enabled ? fx.requestedCurrency : null, fixed_side: fx.enabled ? fx.fixedSide : null,
       last4, brand: network,
@@ -716,22 +721,26 @@ async function pay() {
       credential: cred ? { kind: cred.kind, label: `${cred.brand} ···${cred.last4}` } : null,
       aft: !!p.aft,
     });
-    pendingSave = (!returning && effectiveSave()) ? {
+    // Armed now, synchronously before the POST — so it captures THIS payment's
+    // reference and customer bucket (env:profile), whatever the SE switches to
+    // during a 3DS challenge.
+    saveSlot.arm((!returning && effectiveSave()) ? pendingCardSave({
       vault: storage === 'vault' || storage === 'both',
       token: storage === 'token' || storage === 'both',
       recurrence_type: recurrenceType(),
       aft: !!p.aft,
+      origin_model: 'own-fields',
       origin_product: p.id,
       snapshot: {
         type: detectBrand(card.number).type,
-        number: card.number.replace(/\s/g, ''),
+        number: digits,
         expiration_month: parseExpiry(card.expiry).month,
         expiration_year: parseExpiry(card.expiry).year,
         name: card.name,
         brand: network || 'Card',
         last4: digits.slice(-4),
       },
-    } : null;
+    }) : null);
   }
   sent = true;
   renderRequest(); // fresh salt/timestamp/signature for the send
@@ -739,40 +748,56 @@ async function pay() {
   renderResponseSending();
 
   try {
-    const { httpStatus, data } = await createDirectPayment(postBody());
+    // One Idempotency-Key for this click; an unknown outcome (no response /
+    // 502 / 504) is re-sent once under the same key — see shared.js.
+    const reqBody = postBody();
+    payDispatched = true;
+    const { httpStatus, data } = await sendIdempotent(createDirectPayment, reqBody, {
+      onRetry: () => setStatus('Retrying…', 'processing'),
+    });
     renderResponse(httpStatus, data);
     const d = data?.data;
 
-    if (!d || data?.error) {
-      setStatus('Declined', 'error');
-      renderError({ status: data?.error || 'ERR' }); // the decline copy is screens.js's, always
-      ledger.updateStatus(state.reference, { status: 'failed', phase: 'declined' });
-      pendingSave = null;
+    // No answer even after the same-key retry: the charge may have gone
+    // through, so this is NOT a decline. Keep the entry pending and the card
+    // save armed, and watch the reference — the id comes from the webhook or a
+    // Retrieve-confirmed claim (webhooks.js).
+    if (isUnknownOutcome(httpStatus)) {
+      setStatus('Outcome unknown · confirming', 'processing');
+      renderProcessing('Confirming payment…', 'We didn’t hear back in time — checking whether your payment went through. Please don’t pay again.');
+      ledger.updateStatus(reference, { phase: 'unconfirmed' });
+      startWebhookWatch({ reference, onTerminal: onTerminalFor(reference) });
       return;
     }
 
-    ledger.setPaymentId(state.reference, d.id);
+    // api.js never throws: a transport failure is httpStatus 0 + NETWORK_ERROR,
+    // and the live gate's refusals (LIVE_*) arrive here as normal errors.
+    if (!d || data?.error || httpStatus >= 400 || httpStatus === 0) {
+      setStatus(failureStatusText(data, httpStatus === 0 ? 'Error' : 'Declined'), 'error');
+      renderError({ status: data?.error || 'ERR' }); // the decline copy is screens.js's, always
+      ledger.updateStatus(reference, { status: 'failed', phase: httpStatus === 0 ? 'error' : 'declined' });
+      saveSlot.clear(reference);
+      if (LIVE_GATE_ERRORS.has(data?.error) && data?.message) toast(data.message, 'err');
+      return;
+    }
+
+    ledger.setPaymentId(reference, d.id);
 
     if (d.status === 'ACT' && d.next_action === '3d_verification') {
       setStatus('3DS challenge', 'action');
-      render3DS(d.redirect_url);
-      ledger.updateStatus(state.reference, { phase: 'pending_3ds' });
+      render3DS(httpsUrl(d.redirect_url) || 'about:blank');
+      ledger.updateStatus(reference, { phase: 'pending_3ds' });
     } else if (d.status === 'CLO' && d.paid) {
       setStatus('Authorized · confirming', 'processing');
       renderProcessing('Payment authorized', 'Confirming your payment…');
-      ledger.updateStatus(state.reference, { phase: 'awaiting_confirmation' });
+      ledger.updateStatus(reference, { phase: 'awaiting_confirmation' });
     } else {
       renderProcessing('Processing…');
     }
-    startWebhookWatch({ reference: state.reference, payment_id: d.id, onTerminal: handleTerminal });
-  } catch (err) {
-    renderResponse(0, { error: 'network_error', message: err.message });
-    setStatus('Error', 'error');
-    renderError({ status: 'ERR' });
-    ledger.updateStatus(state.reference, { status: 'failed', phase: 'error' });
-    pendingSave = null;
+    startWebhookWatch({ reference, payment_id: d.id, onTerminal: onTerminalFor(reference) });
   } finally {
     sent = false;
+    delete btn.dataset.busy;
   }
 }
 
@@ -797,12 +822,20 @@ function cardValid() {
     && card.name.trim().length > 0;
 }
 /* Gate the pay button, and flag any field whose CONTENT is invalid (empty
-   fields stay unflagged — they just keep the button disabled). */
-function refreshPayValidity() {
+   fields stay unflagged — they just keep the button disabled). The amount is
+   gated too (shared.js amountProblem): the tile is free text, so '' or
+   '149.999' must never reach a body. The tile and its invalid styling belong
+   to app.js's shell, which also calls this back (FLOWS[model].refreshPayValidity)
+   when a bad amount is fixed. */
+export function refreshPayValidity() {
   const btn = $('#pay-btn');
   if (!btn) return;
-  if (isReturning()) { btn.disabled = currentMode() === 'cvv' && !card.cvv; return; }
-  btn.disabled = !cardValid();
+  const badAmount = amountProblem();
+  if (btn.dataset.busy) return; // mid-send — pay() owns the button until it settles
+  if (isLive()) { btn.disabled = true; return; }
+  btn.title = badAmount || '';
+  if (isReturning()) { btn.disabled = !!badAmount || (currentMode() === 'cvv' && !card.cvv); return; }
+  btn.disabled = !!badAmount || !cardValid();
   const flag = (id, bad) => $(`#${id}`)?.closest('.co-input')?.classList.toggle('is-invalid', bad);
   const digits = card.number.replace(/\D/g, '');
   const { month, year } = parseExpiry(card.expiry);
@@ -822,13 +855,17 @@ function rerenderPayRegion() {
   renderScPopover();
   renderRequest();
   const payBtn = $('#pay-btn');
-  if (payBtn) payBtn.textContent = `${productCta()} ${chargeText(customerCharge())}${isSubscription() ? ' /mo' : ''}`;
+  if (payBtn) payBtn.textContent = payCta();
   refreshPayValidity();
 }
 
+// A rejected pay() must not go unhandled — see payCrashed().
+const onPayClick = () => { pay().catch(payCrashed); };
+
 function wirePayRegion() {
   const useTest = $('#use-test');
-  if (useTest) useTest.style.display = isReturning() ? 'none' : '';
+  if (useTest) useTest.style.display = isReturning() || isLive() ? 'none' : '';
+  if (isLive()) { refreshPayValidity(); return; } // notice + disabled button only — nothing to wire
 
   if (isReturning()) {
     const root = $('#cof-returning');
@@ -853,7 +890,7 @@ function wirePayRegion() {
       refreshPayValidity();
     });
     $('#f-tds')?.addEventListener('change', e => { tds = e.target.checked; renderRequest(); });
-    $('#pay-btn')?.addEventListener('click', pay);
+    $('#pay-btn')?.addEventListener('click', onPayClick);
     refreshPayValidity();
     return;
   }
@@ -895,7 +932,7 @@ function wirePayRegion() {
     dpSeg.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
     renderRequest();
   });
-  $('#pay-btn').addEventListener('click', pay);
+  $('#pay-btn').addEventListener('click', onPayClick);
   $('#use-test')?.addEventListener('click', fillTestCard);
   syncNameInheritance();
   refreshPayValidity();
@@ -903,6 +940,7 @@ function wirePayRegion() {
 
 export function mount() {
   sent = false;
+  if (isLive()) wipeCard(); // nothing typed in sandbox survives into live
   useDifferentCard = false; // returning view is the default whenever credentials exist
   closeScPopover(); // never linger open across a vertical/model/env reset
   wirePayRegion();

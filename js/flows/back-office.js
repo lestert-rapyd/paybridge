@@ -20,19 +20,34 @@
 
    Amounts follow the product-wide convention: 3-letter ISO code, no
    currency symbol (matches the API and the checkout tile).
+
+   Ground rules this file keeps:
+     · Everything painted is escaped (ui.js esc) — ledger entries carry
+       Rapyd/webhook data and the customer name is SE-typed.
+     · Every call about a payment is signed with the env + MID that CREATED
+       it (entry.env / entry.profile), never whatever is selected now.
+     · Webhooks shown here are display-only; state is settled by ledger.js,
+       which trusts only verified events or its own Retrieve Payment.
+     · One idempotency key per logical refund/charge (see the Actions block).
    ───────────────────────────────────────────────────────────── */
 
 import { state } from '../state.js';
 import { VERTICALS } from '../verticals.js';
-import { createRefund, createDirectPayment, retrievePayment, retrieveCustomer, fetchWebhooksBatch } from '../api.js';
+import {
+  createRefund, createDirectPayment, retrievePayment, retrieveCustomer, fetchWebhooksBatch,
+  newIdempotencyKey, newReference,
+} from '../api.js';
 import { profileEwallet } from '../profiles.js';
 import { renderJSONView } from '../json-view.js';
-import { setActiveTab } from '../ui.js';
+import { setActiveTab, esc } from '../ui.js';
 import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
-import { classify } from '../classify.js';
+import { classify, isTrusted } from '../classify.js';
+import { brandLabel, currencyDecimals, validAmount } from '../sync.js';
+import { eventCardHTML } from '../webhooks.js';
 import {
   getLedger, getEntry, subscribeLedger, recordPayment, recordRefund, updateRefund,
   setPaymentId, updateStatus, applyPaymentObject, walletBalances, refundedTotals,
+  refreshPayment,
 } from '../ledger.js';
 import * as customers from '../customers.js';
 import {
@@ -61,15 +76,19 @@ let pendingChargeRef = null;  // payment reference we're waiting to confirm
 const PHASE_LABEL = {
   created: 'Created', pending_3ds: 'Pending · 3DS', awaiting_confirmation: 'Awaiting confirmation',
   completed: 'Completed', failed: 'Failed', declined: 'Declined', error: 'Error',
+  unconfirmed: 'Outcome unknown', // no answer / 5xx — the poller settles it either way
 };
 
-function esc(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+/* Round to the currency's ISO 4217 minor units (0 for JPY/KRW, 3 for KWD…)
+   so a request body never carries more decimals than Rapyd accepts. */
+const roundCur = (n, cur) => { const f = 10 ** currencyDecimals(cur); return Math.round((Number(n) || 0) * f) / f; };
 const fmt = (n) => { const v = Number(n); return Number.isFinite(v) ? v.toFixed(2) : '—'; };
-const money = (n, cur) => `${fmt(n)} ${cur || ''}`.trim();
-function pill(text, kind) { return `<span class="wh-pill ${kind}">${text}</span>`; }
+const moneyText = (n, cur) => `${fmt(n)} ${cur || ''}`.trim();
+/** HTML-safe — every markup caller interpolates it directly (the currency
+    can come from a payment object). Use moneyText for textContent. */
+const money = (n, cur) => esc(moneyText(n, cur));
+function pill(text, kind) { return `<span class="wh-pill ${esc(kind)}">${esc(text)}</span>`; }
 
 function statusKind(status) {
   if (status === 'completed') return 'success';
@@ -77,10 +96,11 @@ function statusKind(status) {
   return 'pending';
 }
 
-function brandLabel(entry) {
+/* "Visa ending 1111" — plain text (callers esc() it); the scheme name is
+   sync.js's one brandLabel(), fed the settled payment_method type first. */
+function cardLine(entry) {
   const s = entry.settled || {};
-  const t = (s.brand || entry.brand || '').toLowerCase();
-  const net = /visa/.test(t) ? 'Visa' : /master/.test(t) ? 'Mastercard' : /amex|express/.test(t) ? 'Amex' : 'Card';
+  const net = brandLabel(s.brand || entry.brand);
   const last4 = s.last4 || entry.last4;
   return last4 ? `${net} ending ${last4}` : net;
 }
@@ -134,10 +154,10 @@ function tileHTML(entry) {
   const clickable = entry.status === 'completed';
   const mit = entry.origin === 'backoffice';
   return `
-    <div class="bo-tile ${clickable ? 'clickable' : 'inert'}" data-ref="${entry.reference}">
+    <div class="bo-tile ${clickable ? 'clickable' : 'inert'}" data-ref="${esc(entry.reference)}">
       <div class="bo-tile-main">
         <div class="bo-tile-ref">${esc(entry.reference)}</div>
-        <div class="bo-tile-sub">${brandLabel(entry)}${fx ? ` <span class="bo-fx-badge">FX → ${s.merchant_requested_currency} · ${entry.fixed_side || 'sell'}</span>` : ''}${mit ? ` <span class="bo-mit-badge">MIT · ${entry.initiation_type || 'recurring'}</span>` : ''}${entry.aft ? ` <span class="bo-mit-badge aft">AFT</span>` : ''}</div>
+        <div class="bo-tile-sub">${esc(cardLine(entry))}${fx ? ` <span class="bo-fx-badge">FX → ${esc(s.merchant_requested_currency)} · ${esc(entry.fixed_side || 'sell')}</span>` : ''}${mit ? ` <span class="bo-mit-badge">MIT · ${esc(entry.initiation_type || 'recurring')}</span>` : ''}${entry.aft ? ` <span class="bo-mit-badge aft">AFT</span>` : ''}</div>
       </div>
       <div class="bo-tile-amts">
         <div class="bo-tile-paid">${money(custAmt, custCur)}</div>
@@ -175,8 +195,8 @@ function eligibilityBarHTML(t) {
   return `
     <div class="bo-eligible ${full ? 'full' : ''}">
       <div class="bo-eligible-top">
-        <span class="bo-eligible-amt">Refunded ${fmt(t.refunded)} / ${fmt(t.total)} ${t.currency}</span>
-        <span class="bo-eligible-state">${full ? 'Fully refunded' : `${fmt(t.remaining)} ${t.currency} eligible`}</span>
+        <span class="bo-eligible-amt">Refunded ${fmt(t.refunded)} / ${fmt(t.total)} ${esc(t.currency)}</span>
+        <span class="bo-eligible-state">${full ? 'Fully refunded' : `${fmt(t.remaining)} ${esc(t.currency)} eligible`}</span>
       </div>
       <div class="bo-eligible-track"><div class="bo-eligible-fill" style="width:${pct}%"></div></div>
     </div>`;
@@ -198,7 +218,7 @@ function refundHistoryHTML(entry) {
               <td class="bo-rt-amt">${r.amount != null ? money(r.amount, r.currency) : '—'}</td>
               <td class="bo-rt-reason" title="${esc(r.reason || '')}">${r.reason ? esc(r.reason) : '—'}</td>
               <td class="bo-rt-when">${fmtWhen(r.created_at)}</td>
-              <td class="bo-rt-id"><code>${shortId(r.refund_id)}</code></td>
+              <td class="bo-rt-id"><code>${esc(shortId(r.refund_id))}</code></td>
             </tr>`).join('')}
         </tbody>
       </table>
@@ -206,16 +226,16 @@ function refundHistoryHTML(entry) {
 }
 
 /* The full refundable slice, expressed in the customer's currency (that's the
-   basis refundedTotals() reports in). */
+   basis refundedTotals() reports in). Exactly what's left — never the whole
+   total again once something has been refunded. */
 function fullCustomerRefundable(entry) {
-  const t = refundedTotals(entry);
-  return t.remaining > 0 ? t.remaining : t.total;
+  return refundedTotals(entry).remaining;
 }
 /* Same slice, converted into a given route's currency (customer or merchant). */
 function fullRefundAmount(entry, route) {
   const custFull = fullCustomerRefundable(entry);
-  const fxr = (entry.settled || {}).fx_rate;
-  return route === 'merchant' && fxr ? round2(custFull * fxr) : custFull;
+  const s = entry.settled || {};
+  return route === 'merchant' && s.fx_rate ? roundCur(custFull * s.fx_rate, s.merchant_requested_currency) : custFull;
 }
 
 const guarTag = (guaranteed) => guaranteed
@@ -232,7 +252,7 @@ function fullRoutesHTML(entry) {
   const custCur = s.currency || entry.currency;
   const merchCur = s.merchant_requested_currency;
   const custFull = fullCustomerRefundable(entry);
-  const wallet = money(round2(custFull * (fxr || 1)), merchCur); // debited from the wallet
+  const wallet = money(roundCur(custFull * (fxr || 1), merchCur), merchCur); // debited from the wallet
   const out = money(custFull, custCur);                          // received by the customer
   const leg = (label, val, guaranteed) =>
     `<div class="bo-route-leg"><span>${label}</span><span class="bo-leg-val"><b>${val}</b>${guarTag(guaranteed)}</span></div>`;
@@ -246,7 +266,7 @@ function fullRoutesHTML(entry) {
       </div>
     </button>`;
   return `
-    <div class="bo-route-anchor">You received <b>${money(s.merchant_requested_amount, merchCur)}</b> for this order · rate 1 ${custCur} = ${fmt(fxr)} ${merchCur}</div>
+    <div class="bo-route-anchor">You received <b>${money(s.merchant_requested_amount, merchCur)}</b> for this order · rate 1 ${esc(custCur)} = ${fmt(fxr)} ${esc(merchCur)}</div>
     <div class="bo-routes">
       ${card('customer', 'Refund what they paid',
         'The customer is made whole in the currency they paid — your wallet debit floats with the rate.',
@@ -275,10 +295,10 @@ function partialFieldsHTML(entry) {
   const merchCur = s.merchant_requested_currency;
   const curControl = fx
     ? `<div class="co-fx-seg bo-refcur-seg" id="bo-refund-curseg">
-         <button type="button" data-route="customer" class="${form.route === 'merchant' ? '' : 'active'}">${custCur}</button>
-         <button type="button" data-route="merchant" class="${form.route === 'merchant' ? 'active' : ''}">${merchCur}</button>
+         <button type="button" data-route="customer" class="${form.route === 'merchant' ? '' : 'active'}">${esc(custCur)}</button>
+         <button type="button" data-route="merchant" class="${form.route === 'merchant' ? 'active' : ''}">${esc(merchCur)}</button>
        </div>`
-    : `<span class="bo-refund-currency">${custCur}</span>`;
+    : `<span class="bo-refund-currency">${esc(custCur)}</span>`;
   return `
     <div class="bo-refund-field">
       <label>Amount</label>
@@ -287,7 +307,7 @@ function partialFieldsHTML(entry) {
         ${curControl}
       </div>
     </div>
-    ${fx ? `<div class="bo-partial-note">Only this order's pair — <b>${custCur}</b> or <b>${merchCur}</b> — can be refunded.</div>` : ''}`;
+    ${fx ? `<div class="bo-partial-note">Only this order's pair — <b>${esc(custCur)}</b> or <b>${esc(merchCur)}</b> — can be refunded.</div>` : ''}`;
 }
 
 /* The Full / Partial scope toggle that sits at the top of the form. */
@@ -327,7 +347,7 @@ function detailHTML(entry) {
   const fullyRefunded = t.remaining <= 0 && t.refunded > 0;
   const statusBadge = fullyRefunded
     ? pill('REFUNDED', 'field')
-    : (t.refunded > 0 ? pill(`PARTIAL · ${fmt(t.refunded)}/${fmt(t.total)} ${t.currency}`, 'pending') : pill('COMPLETED', 'success'));
+    : (t.refunded > 0 ? pill(`PARTIAL · ${fmt(t.refunded)}/${fmt(t.total)} ${t.currency || ''}`, 'pending') : pill('COMPLETED', 'success'));
 
   return `
     <button class="bo-back" id="bo-back">‹ All payments</button>
@@ -336,16 +356,16 @@ function detailHTML(entry) {
         <div>
           <span class="bo-model-tag">${entry.model === 'toolkit' ? 'Toolkit' : 'Own fields'}</span>
           ${entry.origin === 'backoffice' ? `<span class="bo-model-tag mit">Back office · MIT</span>` : ''}
-          <span class="bo-detail-vertical">${v?.label || entry.vertical}</span>
+          <span class="bo-detail-vertical">${esc(v?.label || entry.vertical)}</span>
         </div>
         ${statusBadge}
       </div>
       <div class="bo-detail-ref">${esc(entry.reference)}</div>
-      <div class="bo-detail-card2">${brandLabel(entry)}</div>
+      <div class="bo-detail-card2">${esc(cardLine(entry))}</div>
 
       <div class="bo-detail-rows">
         <div class="bo-detail-row"><span>Customer paid</span><b>${money(custAmt, custCur)}</b></div>
-        ${fx ? `<div class="bo-detail-row"><span>Rate at capture</span><b>1 ${custCur} = ${fmt(s.fx_rate)} ${s.merchant_requested_currency}</b></div>` : ''}
+        ${fx ? `<div class="bo-detail-row"><span>Rate at capture</span><b>1 ${esc(custCur)} = ${fmt(s.fx_rate)} ${esc(s.merchant_requested_currency)}</b></div>` : ''}
         ${fx ? `<div class="bo-detail-row"><span>Merchant settled</span><b class="bo-detail-settled">${money(s.merchant_requested_amount, s.merchant_requested_currency)}</b></div>` : ''}
       </div>
 
@@ -417,8 +437,8 @@ function renderCof() {
     <div class="bo-cof-card">
       <div class="bo-cof-head">
         <div>
-          <div class="bo-cof-name">${customers.getIdentity().name}</div>
-          <div class="bo-cof-id">${cus ? `<code>${cus}</code>` : 'merchant vault only — no Rapyd customer object'}</div>
+          <div class="bo-cof-name">${esc(customers.getIdentity().name)}</div>
+          <div class="bo-cof-id">${cus ? `<code>${esc(cus)}</code>` : 'merchant vault only — no Rapyd customer object'}</div>
         </div>
         <div class="bo-cof-headbtns">
           ${cus ? `<button class="bo-cof-sync" id="bo-cof-sync" ${chargeFiring ? 'disabled' : ''}>↻ Sync from Rapyd</button>` : ''}
@@ -456,7 +476,7 @@ function customerViewHTML() {
 
       <div class="bo-detail-rows">
         <div class="bo-detail-row"><span>Email</span><b>${esc(id.email)}</b></div>
-        ${when ? `<div class="bo-detail-row"><span>Created</span><b>${when} · this session</b></div>` : ''}
+        ${when ? `<div class="bo-detail-row"><span>Created</span><b>${esc(when)} · this session</b></div>` : ''}
         <div class="bo-detail-row"><span>Cards on file</span><b>${creds.length}</b></div>
       </div>
 
@@ -492,16 +512,16 @@ function credRowHTML(c) {
     ? 'Token not captured yet — waiting on PAYMENT_COMPLETED'
     : 'No network_reference_id captured — a vault card cannot be charged without the customer present';
   return `
-    <div class="bo-cof-cred ${open ? 'open' : ''}" data-cred="${c.ref}">
+    <div class="bo-cof-cred ${open ? 'open' : ''}" data-cred="${esc(c.ref)}">
       <div class="bo-cof-credrow">
-        <span class="bo-cof-brand">${c.brand || 'Card'} ···${c.last4 || '····'}</span>
-        <span class="bo-cof-exp">${exp}</span>
+        <span class="bo-cof-brand">${esc(c.brand || 'Card')} ···${esc(c.last4 || '····')}</span>
+        <span class="bo-cof-exp">${esc(exp)}</span>
         ${pill(c.kind === 'token' ? 'card_ token' : 'merchant vault', 'field')}
         ${pill(c.recurrence_type || 'unscheduled', mit ? 'pending' : 'field')}
         ${c.aft ? pill('AFT', 'evt') : ''}
         ${c.network_reference_id ? pill('NRI ✓', 'success') : ''}
         ${mit
-          ? `<button class="bo-cof-charge" data-charge="${c.ref}" ${chargeable && !chargeFiring ? '' : `disabled title="${esc(blockedHint)}"`}>Charge</button>`
+          ? `<button class="bo-cof-charge" data-charge="${esc(c.ref)}" ${chargeable && !chargeFiring ? '' : `disabled title="${esc(blockedHint)}"`}>Charge</button>`
           : `<span class="bo-cof-cit">reused from the client site</span>`}
       </div>
       ${open ? chargeFormHTML(c) : ''}
@@ -526,7 +546,7 @@ function chargeFormHTML(c) {
     <div class="bo-charge-form">
       <div class="bo-refund-formhead">Scheduled charge — customer not present</div>
       <div class="bo-charge-meta">
-        <span class="bo-charge-prod">${p.name}</span>
+        <span class="bo-charge-prod">${esc(p.name)}</span>
         ${pill('initiation_type: recurring', 'evt')}
         ${c.aft ? pill('AFT · is_direct_purchase', 'evt') : ''}
       </div>
@@ -535,7 +555,7 @@ function chargeFormHTML(c) {
         <label>Amount</label>
         <div class="bo-refund-amtfield">
           <input type="text" inputmode="decimal" class="bo-refund-input" id="bo-charge-amount" value="${esc(chargeForm.amount)}" />
-          <span class="bo-refund-currency">${p.currency}</span>
+          <span class="bo-refund-currency">${esc(p.currency)}</span>
         </div>
       </div>
       <div class="bo-refund-actions">
@@ -552,7 +572,7 @@ function mitBody(c, amountInput, ref) {
   const p = productForCred(c);
   const v = VERTICALS[c.origin_vertical] || VERTICALS[state.vertical];
   const body = {
-    amount: round2(amountInput),
+    amount: roundCur(amountInput, p.currency),
     currency: p.currency,
     capture: true,
   };
@@ -590,22 +610,48 @@ function paintGetRequest(entry, prepared) {
   const path = `/v1/payments/${entry.payment_id}`;
   const st = newSaltTimestamp();
   el.innerHTML = `
-    <div class="req-headline"><span class="method-pill get">GET</span><span class="req-path">${path}</span></div>
+    <div class="req-headline"><span class="method-pill get">GET</span><span class="req-path">${esc(path)}</span></div>
     ${headersHTML(st)}
     <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${prepared ? 'back office · retrieve (prepared)' : 'back office · retrieve'}</span></div>
     <div class="jsonv"><div class="jsonv-body"><span class="jv-empty">— GET has no request body —</span></div></div>`;
   fillSignature(el, 'get', path, st, null);
 }
-function paintResponse(data, ok, label) {
+/* #panel-response has one owner at a time: the actionSeq of whoever painted
+   it last. An async result repaints only while it still owns the panel — so
+   a slow GET can't clobber a newer action's response, yet one superseded by
+   an action that never touched this panel (opening the charge form) still
+   replaces its own "RETRIEVING…" instead of leaving it there forever. */
+let responseOwner = 0;
+
+/** `httpStatus` null = still in flight; 0 = no response (network/CORS). */
+function paintResponse(data, ok, label, httpStatus = null, owner = actionSeq) {
   const el = $('#panel-response');
   if (!el || state.leftView !== 'backoffice') return;
+  responseOwner = owner;
+  const kind = httpStatus == null ? 'pending' : ok ? 'success' : 'failure';
+  const code = httpStatus == null ? 'HTTP …' : httpStatus ? `HTTP ${esc(httpStatus)}` : 'NO RESPONSE';
   el.innerHTML = `
     <div class="eng-pillrow">
-      <span class="wh-pill ${ok ? 'success' : 'failure'}">HTTP ${ok ? 200 : 400}</span>
-      <span class="wh-pill ${ok ? 'success' : 'failure'}">${label}</span>
+      <span class="wh-pill ${kind}">${code}</span>
+      <span class="wh-pill ${kind}">${esc(label)}</span>
     </div>
-    ${renderJSONView(data ?? { error: 'no response body' })}`;
+    ${httpStatus == null
+      ? `<div class="eng-sending"><span class="spin"></span>Awaiting Rapyd response…</div>`
+      : renderJSONView(data ?? { error: 'no response body' })}`;
 }
+const isOk = (httpStatus, data) => httpStatus >= 200 && httpStatus < 400 && !data?.error;
+/** The pill for a failed call: a Rapyd error_code, else the backend's error
+    (LIVE_AUTH_REQUIRED, LIVE_LIMIT…), else a transport failure. */
+function errLabel(httpStatus, data) {
+  if (!httpStatus) return 'NETWORK ERROR';
+  return String(data?.raw?.error_code || data?.error || 'ERROR');
+}
+/* Errors raised by the backend's own gate — Rapyd never saw the request, so
+   no Rapyd-shaped failure webhook should be narrated for them. */
+const isGateError = (data) => /^(LIVE_|UNKNOWN_PROFILE$|MISSING_)/.test(String(data?.error || ''));
+/* No answer, or a 5xx/timeout: the call may or may not have reached Rapyd. */
+/* A gate error (MISSING_KEYS 500, LIVE_*) is a definite refusal — never parked. */
+const unknownOutcome = (httpStatus, data) => !isGateError(data) && (!httpStatus || httpStatus >= 500);
 function paintRefundRequest(body) {
   const el = $('#panel-request');
   if (!el || state.leftView !== 'backoffice') return;
@@ -636,7 +682,7 @@ function paintListRequest(prepared) {
   const path = `/v1/customers/${cus}/payment_methods?category=card`;
   const st = newSaltTimestamp();
   el.innerHTML = `
-    <div class="req-headline"><span class="method-pill get">GET</span><span class="req-path">${path}</span></div>
+    <div class="req-headline"><span class="method-pill get">GET</span><span class="req-path">${esc(path)}</span></div>
     ${headersHTML(st)}
     <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${prepared ? 'back office · saved cards (prepared)' : 'back office · saved cards'}</span></div>
     <div class="jsonv"><div class="jsonv-body"><span class="jv-empty">— GET has no request body —</span></div></div>`;
@@ -650,7 +696,7 @@ function paintCustomerGetRequest(prepared) {
   const path = `/v1/customers/${cus}`;
   const st = newSaltTimestamp();
   el.innerHTML = `
-    <div class="req-headline"><span class="method-pill get">GET</span><span class="req-path">${path}</span></div>
+    <div class="req-headline"><span class="method-pill get">GET</span><span class="req-path">${esc(path)}</span></div>
     ${headersHTML(st)}
     <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${prepared ? 'back office · retrieve customer (prepared)' : 'back office · retrieve customer'}</span></div>
     <div class="jsonv"><div class="jsonv-body"><span class="jv-empty">— GET has no request body —</span></div></div>`;
@@ -663,49 +709,46 @@ function paintCreateBeat() {
   if (state.leftView !== 'backoffice') return;
   const req = $('#panel-request');
   const res = $('#panel-response');
+  const mySeq = ++actionSeq; // supersede an in-flight GET so it can't overwrite this
   if (req) { req.innerHTML = customerRequestCardHTML(); fillCustomerSignature(); }
   const card = customerResponseCardHTML();
-  if (res && card) res.innerHTML = card;
+  if (res && card) { res.innerHTML = card; responseOwner = mySeq; }
   setActiveTab('request');
 }
 
 async function fireRetrieveCustomer() {
   const cus = customers.getCustomerId();
   if (!cus) return;
+  // The cus_*** lives in the CURRENT bucket (customers.js keys by env:profile),
+  // so the current env/profile is exactly the pair that minted it.
+  const env = state.env, profile = state.profile;
   const mySeq = ++actionSeq;
   paintCustomerGetRequest(false);
   setActiveTab('response');
-  paintResponse(null, true, 'RETRIEVING…');
+  paintResponse(null, true, 'RETRIEVING…', null, mySeq);
+  let httpStatus = 0, data = null;
   try {
-    const { httpStatus, data } = await retrieveCustomer(cus, state.env, state.profile);
-    if (mySeq !== actionSeq) return; // superseded — leave the panel alone
-    const ok = httpStatus < 400 && !data?.error;
-    paintResponse(data, ok, ok ? 'CUSTOMER RETRIEVED' : 'ERROR');
+    ({ httpStatus, data } = await retrieveCustomer(cus, env, profile));
   } catch (err) {
-    // A route that isn't deployed yet answers with Vercel's CORS-less 404, which
-    // surfaces as "Failed to fetch" — say so instead of spinning forever.
-    if (mySeq !== actionSeq) return;
-    paintResponse({ error: 'network_error', message: err.message }, false, 'NETWORK ERROR');
+    // api.js never throws; belt and braces so the panel can't spin forever.
+    data = { error: 'NETWORK_ERROR', message: err?.message || 'request failed' };
   }
+  if (responseOwner !== mySeq) return; // a newer action owns the panel
+  // A route that isn't deployed yet answers with Vercel's CORS-less 404, which
+  // arrives as httpStatus 0 — shown as NETWORK ERROR, not a spinner.
+  const ok = isOk(httpStatus, data);
+  paintResponse(data, ok, ok ? 'CUSTOMER RETRIEVED' : errLabel(httpStatus, data), httpStatus, mySeq);
 }
 
+/* The webhook tab while back office is active. Same card markup as the
+   client watcher (webhooks.js eventCardHTML) — escaped, and carrying the
+   "unverified — not trusted" chip, so a forged event reads as one here too. */
 function paintWebhookCard(events, label = 'back office · refund') {
   const el = $('#panel-webhooks');
   if (!el || state.leftView !== 'backoffice') return;
   el.innerHTML = `
-    <div class="wh-status live"><span class="wh-status-dot"></span>Delivered<span class="wh-ref">${label}</span></div>
-    ${events.map((e, i) => {
-      const kind = classify(e);
-      return `
-        <details class="wh-card ${kind}" ${i === 0 ? 'open' : ''}>
-          <summary class="wh-card-head">
-            <span class="wh-chev">▸</span>
-            ${pill(e.type || 'EVENT', 'evt')}
-            ${e.status ? pill(`status: ${e.status}`, kind) : ''}
-          </summary>
-          <div class="wh-card-json">${renderJSONView(e.raw || e)}</div>
-        </details>`;
-    }).join('')}`;
+    <div class="wh-status live"><span class="wh-status-dot"></span>Delivered<span class="wh-ref">${esc(label)}</span></div>
+    ${events.map((e, i) => eventCardHTML(e, i === 0)).join('')}`;
 }
 
 /* ── Refund body assembly (route-aware) ───────────────────── */
@@ -714,14 +757,16 @@ function computeRefundLegs(entry, route, amountInput) {
   const fxr = s.fx_rate;
   const custCur = s.currency || entry.currency;
   const merchCur = s.merchant_requested_currency;
-  const amt = round2(amountInput);
+  // Each leg is rounded to ITS currency's minor units (JPY has none).
   if (isFx(entry) && route === 'merchant' && merchCur && fxr) {
-    return { body: { amount: amt, currency: merchCur }, customer_equiv: round2(amt / fxr),
+    const amt = roundCur(amountInput, merchCur);
+    return { body: { amount: amt, currency: merchCur }, customer_equiv: roundCur(amt / fxr, custCur),
       merchant_debit_amount: amt, merchant_debit_currency: merchCur };
   }
+  const amt = roundCur(amountInput, custCur);
   if (isFx(entry) && route === 'customer' && merchCur && fxr) {
     return { body: { amount: amt, currency: custCur }, customer_equiv: amt,
-      merchant_debit_amount: round2(amt * fxr), merchant_debit_currency: merchCur };
+      merchant_debit_amount: roundCur(amt * fxr, merchCur), merchant_debit_currency: merchCur };
   }
   return { body: { amount: amt, currency: custCur }, customer_equiv: amt,
     merchant_debit_amount: amt, merchant_debit_currency: custCur };
@@ -740,8 +785,28 @@ function currentRefundBody(entry) {
 /* ── Actions ──────────────────────────────────────────────── */
 // Monotonic token: any newer right-panel action (another tile's GET, a refund
 // fire) supersedes a still-in-flight GET, so a slow response can't clobber the
-// panel after the SE has moved on.
+// panel after the SE has moved on (see responseOwner above).
 let actionSeq = 0;
+
+/* Idempotency — one key per LOGICAL refund / MIT charge. A fire whose outcome
+   is unknown (no response, 5xx, timeout) parks its key AND reference; firing
+   the same body again for the same payment / credential re-sends both, so a
+   request that did reach Rapyd is deduped instead of refunding or charging
+   twice. A definite answer (2xx/4xx) clears it — the next click is new. */
+let refundRetry = null; // { owner: payment reference, sig, key, ref }
+let chargeRetry = null; // { owner: credential ref, sig, key, ref }
+
+/* Re-render the body without taking the caret out of the field being typed in. */
+function renderBodyKeepingFocus() {
+  const a = document.activeElement;
+  const id = a?.id && $('#bo-body')?.contains(a) ? a.id : null;
+  const sel = id && typeof a.selectionStart === 'number' ? [a.selectionStart, a.selectionEnd] : null;
+  renderBody();
+  if (!id) return;
+  const el = document.getElementById(id);
+  el?.focus();
+  if (sel) { try { el?.setSelectionRange(sel[0], sel[1]); } catch { /* not a text input */ } }
+}
 
 async function retrieveAndOpen(reference) {
   const entry = getEntry(reference);
@@ -753,18 +818,21 @@ async function retrieveAndOpen(reference) {
   renderBody();
   paintGetRequest(entry, false);
   setActiveTab('response');
-  paintResponse(null, true, 'RETRIEVING…');
+  paintResponse(null, true, 'RETRIEVING…', null, mySeq);
+  let httpStatus = 0, data = null;
   try {
-    // signed by the MID that created the payment — the only one that can see it
-    const { httpStatus, data } = await retrievePayment(entry.payment_id, state.env, entry.profile || state.profile);
-    const okResp = httpStatus < 400 && !data?.error;
-    if (okResp && data?.data) applyPaymentObject(reference, data.data); // ledger is always safe to update, even if the panel paint is superseded
-    if (mySeq !== actionSeq) return; // superseded by a newer action — leave the panel alone
-    paintResponse(data, okResp, okResp ? 'PAYMENT RETRIEVED' : 'ERROR');
+    // signed with the env + MID that created the payment — the only pair that
+    // can see it (entries from before env was recorded fall back to the current)
+    ({ httpStatus, data } = await retrievePayment(entry.payment_id, entry.env || state.env, entry.profile || state.profile));
   } catch (err) {
-    if (mySeq !== actionSeq) return;
-    paintResponse({ error: 'network_error', message: err.message }, false, 'ERROR');
+    data = { error: 'NETWORK_ERROR', message: err?.message || 'request failed' }; // api.js never throws; belt and braces
   }
+  const okResp = isOk(httpStatus, data);
+  // The ledger is always safe to update (fresh refunded_amount for X/Y and the
+  // refund default), even when the panel paint below is superseded.
+  if (okResp && data?.data) applyPaymentObject(reference, data.data);
+  if (responseOwner !== mySeq) return; // a newer action owns the panel
+  paintResponse(data, okResp, okResp ? 'PAYMENT RETRIEVED' : errLabel(httpStatus, data), httpStatus, mySeq);
 }
 
 function openRefundForm() {
@@ -779,6 +847,21 @@ function openRefundForm() {
   renderBody();
   paintRefundRequest(currentRefundBody(entry));
   setActiveTab('request');
+
+  // Rapyd's refunded_amount may have moved since the detail opened — re-read
+  // it and re-pin the full-refund default to the fresh remaining slice, unless
+  // the SE has moved on (other payment, partial scope, already firing).
+  const ref = entry.reference;
+  refreshPayment(ref).then(() => {
+    if (!refundOpen || detailRef !== ref || firing || form.scope !== 'full') return;
+    const fresh = getEntry(ref);
+    if (!fresh) return;
+    const next = fmt(fullRefundAmount(fresh, form.route));
+    if (next === form.amount) return;
+    form.amount = next;
+    renderBodyKeepingFocus();
+    paintRefundRequest(currentRefundBody(fresh));
+  }).catch((err) => console.error('refund default refresh failed:', err));
 }
 
 /* Full ↔ Partial. Full re-pins the amount to the whole slice; Partial keeps
@@ -823,8 +906,9 @@ function refreshRouteLegs() {
   const s = entry.settled || {};
   const fxr = s.fx_rate, custCur = s.currency || entry.currency, merchCur = s.merchant_requested_currency;
   const amt = round2(form.amount);
-  const wallet = form.route === 'customer' ? money(round2(amt * (fxr || 1)), merchCur) : money(amt, merchCur);
-  const out = form.route === 'customer' ? money(amt, custCur) : money(round2(fxr ? amt / fxr : amt), custCur);
+  // textContent below — the plain-text formatter, not the escaped one
+  const wallet = form.route === 'customer' ? moneyText(round2(amt * (fxr || 1)), merchCur) : moneyText(amt, merchCur);
+  const out = form.route === 'customer' ? moneyText(amt, custCur) : moneyText(round2(fxr ? amt / fxr : amt), custCur);
   const bs = document.querySelectorAll('.bo-route.active .bo-route-leg b');
   if (bs[0]) bs[0].textContent = wallet;
   if (bs[1]) bs[1].textContent = out;
@@ -845,46 +929,66 @@ async function fireRefund() {
   const entry = getEntry(detailRef);
   if (!entry || firing) return;
   const legs = computeRefundLegs(entry, form.route, form.amount);
-  if (!(legs.body.amount > 0)) return; // guard blank/zero
-  const refundRef = `${entry.reference}_refund_${Date.now()}`;
+  // guard blank/zero (legs are already rounded to the currency's minor units)
+  if (!validAmount(legs.body.amount, legs.body.currency)) return;
+
+  // Same payment + same body as a fire whose outcome is unknown → the SAME
+  // refund: re-send its reference and idempotency key so Rapyd dedupes it.
+  const sig = JSON.stringify([legs.body, form.reason || '']);
+  const parked = refundRetry?.owner === entry.reference && refundRetry.sig === sig
+    ? entry.refunds.find((x) => x.reference === refundRetry.ref && x.status === 'pending') : null;
+  // Inherits the payment reference's random part — unguessable like it.
+  const refundRef = parked ? refundRetry.ref : `${entry.reference}_refund_${Date.now()}`;
+  const idempotencyKey = parked ? refundRetry.key : newIdempotencyKey();
+  refundRetry = null;
   const body = buildBody(entry, refundRef, legs);
 
   ++actionSeq; // supersede any still-in-flight GET so it can't clobber this
   firing = true;
   pendingRefundRef = refundRef;
-  recordRefund(entry.reference, {
-    reference: refundRef, amount: legs.body.amount, currency: legs.body.currency,
-    reason: form.reason, route: form.route,
-    merchant_debit_amount: legs.merchant_debit_amount, merchant_debit_currency: legs.merchant_debit_currency,
-    customer_equiv: legs.customer_equiv,
-  });
+  if (!parked) {
+    recordRefund(entry.reference, {
+      reference: refundRef, amount: legs.body.amount, currency: legs.body.currency,
+      reason: form.reason, route: form.route,
+      merchant_debit_amount: legs.merchant_debit_amount, merchant_debit_currency: legs.merchant_debit_currency,
+      customer_equiv: legs.customer_equiv,
+    });
+  }
   renderBody(); // reflect "Processing…" on the button
   paintRefundRequest(body); // freeze the signed body view (env is transport-only, added at fetch)
   setActiveTab('request');
 
   try {
-    // refunds must be signed by the MID that took the payment
-    const { httpStatus, data } = await createRefund({ ...body, env: state.env, profile: entry.profile || state.profile });
-    const ok = httpStatus < 400 && !data?.error;
-    paintResponse(data, ok, ok ? 'REFUND CREATED' : (data?.raw?.error_code || data?.error || 'ERROR'));
+    // refunds must be signed by the env + MID that took the payment
+    const { httpStatus, data } = await createRefund(
+      { ...body, env: entry.env || state.env, profile: entry.profile || state.profile },
+      { idempotencyKey });
+    const ok = isOk(httpStatus, data);
+    paintResponse(data, ok, ok ? 'REFUND CREATED' : errLabel(httpStatus, data), httpStatus);
     setActiveTab('response');
     if (ok) {
       const d = data?.data;
       if (d?.id) updateRefund(entry.reference, refundRef, { refund_id: d.id, amount: d.amount ?? legs.body.amount, currency: d.currency ?? legs.body.currency });
       watchEventForRef(refundRef, 'back office · refund'); // real REFUND_COMPLETED / PAYMENT_REFUND_FAILED
+    } else if (unknownOutcome(httpStatus, data)) {
+      // No answer, or a 5xx/timeout — the refund may exist. Leave it pending
+      // (the ledger poller settles it from a webhook or Retrieve Payment), keep
+      // the form open, and park the key so "Process refund" re-sends THIS one.
+      refundRetry = { owner: entry.reference, sig, key: idempotencyKey, ref: refundRef };
+      watchEventForRef(refundRef, 'back office · refund');
     } else {
-      // Rapyd rejected the refund synchronously (e.g. amount exceeds
-      // refundable) — mark it failed and surface a PAYMENT_REFUND_FAILED
-      // event on the webhook tab, grounded in the real API error.
+      // Rejected synchronously (e.g. amount exceeds refundable) — mark it
+      // failed. When Rapyd itself rejected it, surface a PAYMENT_REFUND_FAILED
+      // event on the webhook tab, grounded in the real API error; a backend
+      // gate error (live token, live cap) never reached Rapyd, so it has none.
       updateRefund(entry.reference, refundRef, { status: 'failed' });
-      paintWebhookCard([refundFailedEvent(refundRef, body, data)]);
+      if (!isGateError(data)) paintWebhookCard([refundFailedEvent(refundRef, body, data)]);
     }
   } catch (err) {
-    // A genuine transport failure (no API response to render) — not a Rapyd
-    // business error. Shown as-is; no webhook, since no refund was created.
-    paintResponse({ error: 'network_error', message: err.message }, false, 'NETWORK ERROR');
+    // api.js never throws — belt and braces: treat it as an unknown outcome.
+    paintResponse({ error: 'NETWORK_ERROR', message: err?.message || 'request failed' }, false, 'NETWORK ERROR', 0);
     setActiveTab('response');
-    updateRefund(entry.reference, refundRef, { status: 'failed' });
+    refundRetry = { owner: entry.reference, sig, key: idempotencyKey, ref: refundRef };
   } finally {
     firing = false;
     renderBody();
@@ -915,21 +1019,40 @@ function refundFailedEvent(refundRef, body, data) {
 
 /* ── Back-office webhook watcher (card + confirmation beat) ──
    Shared by refunds AND MIT charges — watches one reference until its real
-   event lands, paints the card, jumps to the Webhooks tab (locked UX #2). */
+   event lands, paints the card, jumps to the Webhooks tab (locked UX #2).
+   Display only: the ledger poller is what settles the refund/charge, and it
+   trusts only verified events. So the watch paints whatever lands (an
+   unverified one carries its chip) and keeps going until a TRUSTED terminal
+   event arrives — a forged or intermediate event must not end it. */
+let watchGen = 0; // a newer watch (or a stale tick) never paints over this one
 function stopRefundWatch() { if (refundWatchTimer) clearInterval(refundWatchTimer); refundWatchTimer = null; }
 function watchEventForRef(ref, label) {
   stopRefundWatch();
-  let elapsed = 0;
+  const my = ++watchGen;
+  const startedAt = Date.now();
+  let painted = '';    // event keys last painted — repaint only on change
+  let jumped = false;  // jump to the Webhooks tab once, on the first event
+  let busy = false;    // a slow read must not stack overlapping ticks
   const tick = async () => {
-    elapsed += 3000;
-    let events = [];
-    try { const d = await fetchWebhooksBatch([ref]); events = d.byRef?.[ref] || []; } catch { /* transient */ }
-    if (events.length) {
-      paintWebhookCard(events, label);
-      if (state.leftView === 'backoffice') setActiveTab('webhooks');
-      stopRefundWatch();
+    if (busy) return;
+    busy = true;
+    try {
+      const { byRef } = await fetchWebhooksBatch([ref]); // never throws
+      if (my !== watchGen) return;
+      const events = byRef?.[ref] || [];
+      const keys = events.map((e) => `${e.event_id || ''}|${e.received_at || ''}|${e.type || ''}|${e.verified || ''}`).join(',');
+      if (events.length && keys !== painted) {
+        painted = keys;
+        paintWebhookCard(events, label);
+        if (!jumped && state.leftView === 'backoffice') { setActiveTab('webhooks'); jumped = true; }
+      }
+      const settled = events.some((e) => isTrusted(e) && classify(e) !== 'pending');
+      if (settled || Date.now() - startedAt > 120000) { if (my === watchGen) stopRefundWatch(); }
+    } catch (err) {
+      console.error('back-office webhook watch failed:', err); // next tick retries
+    } finally {
+      busy = false;
     }
-    if (elapsed > 120000) stopRefundWatch();
   };
   tick();
   refundWatchTimer = setInterval(tick, 3000);
@@ -944,6 +1067,9 @@ function maybeFinalizeRefund() {
     if (r && (r.status === 'completed' || r.status === 'failed')) {
       pendingRefundRef = null;
       refundOpen = false;
+      // Rapyd's refunded_amount on the parent is now stale — re-read it so X/Y
+      // and the next full-refund default follow the server (never rejects).
+      if (r.status === 'completed') refreshPayment(e.reference);
     }
   }
 }
@@ -976,47 +1102,74 @@ function onChargeAmountInput(raw) {
 async function fireCharge() {
   const cred = customers.getCredential(cofChargeRef);
   if (!cred || chargeFiring) return;
-  if (!(round2(chargeForm.amount) > 0)) return; // guard blank/zero
   const p = productForCred(cred);
-  const ref = `pb_mit_${Date.now()}`;
+  const amount = roundCur(chargeForm.amount, p.currency);
+  if (!validAmount(amount, p.currency)) return; // guard blank/zero
+
+  // The credential belongs to the bucket on screen — capture its env + MID now,
+  // so the signature, the ledger entry and every later retrieve agree even if
+  // the SE switches profile while the charge is in flight.
+  const env = state.env, profile = state.profile;
+  // Same credential + amount as a charge whose outcome is unknown → the SAME
+  // charge: re-send its reference and idempotency key so Rapyd dedupes it.
+  const sig = JSON.stringify([customers.bucketKey(), cred.ref, amount, p.currency]);
+  const parked = chargeRetry?.owner === cred.ref && chargeRetry.sig === sig
+    && getEntry(chargeRetry.ref)?.status === 'pending' ? chargeRetry : null;
+  const ref = parked ? parked.ref : newReference('pb_mit'); // unguessable — it's the webhook read key
+  const idempotencyKey = parked ? parked.key : newIdempotencyKey();
+  chargeRetry = null;
   const body = mitBody(cred, chargeForm.amount, ref);
 
   ++actionSeq; // supersede any still-in-flight GET
   chargeFiring = true;
   pendingChargeRef = ref;
-  recordPayment(ref, {
-    model: cred.origin_model || 'own-fields',
-    vertical: cred.origin_vertical || state.vertical,
-    amount: String(body.amount), currency: body.currency,
-    last4: cred.last4, brand: cred.brand,
-    origin: 'backoffice', initiation_type: 'recurring', profile: state.profile,
-    credential: { kind: cred.kind, label: `${cred.brand || 'Card'} ···${cred.last4 || ''}` },
-    aft: cred.aft,
-  });
+  if (parked) {
+    updateStatus(ref, { phase: 'created' }); // same charge, re-sent
+  } else {
+    recordPayment(ref, {
+      model: cred.origin_model || 'own-fields',
+      vertical: cred.origin_vertical || state.vertical,
+      amount: String(body.amount), currency: body.currency,
+      last4: cred.last4, brand: cred.brand,
+      origin: 'backoffice', initiation_type: 'recurring', profile, env,
+      credential: { kind: cred.kind, label: `${cred.brand || 'Card'} ···${cred.last4 || ''}` },
+      aft: cred.aft,
+    });
+  }
   renderCredSurfaces(); // reflect "Processing…" on the button
   paintChargeRequest(body, true); // freeze the signed body view (env/profile are transport-only)
   setActiveTab('request');
 
   try {
-    const { httpStatus, data } = await createDirectPayment({ ...body, env: state.env, profile: state.profile });
-    const ok = httpStatus < 400 && !data?.error;
-    paintResponse(data, ok, ok ? 'CHARGE CREATED' : (data?.raw?.error_code || data?.error || 'ERROR'));
+    const { httpStatus, data } = await createDirectPayment({ ...body, env, profile }, { idempotencyKey });
+    const ok = isOk(httpStatus, data);
+    paintResponse(data, ok, ok ? 'CHARGE CREATED' : errLabel(httpStatus, data), httpStatus);
     setActiveTab('response');
     if (ok) {
       const d = data?.data;
       if (d?.id) setPaymentId(ref, d.id);
       updateStatus(ref, { phase: 'awaiting_confirmation' });
       watchEventForRef(ref, 'back office · scheduled charge'); // real PAYMENT_COMPLETED / PAYMENT_FAILED
+    } else if (unknownOutcome(httpStatus, data)) {
+      // No answer, or a 5xx/timeout — the charge may exist. Leave it pending
+      // (the ledger poller settles it if its webhook lands) and park the key so
+      // "Run scheduled charge now" re-sends THIS charge rather than a second one.
+      updateStatus(ref, { phase: 'unconfirmed' });
+      chargeRetry = { owner: cred.ref, sig, key: idempotencyKey, ref };
+      watchEventForRef(ref, 'back office · scheduled charge');
     } else {
-      // Rapyd rejected the charge synchronously — mark it failed and surface a
-      // PAYMENT_FAILED event on the webhook tab, grounded in the real error.
+      // Rejected synchronously — mark it failed. When Rapyd itself declined it,
+      // surface a PAYMENT_FAILED event on the webhook tab, grounded in the real
+      // error; a backend gate error never reached Rapyd, so it has none.
       updateStatus(ref, { status: 'failed', phase: 'declined' });
-      paintWebhookCard([paymentFailedEvent(ref, body, data)], 'back office · scheduled charge');
+      if (!isGateError(data)) paintWebhookCard([paymentFailedEvent(ref, body, data)], 'back office · scheduled charge');
     }
   } catch (err) {
-    paintResponse({ error: 'network_error', message: err.message }, false, 'NETWORK ERROR');
+    // api.js never throws — belt and braces: treat it as an unknown outcome.
+    paintResponse({ error: 'NETWORK_ERROR', message: err?.message || 'request failed' }, false, 'NETWORK ERROR', 0);
     setActiveTab('response');
-    updateStatus(ref, { status: 'failed', phase: 'error' });
+    updateStatus(ref, { phase: 'unconfirmed' });
+    chargeRetry = { owner: cred.ref, sig, key: idempotencyKey, ref };
   } finally {
     chargeFiring = false;
     renderCredSurfaces();
@@ -1050,13 +1203,22 @@ function paymentFailedEvent(ref, body, data) {
 async function fireSync() {
   if (!customers.getCustomerId()) return;
   const mySeq = ++actionSeq;
+  // The bucket on screen now — a profile switch mid-call can't misfile the cards.
+  const key = customers.bucketKey();
   paintListRequest(false);
   setActiveTab('response');
-  paintResponse(null, true, 'RETRIEVING…');
-  const { httpStatus, data } = await customers.refreshTokens();
-  if (mySeq !== actionSeq) return; // superseded — leave the panel alone
-  const ok = httpStatus < 400 && !data?.error;
-  paintResponse(data, ok, ok ? 'SAVED CARDS RETRIEVED' : 'ERROR');
+  paintResponse(null, true, 'RETRIEVING…', null, mySeq);
+  let httpStatus = 0, data = null;
+  try {
+    ({ httpStatus, data } = await customers.refreshTokens({ key }));
+  } catch (err) {
+    // refreshTokens never rejects; belt and braces so the panel can't stick
+    // on RETRIEVING… (and no unhandled rejection from a click handler).
+    data = { error: 'NETWORK_ERROR', message: err?.message || 'request failed' };
+  }
+  if (responseOwner !== mySeq) return; // a newer action owns the panel
+  const ok = isOk(httpStatus, data);
+  paintResponse(data, ok, ok ? 'SAVED CARDS RETRIEVED' : errLabel(httpStatus, data), httpStatus, mySeq);
 }
 
 /* On MIT-charge completion (surfaced by the ledger poller), close the form —
