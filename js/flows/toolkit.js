@@ -685,12 +685,37 @@ function hostedReturn(page, via) {
   }
 }
 
-/** The trusted terminal event is about to paint: a hosted payment lands on the
-    merchant's complete page (a decline on its checkout). */
+/** The trusted terminal event is about to paint. A success lands on the
+    merchant's complete page. A DECLINE while the shopper is still on Rapyd's
+    page stays there — that's what they really see: Rapyd's page shows the
+    decline, and nothing returns to the merchant until they finish or go back.
+    So the frame keeps Rapyd's address and the stand-in, with a short note,
+    and returns true (terminalHandler then skips the merchant's decline
+    screen). A decline after the shopper is back (the return page told us)
+    lands on the merchant's checkout as before. */
 function hostedLanded(reference, success) {
-  if (!hosted || hosted.reference !== reference) return;
+  if (!hosted || hosted.reference !== reference) return false;
+  if (!success && hosted.phase === 'rapyd' && document.getElementById('hp-away')) {
+    hostedDeclined();
+    return true;
+  }
   hosted.phase = 'returned';
   setAddress(merchantDomain(), pagePath(success ? 'complete' : 'checkout'));
+  return false;
+}
+
+/* The stand-in, after a decline on Rapyd's page. Still Rapyd's domain and
+   still the Rapyd seam marker; the back link is still Rapyd's
+   cancel_checkout_url, so hostedReturn() keeps working from here. */
+function hostedDeclined() {
+  const away = document.getElementById('hp-away');
+  if (!away) return;
+  away.classList.add('declined');
+  const title = away.querySelector('.hp-away-title');
+  const sub = away.querySelector('.hp-away-sub');
+  if (title) title.textContent = 'Declined on Rapyd’s page';
+  if (sub) sub.textContent = `The card was declined on Rapyd’s hosted checkout — the shopper sees the decline there, still on Rapyd’s domain. Nothing is charged; going back returns them to ${VERTICALS[state.vertical].merchant}.`;
+  logEvent('declined on hosted page', 'shopper still on Rapyd’s page', 'tk', 'err');
 }
 
 /** The toolkit's own failure / expiry events end the payment client-side —

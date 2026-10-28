@@ -96,6 +96,31 @@ export const SEAM_LABELS = {
   hosted: 'Rapyd · hosted checkout page',
 };
 
+/* ── External 3DS on the seam ────────────────────────────────
+   On a MID set up for an external 3DS provider (profiles.js tds:'external')
+   the merchant's own provider is a THIRD party in the frame: neither the
+   merchant's skin nor Rapyd. Its simulated challenge page gets its own,
+   neutral marker (.seam-ext — grey, not Rapyd purple), shown with the
+   others under "Show seam". See js/ext3ds.js. */
+export const EXT_TDS_LABEL = 'Merchant’s 3DS provider (simulated)';
+
+/** The seam's 3DS line for a path, given the MID's 3DS provider; null when
+    there's nothing to add (Rapyd's own 3DS is already the redirect line).
+    Text only — callers escape. */
+export function seamTdsLine(key, tdsProvider) {
+  if (tdsProvider !== 'external') return null;
+  if (key === 'own-fields' || !SEAM_PATHS[key]) {
+    return 'External 3DS: the merchant’s own 3DS provider authenticates first; its results go in payment_method_options and Rapyd runs no 3DS of its own. A failed check never reaches Rapyd.';
+  }
+  return 'External 3DS doesn’t apply here — Rapyd hosts the card form, so the merchant has no card to authenticate; Rapyd runs 3DS itself.';
+}
+
+/** Wrap the external 3DS provider's page in its own marker. Same contract as
+    seamWrapHTML: `inner` is trusted markup, the label is escaped. */
+export function seamExtWrapHTML(inner, label = EXT_TDS_LABEL) {
+  return `<div class="seam-ext" data-seam="${esc(label)}">${inner}</div>`;
+}
+
 const TOOLKIT_KEYS = new Set(['embedded', 'wallets', 'hosted']);
 /** state.model + the toolkit's integration mode → a SEAM_PATHS key. */
 export function seamPathKey(model, toolkitMode) {
@@ -169,14 +194,17 @@ export function seamWrapHTML(inner, label, extraClass = '') {
   return `<div class="seam-rapyd${extraClass ? ` ${esc(extraClass)}` : ''}" data-seam="${esc(label)}">${inner}</div>`;
 }
 
-/** The SE-facing explainer for a path — drawer and engine room share it. */
-export function seamLinesHTML(key) {
+/** The SE-facing explainer for a path — drawer and engine room share it.
+    `tds` is the MID's 3DS provider ('rapyd' | 'external' | null in live). */
+export function seamLinesHTML(key, { tds = null } = {}) {
   const p = SEAM_PATHS[key] || SEAM_PATHS['own-fields'];
+  const tdsLine = seamTdsLine(key, tds);
   return `
     <ul class="seam-lines">
       <li><b>Card form</b><span>${esc(p.form)}</span></li>
       <li><b>PCI</b><span>${esc(p.pci)}</span></li>
       <li><b>Redirects</b><span>${esc(p.redirect)}</span></li>
+      ${tdsLine ? `<li><b>3DS</b><span>${esc(tdsLine)}</span></li>` : ''}
     </ul>
     <div class="seam-owners">
       <div><span class="seam-who merchant">Merchant</span>${esc(p.merchant.join(' · '))}</div>
@@ -185,11 +213,11 @@ export function seamLinesHTML(key) {
 }
 
 /** The engine room's collapsible seam strip (above the request tabs' panels). */
-export function seamStripHTML(key, open = false) {
+export function seamStripHTML(key, open = false, opts = {}) {
   const p = SEAM_PATHS[key] || SEAM_PATHS['own-fields'];
   return `
     <details class="seam-strip"${open ? ' open' : ''}>
       <summary><span class="seam-strip-k">Integration seam</span><span class="seam-strip-v">${esc(p.label)}</span><span class="seam-strip-tag">${esc(p.tag)}</span></summary>
-      ${seamLinesHTML(key)}
+      ${seamLinesHTML(key, opts)}
     </details>`;
 }
