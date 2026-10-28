@@ -172,6 +172,10 @@ kbd {
 .dc-seg button:hover, .co-fx-seg button:hover { color: var(--ink); }
 .dc-seg button.active, .co-fx-seg button.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
 .dc-seg button.active.live { color: var(--err-deep); }
+/* stacked variant — options too long for one row (wallet integration) */
+.dc-seg-stack { grid-auto-flow: row; }
+.dc-seg-stack button { justify-content: flex-start; white-space: normal; text-align: left; padding: 6px 10px; }
+.dc-seg button:disabled { opacity: .45; cursor: not-allowed; }
 .dc-seg-lg button { flex-direction: column; gap: 3px; min-height: 52px; padding: 6px 8px; white-space: normal; }
 .dc-seg-tag { font-size: 9.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; padding: 2px 5px; border-radius: var(--r-xs); background: var(--line); color: var(--muted); }
 .dc-seg button.active .dc-seg-tag { background: var(--accent-soft); color: var(--accent); }
@@ -336,6 +340,49 @@ kbd {
 .x3ds-spin { width: 16px; height: 16px; border: 2px solid #D5D8DD; border-top-color: #334155; border-radius: 50%; animation: spin .8s linear infinite; }
 .x3ds-foot { padding: 10px 22px 14px; border-top: 1px solid #F1F2F3; font-size: 11.5px; color: #9A9EA6; text-align: center; }
 
+/* Direct Apple Pay / Google Pay (js/flows/direct-wallet.js) — SIMULATED.
+   The merchant's OWN buttons sit on its skinned page; per the wallets' brand
+   rules they're black with white text (no official artwork is embedded —
+   the wallet NAME stands in for the mark). The sheet is Apple's / Google's
+   surface: neutral OS-sheet greys after the storefront prototype's
+   walletSheet, never skin tokens, never --rapyd; grey .seam-ext marker. */
+.dw-express { display: flex; flex-direction: column; gap: 10px; margin: 18px 0 4px; }
+.dw-express-label { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.dw-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.dw-btn { height: 46px; border: 0; border-radius: 8px; background: #000; color: #fff; cursor: pointer;
+  font: 500 16px/1 -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif; letter-spacing: .01em; }
+.dw-btn:hover { background: #262626; }
+.dw-btn:disabled { opacity: .4; cursor: not-allowed; }
+.dw-btn-google { font-family: Roboto, Arial, sans-serif; }
+.dw-or { display: flex; align-items: center; gap: 12px; margin-top: 6px; font-size: 12.5px; color: var(--faint); }
+.dw-or::before, .dw-or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.tk-summary .dw-express { margin-top: 14px; }
+.tk-summary .dw-buttons { grid-template-columns: 1fr; gap: 8px; } /* the summary column is narrow */
+.dw-btn { white-space: nowrap; }
+.dw-overlay { position: absolute; inset: 0; z-index: 20; display: flex; justify-content: center; align-items: flex-start;
+  padding: 72px 16px 40px; background: rgba(23,23,23,0.35); }
+.dw-sheet-wrap { position: sticky; top: 24px; width: 420px; max-width: 100%; }
+.dw-sheet { overflow: hidden; border-radius: 16px; background: #fff; color: #171717; font-family: var(--font-ui); box-shadow: 0 20px 96px rgba(0,0,0,0.2); }
+.dw-sheet-head { display: flex; align-items: center; gap: 10px; padding: 18px 22px; border-bottom: 1px solid #EAEBEC; }
+.dw-sheet-title { font-size: 16px; font-weight: 600; }
+.dw-sim { padding: 4px 8px; border-radius: 4px; background: #F1F2F3; color: #6B7079; font: 500 10.5px/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; }
+.dw-cancel { margin-left: auto; border: 0; background: none; color: #4877EF; font: 500 14px/1 var(--font-ui); cursor: pointer; }
+.dw-sheet-rows { padding: 6px 22px; }
+.dw-sheet-rows div { display: flex; justify-content: space-between; gap: 12px; padding: 14px 0; border-bottom: 1px solid #EAEBEC; font-size: 14px; line-height: 1.3; }
+.dw-sheet-rows div span:first-child { color: #828282; }
+.dw-sheet-rows div.total { border-bottom: 0; font-size: 18px; font-weight: 600; }
+.dw-sheet-rows div.total span:first-child { color: #171717; }
+.dw-sheet-rows .mono { font-family: var(--font-mono); }
+.dw-sheet-foot { padding: 8px 22px 14px; }
+.dw-confirm { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; height: 50px; border: 0; border-radius: 10px;
+  background: #171717; color: #fff; font: 500 15px/1 var(--font-ui); cursor: pointer; }
+.dw-confirm:hover { background: #454545; }
+.dw-confirm i { font-size: 18px; }
+.dw-sheet-note { padding: 0 22px 14px; font-size: 11.5px; color: #9A9EA6; text-align: center; }
+/* The SE's tag on the simulated receipt — neutral, small, never the skin's accent. */
+.screen-sim { align-self: center; margin-bottom: 4px; padding: 4px 10px; border-radius: 4px; background: #F1F2F3; color: #6B7079;
+  font: 500 11px/1.2 var(--font-mono); letter-spacing: .04em; text-transform: uppercase; }
+
 /* Seam explainer lines (seamLinesHTML) — drawer card (light) and the engine
    room's strip (dark, below) share the markup. */
 .seam-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
@@ -344,6 +391,7 @@ kbd {
 .seam-owners { display: grid; gap: 5px; margin-top: 10px; font-size: 12px; line-height: 1.45; color: var(--muted); }
 .seam-who { display: inline-block; min-width: 64px; margin-right: 8px; padding: 1px 7px; border-radius: var(--r-pill); font-size: 10.5px; font-weight: 600; text-align: center; background: var(--soft-2); color: var(--text); }
 .seam-who.rapyd { background: var(--rapyd); color: #fff; }
+.seam-who.third { background: #5B616B; color: #fff; } /* Apple / Google — a third party, grey like .seam-ext */
 
 /* out-of-window annotations below the site (the shopper's bank-app view) */
 .offstage { width: 100%; max-width: 980px; margin: 14px auto 0; animation: cs-rise .5s ease-out .48s both; }
@@ -696,6 +744,27 @@ details[open] > .beat-head > .beat-chev { transform: rotate(90deg); }
 .ext-wait { padding: 10px 0 4px; font-size: 12px; color: var(--eng-faint); font-style: italic; }
 .ext-map { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
 .ext-map code { color: var(--syn-num); }
+/* Direct wallets: the steps OUTSIDE Rapyd (Apple / Google / merchant) — one
+   line + the wallet's own docs, deliberately lighter than a Rapyd call card. */
+.dw-intro { margin-bottom: 12px; }
+.dw-steps { display: grid; gap: 8px; margin-bottom: 12px; }
+.dw-step { padding: 9px 12px; border: 1px dashed var(--eng-line); border-left: 3px solid #8A8F98; border-radius: var(--r-md); background: var(--eng-bg); font-size: 11.5px; line-height: 1.5; color: var(--eng-muted); }
+.dw-step.party-merchant { border-left-color: var(--eng-info); }
+.dw-step.todo { opacity: .55; }
+.dw-step.now { border-style: solid; border-left-width: 3px; }
+.dw-step-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 3px; }
+.dw-step-head b { color: var(--eng-text); font-weight: 600; font-size: 12px; }
+.dw-party { padding: 1px 7px; border-radius: var(--r-pill); background: var(--eng-surface-2); color: var(--eng-text); font-size: 10px; font-weight: 700; letter-spacing: .03em; }
+.dw-pci { padding: 1px 7px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--eng-err) 16%, transparent); color: var(--eng-err); font-size: 10px; font-weight: 700; }
+.dw-step p { margin: 0; }
+.dw-step a { color: var(--eng-accent); text-decoration: none; }
+.dw-step a:hover { text-decoration: underline; }
+.dw-step-note { margin-top: 3px; font-size: 11px; color: var(--eng-faint); }
+.dw-guide { margin: 0 0 8px; padding-left: 18px; display: grid; gap: 4px; font-size: 11.5px; line-height: 1.5; color: var(--eng-muted); }
+.dw-guide code, .dw-guide-3ds code { color: var(--syn-num); }
+.dw-guide-3ds { margin-bottom: 10px; font-size: 11.5px; line-height: 1.5; color: var(--eng-muted); }
+.dw-guide-3ds b { color: var(--eng-text); margin-right: 4px; }
+.beat-foot a { color: var(--eng-accent); }
 /* Fields injected into the Rapyd body from the external 3DS result */
 .jsonv-line.inject-hit { background: color-mix(in srgb, var(--eng-warn) 11%, transparent); box-shadow: inset 3px 0 0 var(--eng-warn); }
 .jsonv-gutter span.inject-hit { color: var(--eng-warn); font-weight: 700; }

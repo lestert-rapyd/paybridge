@@ -26,6 +26,8 @@ import { totalsHTML } from './flows/shared.js';
 import { thumbHTML } from './site/chrome.js';
 import { SEAM_PATHS, seamPathKey, seamLinesHTML, seamStripHTML, setAddress, pagePath, isSeamOn, setSeamOn, applySeam } from './seam.js';
 import { EXT3DS_OUTCOMES, ext3dsPreset, setExt3dsPreset } from './ext3ds.js';
+import { WALLET_INTEGRATIONS, walletIntegration, setWalletIntegration, walletAvailability, effectiveWalletIntegration } from './direct-wallet.js';
+import { directWalletBlockHTML, refreshDirectSlot, resetDirectWallet, setDirectWalletRepainter } from './flows/direct-wallet.js';
 
 // Patch keys that mean "the customer's flow/context actually changed" —
 // only these trigger the full client-flow reset (mount() etc). Everything
@@ -43,7 +45,12 @@ const FLOWS = { 'own-fields': ownFields, 'toolkit': toolkit };
 const seamKey = () => seamPathKey(state.model, toolkit.toolkitMode());
 // The MID's 3DS provider, for the seam's 3DS line — sandbox only (live has no
 // profile, and Own Card Fields are off there).
-const seamOpts = () => ({ tds: state.env === 'sandbox' ? activeProfile().tds : null });
+// The wallet integration that actually runs on this path (js/direct-wallet.js)
+// adds the seam's wallet line.
+const seamOpts = () => ({
+  tds: state.env === 'sandbox' ? activeProfile().tds : null,
+  wallet: effectiveWalletIntegration({ model: state.model, env: state.env }),
+});
 // Shown INSTEAD of the seam summary in live, so the restriction is on screen, not
 // just in the SE's head (kept short — the sub-bar is one line). Own fields:
 // the backend refuses raw card data in live (LIVE_RAW_CARD_FORBIDDEN).
@@ -198,6 +205,7 @@ function refreshCharge() {
   const payBtn = $('#pay-btn');
   if (payBtn) payBtn.textContent = `${productCta()} ${chargeText(c)}${sub ? ' /mo' : ''}`;
   syncAmountGate();
+  refreshDirectSlot(); // the merchant's wallet buttons follow the amount gate too
   FLOWS[state.model].refreshSummary?.();
 }
 /* Keep #pay-btn disabled while the tile holds an invalid amount (F13). The
@@ -344,6 +352,9 @@ function renderCheckout() {
   const host = $('#checkout');
 
   closeCurDropdown();
+  // A simulated direct-wallet run (sheet / result) belongs to the page being
+  // replaced — drop it, so the flow's own engine room comes back.
+  resetDirectWallet();
   // The tile is about to be rebuilt from activeProduct() — always a valid
   // amount — so any invalid draft the SE left in the old one is gone with it.
   state.amountInvalid = false;
@@ -411,6 +422,7 @@ function renderCheckout() {
 
       <div class="co-totals" id="order-totals">${totalsHTML(customerCharge(), feeLabel, feeValue, p.billing === 'subscription')}</div>
 
+      <div class="dw-slot">${directWalletBlockHTML()}</div>
       ${payLabel}
       <div id="pay-region">${flow.renderPaymentHTML()}</div>
       </main>`;
@@ -467,8 +479,11 @@ function toggleLeftView() {
    typing) or the header button; Esc closes it. Four sections:
 
      Customer          · whose site — the skin (state.vertical)
-     Integration path  · Own Card Fields / Checkout Toolkit (state.model) and
+     Integration path  · Own Card Fields / Checkout Toolkit (state.model),
                          the toolkit's mode (full toolkit / wallets / hosted)
+                         and the Apple Pay / Google Pay integration
+                         (Checkout (real) / Direct encrypted / decrypted —
+                         the direct ones simulated, js/direct-wallet.js)
      Account           · Sandbox / Live (the live-token dialog gates Live),
                          the SC1–SC3 credential picker with its feature
                          badges, the MID's 3DS provider (fixed by the MID;
@@ -528,6 +543,7 @@ function pathHTML() {
           ${toolkit.TOOLKIT_MODES.map(([val, label]) => `<button type="button" data-val="${val}" class="${toolkit.toolkitMode() === val ? 'active' : ''}">${label}</button>`).join('')}
         </div>
       </div>` : ''}
+    ${walletFieldHTML()}
     <div class="dc-card dc-seam">
       <div class="dc-card-head">
         <span class="dc-card-title">Show seam</span>
@@ -535,6 +551,32 @@ function pathHTML() {
       </div>
       <p class="dc-note">Outlines where Rapyd begins inside the site — turn off for a clean customer view.</p>
       ${seamLinesHTML(key, seamOpts())}
+    </div>`;
+}
+
+/* Apple Pay / Google Pay integration (js/direct-wallet.js). Checkout (real)
+   is the toolkit's / hosted page's own wallet buttons; the two Direct
+   variants are SIMULATED on the merchant's own page. A variant that can't run
+   here (decrypted off Own Card Fields, anything direct in live) is disabled
+   with its reason. */
+function walletFieldHTML() {
+  const ctx = { model: state.model, env: state.env };
+  const pick = walletIntegration();
+  const eff = effectiveWalletIntegration(ctx);
+  const reasons = WALLET_INTEGRATIONS
+    .map(([val, label]) => [label, walletAvailability(val, ctx)])
+    .filter(([, a]) => !a.ok);
+  return `
+    <div class="dc-field">
+      <div class="dc-label">Wallet integration<span class="dc-label-note">Apple Pay · Google Pay</span></div>
+      <div class="dc-seg dc-seg-stack" id="dc-wallet">
+        ${WALLET_INTEGRATIONS.map(([val, label]) => {
+          const a = walletAvailability(val, ctx);
+          return `<button type="button" data-val="${esc(val)}" class="${eff === val ? 'active' : ''}" ${a.ok ? '' : `disabled title="${esc(a.reason)}"`}>${esc(label)}</button>`;
+        }).join('')}
+      </div>
+      ${reasons.map(([label, a]) => `<p class="dc-note fine">${esc(label)}: ${esc(a.reason)}</p>`).join('')}
+      ${pick !== eff ? `<p class="dc-note warn">${esc(WALLET_INTEGRATIONS.find(([v]) => v === pick)?.[1] || '')} doesn’t apply here — showing Checkout (real).</p>` : ''}
     </div>`;
 }
 
@@ -798,6 +840,14 @@ function wire() {
     const prof = t.closest('#dc-creds button[data-profile]');
     if (prof) { switchProfile(prof.dataset.profile); return; }
     // External 3DS: the simulated provider's default answer — read when Pay runs.
+    const dw = t.closest('#dc-wallet button[data-val]');
+    if (dw) {
+      if (dw.disabled) return;
+      setWalletIntegration(dw.dataset.val);
+      renderDrawer(); renderSeamStrip();
+      refreshDirectSlot(); // the merchant's own buttons appear / go — nothing else repaints
+      return;
+    }
     const ext = t.closest('#dc-ext3ds button[data-val]');
     if (ext) { setExt3dsPreset(ext.dataset.val); renderDrawer(); return; }
     if (t.closest('#dc-forget')) {
@@ -1000,6 +1050,11 @@ setPanelRepainter(() => {
 // Same reasoning for the field↔JSON highlight: rebuilding the customer card
 // drops its .sync-hit classes, and only the flow knows what's focused.
 setHighlightHook(() => FLOWS[state.model].applyHighlight?.());
+// A cancelled direct-wallet sheet hands the engine room back to the flow.
+setDirectWalletRepainter(() => {
+  if (isCheckout()) FLOWS[state.model].refreshRightPanel?.();
+  else renderStepPanels();
+});
 
 document.documentElement.dataset.vertical = state.vertical;
 applySkin(state.vertical);

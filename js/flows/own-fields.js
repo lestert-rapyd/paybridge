@@ -72,6 +72,7 @@ import {
   terminalHandler, cardSaveSlot, pendingCardSave,
 } from './shared.js';
 import { signOut } from '../site/session.js';
+import { ownsPanel as directOwnsPanel, paintPanels as paintDirectPanels } from './direct-wallet.js';
 import { repaintSite } from '../steps.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -556,6 +557,8 @@ function syncNameInheritance() {
    painted here and then destroyed by the payment one tick later — stacking
    them keeps beat 1 inspectable for the whole session. */
 function renderRequest() {
+  // A simulated direct-wallet run owns the engine room until it ends.
+  if (directOwnsPanel()) { paintDirectPanels(); return; }
   const el = $('#panel-request');
   if (!el) return;
   const st = newSaltTimestamp();
@@ -639,6 +642,7 @@ let lastResponse = null;      // persisted so switching back from back office ca
 let responseSending = false;
 
 function paintResponsePanel() {
+  if (directOwnsPanel()) { paintDirectPanels(); return; }
   const el = $('#panel-response');
   if (!el) return;
   const cusCard = customerResponseCardHTML();
