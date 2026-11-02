@@ -217,6 +217,13 @@ export function createPayout(body, opts = {}) {
   return post('/api/create-payout', body, opts);
 }
 
+/** POST /api/payout-card-eligibility → Rapyd POST /v1/cards/eligibility
+    (Retrieve Card Eligibility Details). `body` = site/wallet.js
+    eligibilityBody() + env/profile. Moves no money; the Withdraw's step 1. */
+export function checkCardEligibility(body, opts = {}) {
+  return post('/api/payout-card-eligibility', body, opts);
+}
+
 /** GET /api/retrieve-payout?id=payout_xxx → Rapyd GET /v1/payouts/{id}.
     `profile` = the sandbox MID that created the payout. */
 export function retrievePayout(id, env, profile) {

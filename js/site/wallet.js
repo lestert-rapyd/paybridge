@@ -27,7 +27,13 @@
 
    Withdraw = a real Rapyd CARD PAYOUT (POST /v1/payouts), to the
    shopper's saved card_*** (beneficiary.card_id) or — sandbox only — to
-   Rapyd's published sandbox payout card. Field names:
+   Rapyd's published sandbox payout card. It starts with a card
+   eligibility check (POST /v1/cards/eligibility, transaction_type oct):
+   the card's issuer_country IS the payout's beneficiary_country and its
+   billing_currency the payout_currency (user decision) — the wallet's
+   currency stays sender_currency and Rapyd does the FX. Field names:
+     Retrieve Card Eligibility  docs.rapyd.net/en/retrieve-card-eligibility-details.html
+     Card eligibility guide     docs.rapyd.net/en/card-eligibility-for-card-payouts.html
      Create Payout              docs.rapyd.net/en/create-payout.html
      Get Payout Required Fields docs.rapyd.net/en/get-payout-required-fields.html
      List Payout Method Types   docs.rapyd.net/en/list-payout-method-types.html
@@ -57,6 +63,9 @@ export const SANDBOX_PAYOUT_CARD = Object.freeze({
 
 /* ── Config ─────────────────────────────────────────────── */
 
+/* The eligibility answer's OCT families (data.oct.<family>_domestic|_international). */
+export const OCT_CATEGORIES = ['money_transfer', 'non_money_transfer', 'online_gambling'];
+
 /** The pack's wallet rule with the copy resolved, or null when the pack
     doesn't run a wallet. `packId` is the PACK (VERTICALS[x].pack). */
 export function walletConfig(packId) {
@@ -69,6 +78,10 @@ export function walletConfig(packId) {
     aft: w.aft || null,
     depositLabel: w.depositLabel || 'Top up',
     withdrawLabel: 'Withdraw',
+    // Which data.oct.* family of the eligibility answer judges a withdrawal
+    // (…_domestic / …_international is picked per card): gambling winnings
+    // are online_gambling; any other merchant pay-out non_money_transfer.
+    octCategory: OCT_CATEGORIES.includes(w.octCategory) ? w.octCategory : 'non_money_transfer',
   };
 }
 
@@ -219,6 +232,61 @@ export function pickPayoutMethodType(list, { country, brand } = {}) {
     (us_visa_card, us_mastercard_card — Create Payout / card payout guide). */
 export const fallbackPayoutMethodType = (country, brand) => `${String(country || 'us').toLowerCase()}_${brandKey(brand)}_card`;
 
+/* ── Card eligibility (step 1 of a withdrawal) ──────────── */
+
+/** OCT = Original Credit Transaction: money pushed TO the card — a payout. */
+export const ELIGIBILITY_TRANSACTION_TYPE = 'oct';
+
+/** POST /v1/cards/eligibility body: the saved card as card_id, or — sandbox
+    only (live refuses card_number) — the payout test card's number. */
+export function eligibilityBody(dest) {
+  return dest?.kind === 'token'
+    ? { card_id: dest.card_id, transaction_type: ELIGIBILITY_TRANSACTION_TYPE }
+    : { card_number: SANDBOX_PAYOUT_CARD.card_number, transaction_type: ELIGIBILITY_TRANSACTION_TYPE };
+}
+
+/* data.oct.* values (Retrieve Card Eligibility Details): fast_funds |
+   standard = the card takes it; not_supported = it doesn't; unknown / null =
+   the scheme didn't say — the payout goes ahead and Rapyd is the judge. */
+const OCT_YES = ['fast_funds', 'standard'];
+
+/**
+ * The eligibility answer (`data` of POST /v1/cards/eligibility) → how the
+ * payout must be addressed, or why it must not be sent.
+ *   beneficiaryCountry = data.issuer_country (required — no country, no payout)
+ *   payoutCurrency     = data.billing_currency (the balance currency when absent)
+ *   senderCurrency     = the balance currency; fx when the two differ
+ *   oct                = data.oct[<octCategory>_<domestic|international>],
+ *                        domestic when the issuer is in the sender's country
+ * @returns {{ ok: true, unknown: boolean, … } | { ok: false, code, message, … }}
+ *          `message` is shopper copy.
+ */
+export function payoutRoute(elig, { currency, country, octCategory = 'non_money_transfer' } = {}) {
+  const d = elig && typeof elig === 'object' ? elig : {};
+  const issuer = typeof d.issuer_country === 'string' ? d.issuer_country.trim().toUpperCase() : '';
+  if (!/^[A-Z]{2}$/.test(issuer)) {
+    return { ok: false, code: 'no_country', message: 'We couldn’t verify this card for withdrawals. Try again, or choose another card.' };
+  }
+  const billing = typeof d.billing_currency === 'string' ? d.billing_currency.trim().toUpperCase() : '';
+  const billingOk = /^[A-Z]{3}$/.test(billing);
+  const payoutCurrency = billingOk ? billing : currency;
+  const scope = issuer === String(country || '').toUpperCase() ? 'domestic' : 'international';
+  const family = OCT_CATEGORIES.includes(octCategory) ? octCategory : 'non_money_transfer';
+  const octField = `${family}_${scope}`;
+  const raw = d.oct && typeof d.oct === 'object' ? d.oct[octField] : null;
+  const oct = raw == null ? null : String(raw).toLowerCase();
+  const route = {
+    beneficiaryCountry: issuer, payoutCurrency, senderCurrency: currency, fx: payoutCurrency !== currency,
+    currencyFallback: !billingOk, scope, octField, oct,
+    scheme: typeof d.scheme === 'string' && d.scheme ? d.scheme : null,
+  };
+  if (oct === 'not_supported') {
+    return { ok: false, code: 'not_eligible', ...route,
+      message: `This card can’t receive ${scope === 'international' ? 'international ' : ''}withdrawals. Choose another card.` };
+  }
+  return { ok: true, unknown: !OCT_YES.includes(oct), ...route };
+}
+
 /* ── Beneficiary / sender ───────────────────────────────── */
 
 /* Demo sender (the merchant, a company) addresses per country — dummy values. */
@@ -245,9 +313,10 @@ const splitName = (name) => {
  * @param required  data from the required-fields call, or null
  * @param ctx       { dest: { kind: 'token', card_id } | { kind: 'test' },
  *                    identity: { name, email, date_of_birth, nationality, address },
- *                    merchant: string, country }
+ *                    merchant: string, country (the sender's),
+ *                    beneficiaryCountry (the card issuer's; default country) }
  */
-export function fillParties(required, { dest, identity = {}, merchant = '', country } = {}) {
+export function fillParties(required, { dest, identity = {}, merchant = '', country, beneficiaryCountry = country } = {}) {
   const { first, last } = splitName(identity.name);
   const addr = identity.address || {};
   const card = dest?.kind === 'token'
@@ -258,7 +327,7 @@ export function fillParties(required, { dest, identity = {}, merchant = '', coun
   const benValues = {
     first_name: first, last_name: last, name: `${first} ${last}`.trim(),
     email: identity.email, address: addr.line_1, city: addr.city, postcode: addr.zip,
-    state: addr.state, country, date_of_birth: identity.date_of_birth, nationality: identity.nationality,
+    state: addr.state, country: beneficiaryCountry, date_of_birth: identity.date_of_birth, nationality: identity.nationality,
     ...card,
   };
   const ma = MERCHANT_ADDRESS[country] || MERCHANT_ADDRESS.US;
@@ -290,22 +359,37 @@ export function fillParties(required, { dest, identity = {}, merchant = '', coun
 /* ── Create Payout body ─────────────────────────────────── */
 
 /**
- * POST /v1/payouts for a domestic card payout from the profile's wallet:
- * the shopper (individual) is paid in the balance currency; the merchant
- * (company) sends the same currency, so there is no FX leg and
- * confirm_automatically is a no-op made explicit (it only matters for FX —
- * Create Payout). `ewallet` is the sandbox profile's wallet; omitted in live,
- * where the backend injects the live wallet.
+ * POST /v1/payouts for a card payout from the profile's wallet. The merchant
+ * (company, `country`) always sends the balance `currency`; the shopper
+ * (individual) is paid in the card's billing currency (`payoutCurrency`) in
+ * the issuer's country (`beneficiaryCountry`) — both from payoutRoute().
+ *   same currency → payout_amount (no FX leg)
+ *   FX            → sender_amount: the withdrawal is what leaves the balance,
+ *                   in sender_currency; Rapyd converts and the card gets
+ *                   whatever that buys (Create Payout: payout_amount is "in
+ *                   payout_currency", sender_amount "in sender_currency";
+ *                   one or the other). confirm_automatically: true accepts
+ *                   Rapyd's FX rate without a Confirm Payout with FX call.
+ *   live          → always payout_amount: the backend's live cap reads it and
+ *                   refuses sender_amount, so a live FX payout is 0.01 in the
+ *                   payout currency.
+ * `ewallet` is the sandbox profile's wallet; omitted in live, where the
+ * backend injects the live wallet.
  */
-export function payoutBody({ amount, currency, country, methodType, beneficiary, sender, reference, description, descriptor, ewallet }) {
+export function payoutBody({
+  amount, currency, country, payoutCurrency = currency, beneficiaryCountry = country, live = false,
+  methodType, beneficiary, sender, reference, description, descriptor, ewallet,
+}) {
   const body = {};
   if (ewallet) body.ewallet = ewallet;
+  const senderSide = payoutCurrency !== currency && !live;
+  const amountCur = senderSide ? currency : payoutCurrency;
+  body[senderSide ? 'sender_amount' : 'payout_amount'] = validAmount(amount, amountCur) ? Number(amount) : amount;
   Object.assign(body, {
-    payout_amount: validAmount(amount, currency) ? Number(amount) : amount,
-    payout_currency: currency,
+    payout_currency: payoutCurrency,
     sender_currency: currency,
     sender_country: country,
-    beneficiary_country: country,
+    beneficiary_country: beneficiaryCountry,
     sender_entity_type: 'company',
     beneficiary_entity_type: 'individual',
     payout_method_type: methodType,
@@ -320,12 +404,14 @@ export function payoutBody({ amount, currency, country, methodType, beneficiary,
 }
 
 /** The required-fields query for this payout (all seven are sent — every
-    documented example carries them; sender_country is confirmed required). */
-export function requiredFieldsQuery({ methodType, country, currency, amount }) {
+    documented example carries them; sender_country is confirmed required).
+    On an FX payout payout_amount is the sender-side amount — the converted
+    figure isn't known before the payout; it only sizes the field lookup. */
+export function requiredFieldsQuery({ methodType, country, currency, amount, beneficiaryCountry = country, payoutCurrency = currency }) {
   return {
     payout_method_type: methodType,
     sender_country: country, sender_currency: currency,
-    beneficiary_country: country, payout_currency: currency,
+    beneficiary_country: beneficiaryCountry, payout_currency: payoutCurrency,
     sender_entity_type: 'company', beneficiary_entity_type: 'individual',
     payout_amount: amount,
   };

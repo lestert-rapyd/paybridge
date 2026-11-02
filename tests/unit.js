@@ -64,6 +64,7 @@ import {
   DEPOSIT_ID, SANDBOX_PAYOUT_CARD, walletConfig, depositProduct, setPendingDeposit, clearPendingDeposit,
   walletEntries, walletBalance, depositProblem, withdrawProblem, withdrawChips, pickPayoutMethodType,
   fallbackPayoutMethodType, fillParties, payoutBody, requiredFieldsQuery, payoutOutcome, isDepositEntry,
+  eligibilityBody, payoutRoute, ELIGIBILITY_TRANSACTION_TYPE,
 } from '../js/site/wallet.js';
 
 /* ── Tiny harness ── */
@@ -923,6 +924,7 @@ test('wallet: packs opt in — gambling + crypto deposit/withdraw, home off', ()
   eq([g.currency, g.country, g.depositLabel, g.aft], ['EUR', 'MT', 'Deposit', null]);
   eq([c.currency, c.country, c.depositLabel], ['USD', 'US', 'Deposit']);
   eq(c.aft, { purpose_code: 'crypto_currency', special_condition_indicator: 'cryptocurrency' });
+  eq([g.octCategory, c.octCategory], ['online_gambling', 'non_money_transfer'], 'which data.oct.* verdict judges a withdrawal');
   eq(walletConfig('home'), null, 'home runs no wallet');
   eq(walletConfig('nope'), null);
 });
@@ -1065,6 +1067,86 @@ test('wallet: Create Payout body', () => {
     payout_method_type: 'us_visa_card', sender_country: 'US', sender_currency: 'USD', beneficiary_country: 'US',
     payout_currency: 'USD', sender_entity_type: 'company', beneficiary_entity_type: 'individual', payout_amount: '10',
   });
+});
+
+/* A Retrieve Card Eligibility Details `data` (docs.rapyd.net/en/
+   retrieve-card-eligibility-details.html) — field names from that page. */
+const eligData = (over = {}) => ({
+  scheme: 'VISA', card_type: 'consumer', product_type: 'Credit', billing_currency: 'USD', issuer: 'Demo Bank', issuer_country: 'US',
+  oct: {
+    money_transfer_domestic: 'standard', money_transfer_international: 'standard',
+    non_money_transfer_domestic: 'fast_funds', non_money_transfer_international: 'not_supported',
+    online_gambling_domestic: 'standard', online_gambling_international: 'not_supported',
+  },
+  aft: { domestic: true, international: false },
+  ...over,
+});
+
+test('wallet: eligibility body — saved card_id, else the sandbox card number; always oct', () => {
+  eq(ELIGIBILITY_TRANSACTION_TYPE, 'oct');
+  eq(eligibilityBody({ kind: 'token', card_id: 'card_abc' }), { card_id: 'card_abc', transaction_type: 'oct' });
+  eq(eligibilityBody({ kind: 'test' }), { card_number: SANDBOX_PAYOUT_CARD.card_number, transaction_type: 'oct' });
+  ok(!('card_number' in eligibilityBody({ kind: 'token', card_id: 'card_x' })), 'a token never carries a PAN');
+});
+
+test('wallet: eligibility → payout route (issuer_country → beneficiary_country, billing_currency → payout_currency)', () => {
+  const dom = payoutRoute(eligData(), { currency: 'USD', country: 'US' });
+  eq([dom.ok, dom.beneficiaryCountry, dom.payoutCurrency, dom.senderCurrency, dom.fx, dom.scope, dom.octField, dom.oct, dom.unknown, dom.scheme],
+    [true, 'US', 'USD', 'USD', false, 'domestic', 'non_money_transfer_domestic', 'fast_funds', false, 'VISA']);
+  // A GB card billed in GBP, withdrawn from a USD balance: international + FX.
+  const gb = payoutRoute(eligData({ issuer_country: 'gb', billing_currency: 'gbp', oct: { non_money_transfer_international: 'standard' } }),
+    { currency: 'USD', country: 'US' });
+  eq([gb.ok, gb.beneficiaryCountry, gb.payoutCurrency, gb.senderCurrency, gb.fx, gb.scope], [true, 'GB', 'GBP', 'USD', true, 'international']);
+  // The pack's OCT family picks the verdict: gambling winnings.
+  const mt = payoutRoute(eligData({ issuer_country: 'MT', billing_currency: 'EUR' }), { currency: 'EUR', country: 'MT', octCategory: 'online_gambling' });
+  eq([mt.ok, mt.octField, mt.oct, mt.fx], [true, 'online_gambling_domestic', 'standard', false]);
+  // No billing currency → the balance currency, flagged.
+  const nb = payoutRoute(eligData({ billing_currency: null }), { currency: 'USD', country: 'US' });
+  eq([nb.ok, nb.payoutCurrency, nb.currencyFallback, nb.fx], [true, 'USD', true, false]);
+  // unknown / null / absent verdicts: go ahead, flagged — Rapyd is the judge.
+  for (const v of ['unknown', null, undefined]) {
+    const r = payoutRoute(eligData({ oct: { non_money_transfer_domestic: v } }), { currency: 'USD', country: 'US' });
+    eq([r.ok, r.unknown], [true, true], String(v));
+  }
+  eq(payoutRoute(eligData({ oct: null }), { currency: 'USD', country: 'US' }).unknown, true, 'no oct object');
+  eq(payoutRoute(eligData(), { currency: 'USD', country: 'US', octCategory: 'bogus' }).octField, 'non_money_transfer_domestic', 'unknown family → default');
+});
+
+test('wallet: ineligible card ⇒ no payout (not_supported, or no issuer_country)', () => {
+  const no = payoutRoute(eligData({ issuer_country: 'GB' }), { currency: 'USD', country: 'US' });
+  eq([no.ok, no.code, no.octField, no.oct], [false, 'not_eligible', 'non_money_transfer_international', 'not_supported']);
+  ok(/international withdrawals/.test(no.message), 'shopper copy names why');
+  const gam = payoutRoute(eligData({ issuer_country: 'DE', billing_currency: 'EUR' }), { currency: 'EUR', country: 'MT', octCategory: 'online_gambling' });
+  eq([gam.ok, gam.code], [false, 'not_eligible']);
+  for (const d of [eligData({ issuer_country: null }), eligData({ issuer_country: 'USA' }), {}, null, 'x']) {
+    const r = payoutRoute(d, { currency: 'USD', country: 'US' });
+    eq([r.ok, r.code, 'beneficiaryCountry' in r], [false, 'no_country', false], JSON.stringify(d));
+  }
+});
+
+test('wallet: payout body follows the route — FX keeps sender_currency, fixes sender_amount', () => {
+  const route = payoutRoute(eligData({ issuer_country: 'GB', billing_currency: 'GBP', oct: { non_money_transfer_international: 'standard' } }),
+    { currency: 'USD', country: 'US' });
+  const args = {
+    amount: '20.00', currency: 'USD', country: 'US', payoutCurrency: route.payoutCurrency, beneficiaryCountry: route.beneficiaryCountry,
+    methodType: 'gb_visa_card', beneficiary: { card_id: 'card_abc' }, sender: { company_name: 'rapyd.coin' }, reference: 'r', description: 'd',
+  };
+  const fx = payoutBody(args);
+  eq([fx.sender_amount, fx.sender_currency, fx.payout_currency, fx.beneficiary_country, fx.sender_country, fx.confirm_automatically],
+    [20, 'USD', 'GBP', 'GB', 'US', true]);
+  ok(!('payout_amount' in fx), 'FX: the balance-side amount is fixed, Rapyd converts');
+  eq(Object.keys(fx)[0], 'sender_amount');
+  const liveFx = payoutBody({ ...args, amount: '0.01', live: true });
+  eq([liveFx.payout_amount, liveFx.payout_currency, 'sender_amount' in liveFx], [0.01, 'GBP', false], 'live: payout_amount (the backend caps it)');
+  const same = payoutBody({ ...args, payoutCurrency: 'USD', beneficiaryCountry: 'US', methodType: 'us_visa_card' });
+  eq([same.payout_amount, 'sender_amount' in same, same.beneficiary_country], [20, false, 'US']);
+  eq(requiredFieldsQuery({ methodType: 'gb_visa_card', country: 'US', currency: 'USD', amount: '20', beneficiaryCountry: 'GB', payoutCurrency: 'GBP' }), {
+    payout_method_type: 'gb_visa_card', sender_country: 'US', sender_currency: 'USD', beneficiary_country: 'GB',
+    payout_currency: 'GBP', sender_entity_type: 'company', beneficiary_entity_type: 'individual', payout_amount: '20',
+  });
+  const req = { beneficiary_required_fields: [{ name: 'country', is_required: true }], sender_required_fields: [{ name: 'country', is_required: true }, { name: 'city', is_required: true }] };
+  const p2 = fillParties(req, { dest: { kind: 'token', card_id: 'card_abc' }, identity: customers.getIdentity(), merchant: 'm', country: 'US', beneficiaryCountry: 'GB' });
+  eq([p2.beneficiary.country, p2.sender.country, p2.sender.city], ['GB', 'US', 'New York'], 'beneficiary in the issuer\'s country, sender at home');
 });
 
 test('wallet: Rapyd payout status → ledger outcome', () => {

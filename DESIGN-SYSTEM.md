@@ -322,7 +322,9 @@ catalog, copy, `kycAtSignup`, `wallet`; a subscription's `interval` is `monthly`
 
 - **2026-10 — merchant wallet.** The Wallet page (`js/site/wallet.js` rules, `wallet-page.js` page and
   beats; `.wal-*` in `site.css`), deposits through the existing checkout, withdrawals as real card
-  payouts (three engine-room beats; PAYOUT_* events as a webhooks section), payout tiles in the back
+  payouts (four engine-room beats — card eligibility first, its verdict as `.wh-pill`s plus a
+  `.wh-expect-note` on what it did to the payout's country / currency / FX; PAYOUT_* events as a
+  webhooks section), payout tiles in the back
   office (`.bo-tile.clickable-payout`).
 
 - **2026-10 — external 3DS (simulated).** `js/ext3ds.js`, the issuer page (`.x3ds-*`, `.seam-ext`), the

@@ -9,12 +9,19 @@
                          pays on the normal checkout — own fields, toolkit or
                          a saved card, whichever path the drawer picked. The
                          balance moves when the ledger confirms the payment.
-     Withdraw          → three real calls, one beat each:
-                           1 GET  /v1/payout_method_types   which card payout
+     Withdraw          → four real calls, one beat each:
+                           1 POST /v1/cards/eligibility     can this card take a
+                                  payout (oct), where was it issued, what is it
+                                  billed in? issuer_country → beneficiary_country,
+                                  billing_currency → payout_currency; a
+                                  not_supported verdict stops here, unsent
+                           2 GET  /v1/payout_method_types   which card payout
                                   type the MID offers for the country+currency
-                           2 GET  /v1/payout_methods/{type}/required_fields
+                           3 GET  /v1/payout_methods/{type}/required_fields
                                   what the beneficiary/sender must carry
-                           3 POST /v1/payouts                the payout itself
+                           4 POST /v1/payouts                the payout itself —
+                                  sender_currency stays the balance's; when the
+                                  card bills in another currency Rapyd does FX
                          The ledger (kind 'payout') then confirms it from a
                          trusted PAYOUT_COMPLETED / PAYOUT_FAILED or a
                          Retrieve Payout, like any payment.
@@ -28,7 +35,7 @@ import { VERTICALS, activeWallet } from '../verticals.js';
 import * as customers from '../customers.js';
 import { getLedger, getEntry, recordPayout, applyPayoutObject, updateStatus, eventsFor } from '../ledger.js';
 import {
-  createPayout, listPayoutMethodTypes, getPayoutRequiredFields, newReference, newIdempotencyKey,
+  createPayout, listPayoutMethodTypes, getPayoutRequiredFields, checkCardEligibility, newReference, newIdempotencyKey,
 } from '../api.js';
 import { profileEwallet } from '../profiles.js';
 import { promoteToReturning } from '../identity.js';
@@ -43,6 +50,7 @@ import {
   DEPOSIT_ID, SANDBOX_PAYOUT_CARD, walletEntries, walletBalance, isDepositEntry,
   depositProblem, withdrawProblem, withdrawChips, setPendingDeposit,
   pickPayoutMethodType, fallbackPayoutMethodType, fillParties, payoutBody, requiredFieldsQuery,
+  eligibilityBody, payoutRoute,
 } from './wallet.js';
 
 /* ── Page state (module-local; survives repaints, not reloads) ── */
@@ -51,7 +59,8 @@ const draft = { deposit: '', withdraw: '' };
 let destRef = null;                        // withdraw destination: a credential ref | 'test'
 let formError = null;
 /* The latest withdrawal attempt: { key, seq, amount, currency, dest, reference,
-   stopped: shopper copy | null, types, fields, payout } — each beat is
+   stopped: shopper copy | null, elig, route (wallet.js payoutRoute), types,
+   fields, payout } — each beat is
    { salt, path, status: 'sending'|'done', httpStatus, data, … }. */
 let wd = null;
 let seq = 0;
@@ -310,7 +319,8 @@ async function sendPayout(body) {
   return res;
 }
 
-const typesPath = (cfg) => `/v1/payout_method_types?category=card&beneficiary_country=${cfg.country}&payout_currency=${cfg.currency}`;
+const ELIG_PATH = '/v1/cards/eligibility';
+const typesPath = (country, currency) => `/v1/payout_method_types?category=card&beneficiary_country=${country}&payout_currency=${currency}`;
 const fieldsPath = (q) => `/v1/payout_methods/${q.payout_method_type}/required_fields?sender_country=${q.sender_country}`
   + `&beneficiary_country=${q.beneficiary_country}&sender_currency=${q.sender_currency}&payout_currency=${q.payout_currency}`
   + `&sender_entity_type=${q.sender_entity_type}&beneficiary_entity_type=${q.beneficiary_entity_type}&payout_amount=${q.payout_amount}`;
@@ -333,33 +343,57 @@ export async function fireWithdraw(onUpdate = () => {}) {
   const current = () => mySeq === seq;
   formError = null;
   const w = { key, seq: mySeq, amount, currency: cfg.currency, dest, reference: null, stopped: null, done: false,
-    types: { salt: newSaltTimestamp(), path: typesPath(cfg), status: 'sending' }, fields: null, payout: null };
+    elig: { salt: newSaltTimestamp(), body: eligibilityBody(dest), status: 'sending' }, route: null,
+    types: null, fields: null, payout: null };
   wd = w;
   setStatus('Sending withdrawal…', 'processing');
   setActiveTab('request');
   onUpdate();
   const stop = (copy) => { w.stopped = copy; w.done = true; setStatus('Withdrawal not sent', 'error'); setActiveTab('response'); onUpdate(); };
 
-  // 1 · which card payout type the MID offers here
-  const r1 = await listPayoutMethodTypes({ category: 'card', beneficiaryCountry: cfg.country, payoutCurrency: cfg.currency, env, profile });
+  // 1 · can this card take a payout — and where / in what is it billed?
+  // Nothing moves yet, but one key per call keeps a retry harmless.
+  const r0 = await checkCardEligibility({ ...w.elig.body, env, profile }, { idempotencyKey: newIdempotencyKey() });
+  if (!current()) return;
+  Object.assign(w.elig, { status: 'done', httpStatus: r0.httpStatus, data: r0.data });
+  if (!ok(w.elig)) {
+    return stop(isGateError(r0.data) ? 'Withdrawals are unavailable right now.'
+      : 'We couldn’t verify this card for withdrawals. Try again, or choose another card.');
+  }
+  // issuer_country → beneficiary_country, billing_currency → payout_currency
+  // (user decision). Not eligible / no country → stop: no payout call at all.
+  const route = payoutRoute(r0.data?.data, { currency: cfg.currency, country: cfg.country, octCategory: cfg.octCategory });
+  w.route = route;
+  if (!route.ok) return stop(route.message);
+  const brand = route.scheme || dest.brand;
+
+  // 2 · which card payout type the MID offers for the issuer's country + billing currency
+  w.types = { salt: newSaltTimestamp(), path: typesPath(route.beneficiaryCountry, route.payoutCurrency), status: 'sending' };
+  onUpdate();
+  const r1 = await listPayoutMethodTypes({
+    category: 'card', beneficiaryCountry: route.beneficiaryCountry, payoutCurrency: route.payoutCurrency, env, profile,
+  });
   if (!current()) return;
   Object.assign(w.types, { status: 'done', httpStatus: r1.httpStatus, data: r1.data });
   let methodType = null;
   if (ok(w.types)) {
-    methodType = pickPayoutMethodType(r1.data?.data, { country: cfg.country, brand: dest.brand });
-    if (!methodType) return stop('Withdrawals to cards aren’t available here right now.');
+    methodType = pickPayoutMethodType(r1.data?.data, { country: route.beneficiaryCountry, brand });
+    if (!methodType) return stop('Withdrawals to this card aren’t available right now. Choose another card.');
   } else if (isGateError(r1.data)) {
     return stop('Withdrawals are unavailable right now.');
   } else {
     // The list couldn't be read — fall back to the documented naming
     // pattern and let the payout itself be the judge.
-    methodType = fallbackPayoutMethodType(cfg.country, dest.brand);
+    methodType = fallbackPayoutMethodType(route.beneficiaryCountry, brand);
     w.types.fallback = methodType;
   }
   w.types.picked = methodType;
 
-  // 2 · what the beneficiary and sender must carry
-  const q = requiredFieldsQuery({ methodType, country: cfg.country, currency: cfg.currency, amount });
+  // 3 · what the beneficiary and sender must carry
+  const q = requiredFieldsQuery({
+    methodType, country: cfg.country, currency: cfg.currency, amount,
+    beneficiaryCountry: route.beneficiaryCountry, payoutCurrency: route.payoutCurrency,
+  });
   w.fields = { salt: newSaltTimestamp(), path: fieldsPath(q), status: 'sending' };
   onUpdate();
   const r2 = await getPayoutRequiredFields(q, { env, profile });
@@ -368,13 +402,15 @@ export async function fireWithdraw(onUpdate = () => {}) {
   if (!ok(w.fields) && isGateError(r2.data)) return stop('Withdrawals are unavailable right now.');
   const parties = fillParties(ok(w.fields) ? r2.data?.data : null, {
     dest, identity: customers.getIdentity(), merchant: v.merchant, country: cfg.country,
+    beneficiaryCountry: route.beneficiaryCountry,
   });
   w.fields.missing = [...parties.missing.beneficiary.map((f) => `beneficiary.${f}`), ...parties.missing.sender.map((f) => `sender.${f}`)];
 
-  // 3 · the payout
+  // 4 · the payout
   const reference = newReference('wd'); // ≤ 45 chars — Create Payout's limit
   const body = payoutBody({
     amount, currency: cfg.currency, country: cfg.country, methodType,
+    payoutCurrency: route.payoutCurrency, beneficiaryCountry: route.beneficiaryCountry, live: env === 'live',
     beneficiary: parties.beneficiary, sender: parties.sender, reference,
     description: `Withdrawal to ${destLabel(dest)}`, descriptor: v.descriptor,
     ewallet: env === 'sandbox' ? profileEwallet() : null,
@@ -412,13 +448,35 @@ function preparedBody() {
   const v = VERTICALS[state.vertical];
   const dest = activeDest();
   const parties = fillParties(null, { dest: dest || { kind: 'test' }, identity: customers.getIdentity(), merchant: v.merchant, country: cfg.country });
-  return payoutBody({
+  const body = payoutBody({
     amount: amountFor('withdraw') || '(amount)', currency: cfg.currency, country: cfg.country,
     methodType: '(from GET /v1/payout_method_types)',
     beneficiary: parties.beneficiary, sender: parties.sender,
     reference: '(assigned on withdraw)', description: `Withdrawal to ${destLabel(dest)}`, descriptor: v.descriptor,
     ewallet: state.env === 'sandbox' ? profileEwallet() : null,
   });
+  // Not known until the card's eligibility check answers.
+  body.payout_currency = '(card’s billing_currency — POST /v1/cards/eligibility)';
+  body.beneficiary_country = '(card’s issuer_country — POST /v1/cards/eligibility)';
+  return body;
+}
+
+/* What the eligibility answer did to the payout, for the engine room. */
+function routeNote(r) {
+  if (!r) return '';
+  if (!r.beneficiaryCountry) return '<div class="wh-expect-note">No <code>issuer_country</code> in the answer — the payout can’t be addressed, so none is sent.</div>';
+  const lines = [`<code>issuer_country</code> ${esc(r.beneficiaryCountry)} → <code>beneficiary_country</code>`
+    + ` · <code>billing_currency</code> ${esc(r.currencyFallback ? '(absent — using the balance currency)' : r.payoutCurrency)} → <code>payout_currency</code>`
+    + ` · <code>oct.${esc(r.octField)}</code> = ${esc(r.oct ?? 'null')}`];
+  if (!r.ok) lines.push('Not eligible — the withdrawal stops here; no payout call is made.');
+  else if (r.unknown) lines.push('The scheme gave no clear verdict — the payout goes ahead and Rapyd decides.');
+  if (r.ok && r.fx) {
+    lines.push(`FX: <code>sender_currency</code> ${esc(r.senderCurrency)} (the balance) → <code>payout_currency</code> ${esc(r.payoutCurrency)} (the card).`
+      + (isLive()
+        ? ' Live sends <code>payout_amount</code> (the backend caps it), so the card receives 0.01 and Rapyd works out the debit.'
+        : ` <code>sender_amount</code> fixes what leaves the ${esc(r.senderCurrency)} wallet; Rapyd converts at its rate (<code>confirm_automatically: true</code>) and the payout response carries the <code>fx_rate</code>.`));
+  }
+  return `<div class="wh-expect-note">${lines.join('<br>')}</div>`;
 }
 
 function badgeOf(b) {
@@ -453,19 +511,33 @@ export function walletRequestCardsHTML() {
     });
   }
   const parts = [];
-  parts.push(getCardHTML('beat-po-types', 1, wd.types.path, wd.types,
-    wd.types.fallback ? `list unavailable — using ${wd.types.fallback}` : 'which card payout type'));
+  {
+    const [badge, kind] = badgeOf(wd.elig);
+    parts.push(beatCardHTML({
+      id: 'beat-po-elig', n: 1, method: 'POST', path: ELIG_PATH, badge, badgeKind: kind,
+      inner: `
+        ${headersHTML(wd.elig.salt)}
+        <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">transaction_type oct = a payout to this card · ${wd.dest.kind === 'token' ? 'card_id = the saved card_***' : 'sandbox payout test card'}</span></div>
+        ${renderJSONView(wd.elig.body)}`,
+    }));
+  }
+  if (wd.types) {
+    parts.push(getCardHTML('beat-po-types', 2, wd.types.path, wd.types,
+      wd.types.fallback ? `list unavailable — using ${wd.types.fallback}` : 'which card payout type · issuer country + billing currency'));
+  }
   if (wd.fields) {
     const missing = wd.fields.missing?.length ? ` · no demo value for ${wd.fields.missing.join(', ')}` : '';
-    parts.push(getCardHTML('beat-po-fields', 2, wd.fields.path, wd.fields, `beneficiary + sender fields${missing}`));
+    parts.push(getCardHTML('beat-po-fields', 3, wd.fields.path, wd.fields, `beneficiary + sender fields${missing}`));
   }
   if (wd.payout) {
     const [badge, kind] = badgeOf(wd.payout);
+    const fx = wd.route?.fx ? ` · FX ${wd.route.senderCurrency} → ${wd.route.payoutCurrency}` : '';
     parts.push(beatCardHTML({
-      id: 'beat-po-create', n: 3, method: 'POST', path: '/v1/payouts', badge, badgeKind: kind,
+      id: 'beat-po-create', n: 4, method: 'POST', path: '/v1/payouts', badge, badgeKind: kind,
       inner: `
         ${headersHTML(wd.payout.salt)}
-        <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${wd.dest.kind === 'token' ? 'beneficiary.card_id = the saved card_***' : 'sandbox payout test card'}</span></div>
+        <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${esc(`${wd.dest.kind === 'token' ? 'beneficiary.card_id = the saved card_***' : 'sandbox payout test card'}${fx}`)}</span></div>
+        ${routeNote(wd.route)}
         ${renderJSONView(wd.payout.body)}`,
     }));
   }
@@ -481,34 +553,58 @@ export function fillWalletSignatures() {
     if (preparedSalt) sign('beat-po-create', 'post', '/v1/payouts', preparedSalt, preparedBody());
     return;
   }
-  sign('beat-po-types', 'get', wd.types.path, wd.types.salt, null);
+  sign('beat-po-elig', 'post', ELIG_PATH, wd.elig.salt, wd.elig.body);
+  if (wd.types) sign('beat-po-types', 'get', wd.types.path, wd.types.salt, null);
   if (wd.fields) sign('beat-po-fields', 'get', wd.fields.path, wd.fields.salt, null);
   if (wd.payout) sign('beat-po-create', 'post', '/v1/payouts', wd.payout.salt, wd.payout.body);
 }
 
-function responseCardHTML(id, n, method, path, b, okLabel) {
+/* `verdict` (optional): { bad, label, pills: [[text, cls]], note: html } —
+   overrides the badge of a call that answered 200 but stopped the flow
+   (an ineligible card) and adds pills / a note above the JSON. */
+function responseCardHTML(id, n, method, path, b, okLabel, verdict = null) {
   if (b.status === 'sending') {
     return beatCardHTML({ id, n, method, path, badge: 'sending…', badgeKind: 'live',
       inner: `<div class="eng-sending"><span class="spin"></span>Awaiting Rapyd response…</div>` });
   }
   const good = ok(b);
+  const fine = good && !verdict?.bad;
   const code = b.httpStatus ? `HTTP ${esc(b.httpStatus)}` : 'NO RESPONSE';
+  const badge = !good ? String(b.data?.raw?.error_code || b.data?.error || 'failed') : verdict?.label || okLabel;
   return beatCardHTML({
-    id, n, method, path,
-    badge: good ? okLabel : String(b.data?.raw?.error_code || b.data?.error || 'failed'), badgeKind: good ? 'ok' : 'err',
+    id, n, method, path, badge, badgeKind: fine ? 'ok' : 'err',
     inner: `
-      <div class="eng-pillrow"><span class="wh-pill ${good ? 'success' : 'failure'}">${code}</span></div>
+      <div class="eng-pillrow"><span class="wh-pill ${good ? 'success' : 'failure'}">${code}</span>${(verdict?.pills || [])
+        .map(([t, cls]) => `<span class="wh-pill ${esc(cls)}">${esc(t)}</span>`).join('')}</div>
+      ${verdict?.note || ''}
       ${renderJSONView(b.data ?? { error: 'no response body' })}`,
   });
 }
 
+/* The eligibility card's verdict: what the answer decided for the payout. */
+function eligVerdict() {
+  const r = wd.route;
+  if (!ok(wd.elig) || !r) return null;
+  if (!r.beneficiaryCountry) return { bad: true, label: 'no issuer_country', note: routeNote(r) };
+  const pills = [
+    [`ISSUER ${r.beneficiaryCountry}`, ''], [`BILLING ${r.payoutCurrency}`, ''],
+    [`OCT ${r.scope.toUpperCase()} · ${(r.oct || 'unknown').toUpperCase()}`, r.ok ? (r.unknown ? '' : 'success') : 'failure'],
+  ];
+  if (r.ok && r.fx) pills.push([`FX ${r.senderCurrency} → ${r.payoutCurrency}`, '']);
+  return {
+    bad: !r.ok, pills, note: routeNote(r),
+    label: r.ok ? `→ ${r.beneficiaryCountry} · ${r.payoutCurrency}` : 'not eligible',
+  };
+}
+
 /** The Response tab, or '' until the withdrawal's first call has answered. */
 export function walletResponseCardsHTML() {
-  if (!mine() || wd.types.status !== 'done') return '';
+  if (!mine() || wd.elig.status !== 'done') return '';
   const parts = [];
-  if (wd.payout) parts.push(responseCardHTML('beat-po-create-res', 3, 'POST', '/v1/payouts', wd.payout, `payout · ${wd.payout.data?.data?.status || '…'}`));
-  if (wd.fields) parts.push(responseCardHTML('beat-po-fields-res', 2, 'GET', wd.fields.path, wd.fields, 'required fields'));
-  parts.push(responseCardHTML('beat-po-types-res', 1, 'GET', wd.types.path, wd.types, wd.types.picked ? `→ ${wd.types.picked}` : 'method types'));
+  if (wd.payout) parts.push(responseCardHTML('beat-po-create-res', 4, 'POST', '/v1/payouts', wd.payout, `payout · ${wd.payout.data?.data?.status || '…'}`));
+  if (wd.fields) parts.push(responseCardHTML('beat-po-fields-res', 3, 'GET', wd.fields.path, wd.fields, 'required fields'));
+  if (wd.types) parts.push(responseCardHTML('beat-po-types-res', 2, 'GET', wd.types.path, wd.types, wd.types.picked ? `→ ${wd.types.picked}` : 'method types'));
+  parts.push(responseCardHTML('beat-po-elig-res', 1, 'POST', ELIG_PATH, wd.elig, 'eligibility', eligVerdict()));
   return parts.join('');
 }
 
@@ -518,7 +614,7 @@ export function walletResponseCardsHTML() {
 export function walletWebhooksHTML() {
   if (!mine() || !wd.reference) return '';
   const events = eventsFor(wd.reference);
-  const label = `<div class="wh-beat-label"><span class="wh-beat-n">3</span>Withdrawal · <code>POST /v1/payouts</code></div>`;
+  const label = `<div class="wh-beat-label"><span class="wh-beat-n">4</span>Withdrawal · <code>POST /v1/payouts</code></div>`;
   if (!events.length) {
     return `${label}
       <div class="wh-expect-row"><span class="wh-expect">PAYOUT_COMPLETED</span><span class="wh-expect">PAYOUT_FAILED</span></div>
