@@ -11,29 +11,37 @@
    mechanical back-office switch — is what drives the stored-credential
    intent (`recurrence_type`): one-time + save → unscheduled (card-on-
    file, customer-present reuse); subscription → recurring (MIT charges
-   run from the back office). Crypto products additionally carry the
-   AFT indicators (aft / purpose_code / special_condition_indicator).
+   run from the back office). Crypto and forex products additionally
+   carry the AFT indicators (aft / purpose_code / special_condition_
+   indicator) — each only where the pack sets it; an unset indicator is
+   left out of the request, never sent empty.
+
+   `interval` (subscriptions): 'monthly' or 'annual' — the shopper-facing
+   period wording ("/mo", "/yr") follows it (site/cart.js billingPeriod).
+   The back office runs each MIT charge on demand either way.
 
    To add an industry: copy a pack, give it its own catalog and copy,
    and point a skin at it (skins.js `pack`).
 
    `wallet` (journey rule) — the merchant site's Wallet page (js/site/
    wallet.js): a balance the shopper deposits into (a real payment through
-   the checkout) and withdraws from (a real Rapyd card payout). Gambling and
-   crypto merchants run exactly this deposit / withdraw journey, so those
-   packs opt in; `null` keeps the page and its nav item off. Fields:
+   the checkout) and withdraws from (a real Rapyd card payout). Gambling,
+   crypto and forex merchants run exactly this deposit / withdraw journey,
+   so those packs opt in; `null` keeps the page and its nav item off. Fields:
      currency, country  what the balance is held in; the payout's
                         payout/sender currency and beneficiary/sender country
      chips              suggested deposit amounts
      depositLabel       the shopper's verb ('Deposit'; 'Top up' when absent)
      aft                the deposit carries the pack's AFT indicators — only
-                        where the flows already apply AFT (crypto), and then
-                        as is_direct_purchase:false (it funds a balance)
+                        where the pack's catalog already applies AFT (crypto,
+                        forex), and then as is_direct_purchase:false (it
+                        funds a balance)
 
    Optional product fields the merchant site (js/site/) reads when present:
    `cat` (shop-card category), `tagline` + `about` (product page copy),
-   `specs` ([label, value] rows). `thumb: null` renders the neutral
-   "product shot" placeholder (every built-in product uses it — product
+   `specs` ([label, value] rows), and on an AFT one-off `fundedNote` +
+   `dpLabels` (the checkout's is_direct_purchase fork: [now, later]).
+   `thumb: null` renders the neutral "product shot" placeholder (every built-in product uses it — product
    imagery is deliberately a placeholder); `thumb: [c1, c2]` + `glyph`
    would paint a gradient tile instead, for a customer pack that wants one.
    ───────────────────────────────────────────────────────────── */
@@ -62,6 +70,7 @@ export const PACKS = {
         successNote: 'Purchase confirmed — ≈ 0.00075 BTC is on its way to your wallet address. Network confirmations usually take a few minutes.',
         // is_direct_purchase: false → the AFT funds the fiat balance instead
         fundedNote: 'Funds added — your fiat balance is topped up and held. Buy BTC whenever you’re ready, at your price.',
+        dpLabels: ['Buy BTC now', 'Add funds, buy later'],
       },
       {
         id: 'dca', pill: 'DCA Plan', billing: 'subscription', interval: 'monthly', cta: 'Start DCA', glyph: '🔁',
@@ -112,6 +121,139 @@ export const PACKS = {
         amount: '12.00', currency: 'EUR', symbol: '€', country: 'MT',
         delivery: null,
         successNote: 'Ad-free active — enjoy uninterrupted play. Bills to this card automatically each month.',
+      },
+    ],
+  },
+  // Forex / CFD trading — a broker's trading account. Funding it is the
+  // textbook AFT case: Rapyd's AFT guide lists "foreign exchange platforms"
+  // and CFD / derivatives platforms as the merchants it's for, with
+  // purpose_code `high_risk_securities` ("securities, options, derivatives
+  // and foreign exchange") — docs.rapyd.net/en/creating-an-aft-payment.html.
+  // That page documents only aft / is_direct_purchase / purpose_code under
+  // payment_method_options, so no special_condition_indicator is set here.
+  // The broker MCC (6211, security brokers/dealers) is the MID's acquiring
+  // setup, not a request field — nothing to send. Regulated brokers verify
+  // identity before an account trades, hence KYC at signup.
+  forex: {
+    id: 'forex',
+    label: 'Forex trading',
+    headline: 'Fund your trading account',
+    cta: 'Fund',
+    successNote: 'Funds received — your trading balance is updated and ready to trade. Withdrawals return to this card.',
+    kycAtSignup: true,
+    wallet: {
+      currency: 'GBP', country: 'GB', chips: ['100.00', '250.00', '500.00', '1000.00'], depositLabel: 'Deposit',
+      aft: { purpose_code: 'high_risk_securities' },
+    },
+    products: [
+      {
+        id: 'copy', pill: 'Copy trading', billing: 'one_time', cta: 'Invest', glyph: '📈',
+        aft: true, purpose_code: 'high_risk_securities',
+        thumb: null, cat: 'Copy trading',
+        name: 'Copy-Trading Allocation',
+        desc: 'Mirror the FX Majors strategy',
+        tagline: 'Follow a strategy, not a screen',
+        about: 'Allocate to the FX Majors strategy and every trade it places is mirrored in your account, in proportion. Stop copying at any time.',
+        specs: [['Markets', 'EUR/USD, GBP/USD, USD/JPY'], ['Leverage', 'Up to 1:30'], ['Minimum', '£250']],
+        amount: '250.00', currency: 'GBP', symbol: '£', country: 'GB',
+        delivery: null,
+        successNote: 'Allocation live — your £250 is copying the FX Majors strategy from its next trade.',
+        // is_direct_purchase: false → the AFT funds the trading balance instead
+        fundedNote: 'Funds added — your trading balance is topped up. Start copying the strategy whenever you’re ready.',
+        dpLabels: ['Start copying now', 'Add funds, copy later'],
+      },
+      {
+        id: 'signals', pill: 'Pro Signals', billing: 'subscription', interval: 'monthly', cta: 'Subscribe', glyph: '📡',
+        thumb: null, cat: 'Signals',
+        name: 'Pro Signals',
+        desc: 'Daily trade ideas · monthly',
+        tagline: 'Entries, exits and the reasoning',
+        about: 'Analyst trade ideas across the FX majors every trading day, with entry, stop and target levels and a short rationale.',
+        specs: [['Coverage', '28 currency pairs'], ['Delivery', 'In-app + email'], ['Billing', 'Monthly']],
+        amount: '29.00', currency: 'GBP', symbol: '£', country: 'GB',
+        delivery: null,
+        successNote: 'Pro Signals active — today’s ideas are on your dashboard. Your card bills automatically each month.',
+      },
+      {
+        id: 'datafeed', pill: 'Level 2 Data', billing: 'subscription', interval: 'monthly', cta: 'Subscribe', glyph: '📊',
+        thumb: null, cat: 'Market data',
+        name: 'Level 2 Data Feed',
+        desc: 'Real-time depth of market · monthly',
+        tagline: 'See the order book',
+        about: 'Real-time depth-of-market and tick data on every instrument you trade, streamed into the platform.',
+        specs: [['Latency', 'Real-time'], ['Instruments', 'FX, indices, metals'], ['Billing', 'Monthly']],
+        amount: '15.00', currency: 'GBP', symbol: '£', country: 'GB',
+        delivery: null,
+        successNote: 'Level 2 data on — depth of market is streaming now. Bills to this card automatically each month.',
+      },
+    ],
+  },
+  // Digital content — a streaming service: plans (monthly / annual) and
+  // one-off titles to rent or buy. Nothing ships (delivery null), no balance
+  // to hold (wallet null), no identity check to watch a film.
+  content: {
+    id: 'content',
+    label: 'Digital content',
+    headline: 'Start watching',
+    cta: 'Pay',
+    successNote: 'You’re all set — it’s in your library and ready to watch on any device.',
+    kycAtSignup: false,
+    wallet: null,
+    products: [
+      {
+        id: 'rent', pill: 'Rent', billing: 'one_time', cta: 'Rent', glyph: '🎬',
+        thumb: null, cat: 'Rent',
+        name: 'Harbour Lights — Rent', desc: '48-hour rental · HD',
+        tagline: 'Watch tonight',
+        about: 'A lighthouse keeper, a storm and a ship that shouldn’t be there. Start within 30 days; once you press play you have 48 hours to finish.',
+        specs: [['Quality', 'HD'], ['Runtime', '1 h 54 min'], ['Window', '48 hours']],
+        amount: '5.98', currency: 'SGD', symbol: 'S$', country: 'SG',
+        delivery: null,
+        successNote: 'Rental ready — Harbour Lights is in your library. You have 48 hours once you press play.',
+      },
+      {
+        id: 'buy', pill: 'Buy', billing: 'one_time', cta: 'Buy', glyph: '🎞️',
+        thumb: null, cat: 'Buy',
+        name: 'Harbour Lights — Buy', desc: 'Yours to keep · 4K',
+        tagline: 'Keep it forever',
+        about: 'Own the film in 4K with HDR and the director’s commentary. Download it to watch offline on up to five devices.',
+        specs: [['Quality', '4K HDR'], ['Extras', 'Commentary'], ['Devices', 'Up to 5']],
+        amount: '19.98', currency: 'SGD', symbol: 'S$', country: 'SG',
+        delivery: null,
+        successNote: 'It’s yours — Harbour Lights is in your library to stream or download, for good.',
+      },
+      {
+        id: 'season', pill: 'Season Pass', billing: 'one_time', cta: 'Buy', glyph: '📺',
+        thumb: null, cat: 'Season pass',
+        name: 'Tidewater — Season 2 Pass', desc: 'All 8 episodes · as they air',
+        tagline: 'Every episode, as it lands',
+        about: 'Every episode of Tidewater season 2, added to your library the moment it airs. No plan needed.',
+        specs: [['Episodes', '8'], ['Quality', '4K HDR'], ['Released', 'Weekly']],
+        amount: '24.98', currency: 'SGD', symbol: 'S$', country: 'SG',
+        delivery: null,
+        successNote: 'Season pass active — the episodes out so far are in your library; new ones land as they air.',
+      },
+      {
+        id: 'monthly', pill: 'Standard', billing: 'subscription', interval: 'monthly', cta: 'Subscribe', glyph: '▶️',
+        thumb: null, cat: 'Plans',
+        name: 'Stream Standard', desc: 'HD · 2 screens · monthly',
+        tagline: 'Everything in the catalogue',
+        about: 'The whole catalogue in HD on two screens at once. Cancel any time.',
+        specs: [['Quality', 'HD'], ['Screens', '2'], ['Billing', 'Monthly']],
+        amount: '13.98', currency: 'SGD', symbol: 'S$', country: 'SG',
+        delivery: null,
+        successNote: 'Welcome to Stream Standard — start watching now. Your card bills automatically each month until you cancel.',
+      },
+      {
+        id: 'annual', pill: 'Premium', billing: 'subscription', interval: 'annual', cta: 'Subscribe', glyph: '⭐',
+        thumb: null, cat: 'Plans',
+        name: 'Stream Premium', desc: '4K · 4 screens · annual',
+        tagline: 'Two months on us',
+        about: 'The whole catalogue in 4K HDR on four screens, with downloads — billed once a year for the price of ten months.',
+        specs: [['Quality', '4K HDR'], ['Screens', '4'], ['Billing', 'Annual']],
+        amount: '199.90', currency: 'SGD', symbol: 'S$', country: 'SG',
+        delivery: null,
+        successNote: 'Welcome to Stream Premium — start watching in 4K now. Your card bills automatically once a year until you cancel.',
       },
     ],
   },

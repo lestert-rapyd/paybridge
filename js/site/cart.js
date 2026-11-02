@@ -27,6 +27,25 @@ import { currencyDecimals } from '../sync.js';
 
 export const MAX_QTY = 9;
 
+/* ── Billing period ──────────────────────────────────────── */
+
+/* A subscription's period wording, from the pack's `interval` (packs.js):
+   short ("/mo"), the noun ("/ month", "every month"), the badge, and the
+   adjective / adverb ("annual charge", "Recurring annually"). An
+   unknown or missing interval reads as monthly — every pack before annual
+   plans existed. */
+const PERIODS = {
+  monthly: { short: 'mo', noun: 'month', badge: 'Monthly', adj: 'monthly', adverb: 'monthly' },
+  annual:  { short: 'yr', noun: 'year',  badge: 'Annual',  adj: 'annual',  adverb: 'annually' },
+};
+
+/** The period wording for a product (or order line), or null when it's not
+    a subscription. */
+export function billingPeriod(p) {
+  if (!p || p.billing !== 'subscription') return null;
+  return PERIODS[p.interval] || PERIODS.monthly;
+}
+
 /* ── Bag state ───────────────────────────────────────────── */
 
 /** The raw lines for a vertical — [] when the bag belongs to another one. */
@@ -158,6 +177,7 @@ export function cartAsProduct(resolved) {
     lines: resolved.map((l) => ({
       id: l.product.id, name: l.product.name, qty: l.qty,
       amount: lineTotal(l.product, l.qty), currency: l.product.currency, billing: l.product.billing,
+      ...(l.product.interval ? { interval: l.product.interval } : {}),
     })),
   };
 }

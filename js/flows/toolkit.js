@@ -215,7 +215,7 @@ function expressBody(cred) {
     pmo.aft = true;
     pmo.is_direct_purchase = p.is_direct_purchase ?? true; // false for a wallet deposit (site/wallet.js)
     pmo.purpose_code = p.purpose_code;
-    pmo.special_condition_indicator = p.special_condition_indicator;
+    if (p.special_condition_indicator) pmo.special_condition_indicator = p.special_condition_indicator; // forex sets none
   }
   if (Object.keys(pmo).length) body.payment_method_options = pmo;
   body.address = customers.demoAddress();

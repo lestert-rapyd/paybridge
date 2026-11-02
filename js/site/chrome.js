@@ -19,7 +19,7 @@ import { VERTICALS, activeWallet, depositFor } from '../verticals.js';
 import * as customers from '../customers.js';
 import { esc } from '../ui.js';
 import { currencyDecimals } from '../sync.js';
-import { cartCount } from './cart.js';
+import { cartCount, billingPeriod } from './cart.js';
 import { isSignedIn } from './session.js';
 
 /* Which nav item a page lights up. */
@@ -89,7 +89,8 @@ export function moneyText(amount, currency) {
   return `${money} ${currency || ''}`.trim();
 }
 
-/** A product's shelf price — "/ month" for a subscription. Text. */
+/** A product's shelf price — "/ month" ("/ year") for a subscription. Text. */
 export function priceText(p) {
-  return `${moneyText(p.amount, p.currency)}${p.billing === 'subscription' ? ' / month' : ''}`;
+  const per = billingPeriod(p);
+  return `${moneyText(p.amount, p.currency)}${per ? ` / ${per.noun}` : ''}`;
 }

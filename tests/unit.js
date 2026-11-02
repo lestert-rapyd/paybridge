@@ -30,14 +30,15 @@ import { newReference, newIdempotencyKey, pickBackend } from '../js/api.js';
 // through — verticals.js activeProduct(). Neither touches the DOM or network.
 import {
   cartLines, addToCart, setLineQty, removeLine, clearCart, cartCount,
-  resolveLines, lineTotal, cartTotal, cartProblem, cartAsProduct, MAX_QTY,
+  resolveLines, lineTotal, cartTotal, cartProblem, cartAsProduct, MAX_QTY, billingPeriod,
 } from '../js/site/cart.js';
-import { VERTICALS, activeProduct, pricedProduct, orderItems } from '../js/verticals.js';
+import { VERTICALS, VERTICAL_ORDER, activeProduct, pricedProduct, orderItems } from '../js/verticals.js';
 import { state } from '../js/state.js';
 // The customer store: its serialize/restore pair is pure; the live store is
 // pointed at an in-memory stand-in below, so no test writes real localStorage.
 import * as customers from '../js/customers.js';
-import { SKINS } from '../js/skins.js';
+import { SKINS, SKIN_ORDER } from '../js/skins.js';
+import { PACKS } from '../js/packs.js';
 // The integration seam: pure data + address helpers (DOM writers untouched).
 import {
   SEAM_PATHS, SEAM_LABELS, seamPathKey, hostedAddress, isRapydHost, pagePath, HOSTED_DOMAIN,
@@ -467,15 +468,83 @@ test('activeProduct: an invalid or empty bag charges nothing from it', () => {
   });
 });
 
-/* ── skins — the three built-in Rapyd merchants ── */
-test('skins: exactly the three Rapyd merchants, ids stable', () => {
-  eq(Object.keys(SKINS), ['ecommerce', 'crypto', 'gaming']);
-  eq(['ecommerce', 'crypto', 'gaming'].map((id) => [VERTICALS[id].merchant, VERTICALS[id].domain, VERTICALS[id].descriptor, VERTICALS[id].pack]), [
+/* ── skins — the five built-in Rapyd merchants ── */
+test('skins: exactly the five Rapyd merchants, ids stable, drawer order', () => {
+  const ids = ['ecommerce', 'crypto', 'gaming', 'forex', 'content'];
+  eq(Object.keys(SKINS), ids);
+  eq(SKIN_ORDER, ids);
+  eq(VERTICAL_ORDER, ids);
+  eq(ids.map((id) => [VERTICALS[id].merchant, VERTICALS[id].domain, VERTICALS[id].descriptor, VERTICALS[id].pack]), [
     ['rapyd.shop', 'rapyd.shop', 'RAPYD SHOP', 'home'],
     ['rapyd.coin', 'rapyd.coin', 'RAPYD COIN', 'crypto'],
     ['rapyd.spin', 'rapyd.spin', 'RAPYD SPIN', 'igaming'],
+    ['rapyd.fx', 'rapyd.fx', 'RAPYD FX', 'forex'],
+    ['rapyd.stream', 'rapyd.stream', 'RAPYD STREAM', 'content'],
   ]);
   eq(VERTICALS.gaming.label, 'Gambling');
+  eq([VERTICALS.forex.label, VERTICALS.content.label], ['Forex trading', 'Digital content']);
+  for (const id of ids) {
+    eq(VERTICALS[id].id, id, `${id}: composed under its skin id`);
+    ok(PACKS[SKINS[id].pack], `${id}: its pack exists`);
+    ok(VERTICALS[id].descriptor.length <= 22, `${id}: statement descriptor stays short`);
+    // The built-ins share the Rapyd look — they differ in identity, not colour.
+    eq(SKINS[id].tokens, SKINS.ecommerce.tokens, `${id}: Rapyd palette`);
+  }
+});
+
+test('packs: catalog invariants hold for every pack', () => {
+  for (const [key, pack] of Object.entries(PACKS)) {
+    eq(pack.id, key, `${key}: id matches its key`);
+    ok(pack.products.length > 0, `${key}: has products`);
+    const ids = pack.products.map((p) => p.id);
+    eq(new Set(ids).size, ids.length, `${key}: unique product ids`);
+    ok(!ids.includes(DEPOSIT_ID), `${key}: no product shadows the wallet deposit id`);
+    for (const p of pack.products) {
+      ok(validAmount(p.amount, p.currency), `${key}/${p.id}: ${p.amount} ${p.currency} is a valid amount`);
+      ok(['one_time', 'subscription'].includes(p.billing), `${key}/${p.id}: billing`);
+      if (p.billing === 'subscription') ok(['monthly', 'annual'].includes(p.interval), `${key}/${p.id}: subscription has an interval`);
+      else ok(!p.interval, `${key}/${p.id}: a one-off has no interval`);
+      if (p.aft) ok(typeof p.purpose_code === 'string' && p.purpose_code, `${key}/${p.id}: AFT names a purpose_code`);
+    }
+    // One currency per pack — a bag can't mix them (cart.js cartProblem).
+    eq(new Set(pack.products.map((p) => p.currency)).size, 1, `${key}: one catalog currency`);
+    if (pack.wallet) {
+      eq(pack.wallet.currency, pack.products[0].currency, `${key}: wallet holds the catalog currency`);
+      for (const c of pack.wallet.chips) ok(validAmount(c, pack.wallet.currency), `${key}: chip ${c}`);
+    }
+  }
+});
+
+test('packs: forex runs KYC + an AFT wallet; content is digital, no wallet', () => {
+  const fx = PACKS.forex, ct = PACKS.content;
+  eq([fx.kycAtSignup, ct.kycAtSignup], [true, false]);
+  const w = walletConfig('forex');
+  eq([w.currency, w.country, w.depositLabel, w.withdrawLabel], ['GBP', 'GB', 'Deposit', 'Withdraw']);
+  // docs.rapyd.net/en/creating-an-aft-payment.html — the only AFT field set
+  // the guide documents; no special_condition_indicator is invented for forex.
+  eq(w.aft, { purpose_code: 'high_risk_securities' });
+  const dep = depositProduct(w, { amount: '100.00' });
+  eq([dep.aft, dep.purpose_code, dep.is_direct_purchase, dep.currency], [true, 'high_risk_securities', false, 'GBP']);
+  ok(fx.products.some((p) => p.billing === 'one_time') && fx.products.some((p) => p.billing === 'subscription'), 'forex: a one-off + subscriptions');
+  eq(walletConfig('content'), null, 'content runs no wallet');
+  ok(ct.products.every((p) => p.delivery === null && !p.aft), 'content: nothing ships, no AFT');
+  eq(ct.products.filter((p) => p.billing === 'subscription').map((p) => p.interval), ['monthly', 'annual']);
+  ok(ct.products.filter((p) => p.billing === 'one_time').length >= 2, 'content: rent / buy one-offs');
+  // A different currency from the other packs, and one the FX list offers.
+  eq([fx.products[0].currency, ct.products[0].currency], ['GBP', 'SGD']);
+});
+
+test('billingPeriod: monthly by default, annual reads per year; one-offs none', () => {
+  eq(billingPeriod({ billing: 'one_time' }), null);
+  eq(billingPeriod(null), null);
+  eq([billingPeriod({ billing: 'subscription' }).short, billingPeriod({ billing: 'subscription', interval: 'monthly' }).noun], ['mo', 'month']);
+  const yr = billingPeriod({ billing: 'subscription', interval: 'annual' });
+  eq([yr.short, yr.noun, yr.badge, yr.adj], ['yr', 'year', 'Annual', 'annual']);
+  // The interval reaches the ledger's order line, so the Orders page can say "/ year".
+  const annual = PACKS.content.products.find((p) => p.interval === 'annual');
+  eq(orderItems(annual)[0].interval, 'annual');
+  eq(cartAsProduct([{ product: annual, qty: 1 }]).lines[0].interval, 'annual');
+  ok(!('interval' in orderItems(PACKS.home.products[0])[0]), 'a one-off line carries no interval');
 });
 
 /* ── customers.js — remembered customers ──

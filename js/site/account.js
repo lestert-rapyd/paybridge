@@ -32,6 +32,7 @@ import { renderJSONView } from '../json-view.js';
 import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
 import { esc } from '../ui.js';
 import { siteHeaderHTML, thumbHTML, moneyText } from './chrome.js';
+import { billingPeriod } from './cart.js';
 
 /* ── Orders ──────────────────────────────────────────────── */
 
@@ -57,15 +58,18 @@ function orderRowHTML(e) {
   const items = Array.isArray(e.items) ? e.items : [];
   const first = products.find((p) => p.id === items[0]?.id) || null;
   const isSub = e.origin === 'backoffice' || items.some((i) => i.billing === 'subscription');
+  // The period: the line's own interval, else the catalog product's (back-office
+  // charges and older entries carry none); monthly when neither says.
+  const per = isSub ? billingPeriod({ billing: 'subscription', interval: items[0]?.interval || first?.interval }) : null;
   const name = e.origin === 'backoffice'
-    ? `${items[0]?.name || 'Subscription'} · monthly charge`
+    ? `${items[0]?.name || 'Subscription'} · ${per.adj} charge`
     : items.length > 1
       ? `${items[0].name} + ${items.length - 1} more`
       : items[0]?.name || 'Order';
   const [label, tone] = orderStatus(e, isSub);
   const when = new Date(e.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   const card = e.credential?.label || (e.last4 ? `•••• ${e.last4}` : null);
-  const meta = [when, moneyText(e.amount, e.currency) + (isSub ? ' / month' : ''), card].filter(Boolean).join(' · ');
+  const meta = [when, moneyText(e.amount, e.currency) + (per ? ` / ${per.noun}` : ''), card].filter(Boolean).join(' · ');
   return `
     <div class="ord-row">
       ${thumbHTML(first, 'ord-thumb')}

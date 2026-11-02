@@ -21,6 +21,7 @@ import { newIdempotencyKey, retrievePayment } from '../api.js';
 import { renderJSONView } from '../json-view.js';
 import { esc, setStatus } from '../ui.js';
 import { brandLabel, validAmount, currencyDecimals } from '../sync.js';
+import { billingPeriod } from '../site/cart.js';
 import { isTrusted } from '../classify.js';
 import { renderSuccess, renderError } from '../screens.js';
 import * as ledger from '../ledger.js';
@@ -32,10 +33,13 @@ import { beatCardHTML } from '../customer-beat.js';
 
 /** Customer-facing order totals. `c` is a customerCharge() object — what the
     customer actually pays (the converted figure under 'buy'). The amount can
-    be SE-typed (the price tile), so it's escaped like any other input. */
-export function totalsHTML(c, feeLabel, feeValue, perMonth = false) {
+    be SE-typed (the price tile), so it's escaped like any other input.
+    `period` is a subscription's billingPeriod() (site/cart.js) — "/mo",
+    "/yr" — or falsy for a one-off (`true` still reads as monthly). */
+export function totalsHTML(c, feeLabel, feeValue, period = null) {
   const amt = esc(chargeText(c));
-  const mo = perMonth ? ' <span class="per-mo">/mo</span>' : '';
+  const per = period === true ? 'mo' : period?.short;
+  const mo = per ? ` <span class="per-mo">/${esc(per)}</span>` : '';
   return `
     <div class="co-line"><span>Subtotal</span><span>${amt}</span></div>
     <div class="co-line"><span>${esc(feeLabel)}</span><span class="${feeValue === 'Free' ? 'free' : ''}">${esc(feeValue)}</span></div>
@@ -44,7 +48,7 @@ export function totalsHTML(c, feeLabel, feeValue, perMonth = false) {
 
 /** totalsHTML() for the active product — the common call. */
 export function productTotalsHTML(p = activeProduct()) {
-  return totalsHTML(customerCharge(), p.delivery ? 'Delivery' : 'Fees', p.delivery || 'Free', p.billing === 'subscription');
+  return totalsHTML(customerCharge(), p.delivery ? 'Delivery' : 'Fees', p.delivery || 'Free', billingPeriod(p));
 }
 
 /* The fx_rates quote, as a card. Recorded in verticals.js by app.js's debounced
