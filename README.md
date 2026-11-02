@@ -127,14 +127,24 @@ cash-out balance). Signed-in shoppers see a Wallet nav item:
   saved card, hosted page) with the seam, FX and the live 0.01 clamp as usual.
   Crypto deposits carry the pack's AFT indicators with `is_direct_purchase:
   false` (they fund a balance); gambling deposits carry none, as before.
-- **Withdraw** — a real Rapyd **card payout**, three beats in the engine room:
-  `GET /v1/payout_method_types` (category card, the pack's country + currency —
-  picks e.g. `us_visa_card`), `GET /v1/payout_methods/{type}/required_fields`
+- **Withdraw** — a real Rapyd **card payout**, four beats in the engine room:
+  `POST /v1/cards/eligibility` (`transaction_type: oct`, the card as `card_id`
+  or — sandbox — the test card's `card_number`): the card's `issuer_country`
+  becomes the payout's `beneficiary_country` and its `billing_currency` the
+  `payout_currency`; the pack's `octCategory` verdict
+  (`data.oct.<family>_domestic|_international`, domestic when the issuer is in
+  the pack's country) set to `not_supported` — or no `issuer_country` — stops
+  the withdrawal with the reason on the page and **no payout call**. Then
+  `GET /v1/payout_method_types` (category card, issuer country + billing
+  currency — picks e.g. `gb_visa_card`), `GET /v1/payout_methods/{type}/required_fields`
   (fills `beneficiary` / `sender`; any required field the demo has no value for
   is named on the card) and `POST /v1/payouts` from the profile's wallet:
-  `sender_entity_type: company` (the merchant), `beneficiary_entity_type:
-  individual`, same currency both sides, `confirm_automatically: true`, a
-  `merchant_reference_id` (≤ 45 chars). The beneficiary is the shopper's
+  `sender_entity_type: company` (the merchant, in the pack's country),
+  `beneficiary_entity_type: individual`, `sender_currency` = the balance
+  currency, `confirm_automatically: true`, a `merchant_reference_id` (≤ 45
+  chars). When the card bills in another currency Rapyd does the FX: the body
+  fixes `sender_amount` (what leaves the balance) instead of `payout_amount`,
+  and the engine room says so. The beneficiary is the shopper's
   **saved card** (`beneficiary.card_id = card_***`) or, sandbox only, Rapyd's
   sandbox payout card `4111 1111 1111 1111`. The ledger confirms it from a
   verified `PAYOUT_COMPLETED` / `PAYOUT_FAILED` (signed for the payout's env and
@@ -143,7 +153,9 @@ cash-out balance). Signed-in shoppers see a Wallet nav item:
 - **Live:** payouts move real money, so the backend refuses every live payout
   call unless `LIVE_PAYOUTS_ENABLED=true` (default off), then applies the live
   gate, the `LIVE_MAX_AMOUNT` cap on `payout_amount`, its allowlist and no raw
-  card (live can only pay out to a saved `card_***`).
+  card (live can only pay out to a saved `card_***`, and check eligibility by
+  `card_id`). A live FX payout therefore sends `payout_amount` 0.01 in the
+  card's currency, not `sender_amount`.
 
 Payouts need the MID set up for them: card payouts enabled, and funds in the
 source wallet's payout currency (sandbox: *Add Funds to Wallet Account*,
@@ -299,8 +311,8 @@ shown as declined. Everything rendered into HTML goes through `ui.js esc()`.
 | `js/site/session.js` | The merchant's own sign-in session over the session `cus_***` (no Rapyd call). |
 | `js/site/lookup.js` | "Sign in with a customer ID": `GET /v1/customers/{id}` and its engine-room cards; adopts the customer. |
 | `js/site/shop.js` | Shop (one-off / subscription tabs), product page, bag page and its checkout blockers. |
-| `js/site/wallet.js` | The Wallet's rules (pure): the pack's wallet config, the deposit product, balance arithmetic, withdraw limits + chips, payout method-type pick, beneficiary/sender filling, the `POST /v1/payouts` body. |
-| `js/site/wallet-page.js` | The Wallet page, its engine-room beats (method types → required fields → payout) and the withdraw orchestration. |
+| `js/site/wallet.js` | The Wallet's rules (pure): the pack's wallet config, the deposit product, balance arithmetic, withdraw limits + chips, the card-eligibility body + its mapping to the payout's country/currency (`payoutRoute`), payout method-type pick, beneficiary/sender filling, the `POST /v1/payouts` body. |
+| `js/site/wallet-page.js` | The Wallet page, its engine-room beats (card eligibility → method types → required fields → payout) and the withdraw orchestration. |
 | `js/site/account.js` | Signed-in Orders (the customer's vs this tab's guest checkouts, `ledger.ordersFor`) and Payment methods (stored credentials + the list-payment-methods sync beat, once per visit + Refresh). |
 | `js/profiles.js` | Sandbox MID registry (public identifiers only). |
 | `js/flows/own-fields.js` | Own Card Fields flow. |

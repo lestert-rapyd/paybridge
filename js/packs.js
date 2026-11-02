@@ -22,8 +22,14 @@
    the checkout) and withdraws from (a real Rapyd card payout). Gambling and
    crypto merchants run exactly this deposit / withdraw journey, so those
    packs opt in; `null` keeps the page and its nav item off. Fields:
-     currency, country  what the balance is held in; the payout's
-                        payout/sender currency and beneficiary/sender country
+     currency, country  what the balance is held in; the payout's sender
+                        currency and sender country (the beneficiary's
+                        country and payout currency come from the card's
+                        eligibility check — issuer country, billing currency)
+     octCategory        which eligibility verdict judges a withdrawal
+                        (data.oct.<family>_domestic|_international):
+                        'online_gambling' for winnings, else (default)
+                        'non_money_transfer'
      chips              suggested deposit amounts
      depositLabel       the shopper's verb ('Deposit'; 'Top up' when absent)
      aft                the deposit carries the pack's AFT indicators — only
@@ -93,7 +99,10 @@ export const PACKS = {
     kycAtSignup: false,
     // No AFT: the igaming catalog never carried it (gambling deposits are
     // ordinary purchases under the merchant's gaming MCC).
-    wallet: { currency: 'EUR', country: 'MT', chips: ['10.00', '20.00', '50.00', '100.00'], depositLabel: 'Deposit', aft: null },
+    wallet: {
+      currency: 'EUR', country: 'MT', chips: ['10.00', '20.00', '50.00', '100.00'], depositLabel: 'Deposit', aft: null,
+      octCategory: 'online_gambling',
+    },
     products: [
       {
         id: 'spins', pill: '50 Spins', billing: 'one_time', cta: 'Buy', glyph: '🎲',
