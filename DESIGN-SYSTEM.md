@@ -170,7 +170,7 @@ the account form, shop (Products / Subscriptions), product page, bag (its rules 
 under the signed-in customer's `cus_***`; "Guest checkouts this session") and **Payment methods** (synced
 once per visit, with a Refresh link). Product imagery is a hatched `.ph` placeholder.
 
-**Wallet** (signed-in, only when the pack's `wallet` rule is on — gambling and crypto; nav item between
+**Wallet** (signed-in, only when the pack's `wallet` rule is on — gambling, crypto and forex; nav item between
 Orders and Payment methods): the balance card (`.wal-balance`, accent-soft fill), Activity rows
 (`.wal-row` — `icon-cash_in` on `--ok-soft` for deposits, `icon-cash_out` for withdrawals, a struck-through
 amount when it failed) and the Deposit / Withdraw panel (`.wal-panel`: segmented `.wal-tabs`, the amount
@@ -309,10 +309,16 @@ only their innerHTML is rebuilt — so listeners are wired once.
 Add an entry to `js/skins.js` (`id`, `label`, `pack`, `merchant`, `descriptor`, `domain`, `tokens`) and
 its id to `SKIN_ORDER`. Tokens are data — accent set, optional `--font-site*`, optional `--site-*`
 neutrals; omitted ones fall back to Rapyd. Point `pack` at an industry in `js/packs.js` (or add one:
-catalog, copy, `kycAtSignup`). Layout never forks per skin. Keep the built-in ids `ecommerce`,
-`crypto`, `gaming` stable — the ledger, credentials and back office key on them.
+catalog, copy, `kycAtSignup`, `wallet`; a subscription's `interval` is `monthly` or `annual` and the
+"/mo" / "/yr" wording follows it). Layout never forks per skin. Keep the built-in ids `ecommerce`,
+`crypto`, `gaming`, `forex`, `content` stable — the ledger, credentials and back office key on them.
 
 ## 10. History
+
+- **2026-10 — more industries.** Two more built-in merchants on the shared Rapyd palette: rapyd.fx
+  (`forex` skin + pack — KYC at signup, an AFT-funded trading wallet, signals / data subscriptions)
+  and rapyd.stream (`content` — monthly and annual plans, rent / buy / season pass, no wallet). Shop
+  badges, the bag, totals, pay buttons and Orders read the subscription period ("Annual", "/yr").
 
 - **2026-10 — merchant wallet.** The Wallet page (`js/site/wallet.js` rules, `wallet-page.js` page and
   beats; `.wal-*` in `site.css`), deposits through the existing checkout, withdrawals as real card

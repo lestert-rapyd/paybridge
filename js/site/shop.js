@@ -18,7 +18,7 @@ import { state } from '../state.js';
 import { VERTICALS, bagLines } from '../verticals.js';
 import { chosenGuest, canGuestSubscribe } from '../identity.js';
 import { esc } from '../ui.js';
-import { cartProblem, cartTotal, lineTotal, MAX_QTY } from './cart.js';
+import { cartProblem, cartTotal, lineTotal, billingPeriod, MAX_QTY } from './cart.js';
 import { siteHeaderHTML, backLinkHTML, thumbHTML, moneyText, priceText } from './chrome.js';
 
 /* Page-local view state — which tab of the shop, which product is open.
@@ -41,7 +41,7 @@ function shopCardHTML(p) {
     <button type="button" class="shop-card" data-product="${esc(p.id)}">
       <div class="shop-shot">
         ${thumbHTML(p, 'shop-thumb')}
-        ${p.billing === 'subscription' ? `<span class="shop-badge"><i class="icon-loop"></i>Monthly</span>` : ''}
+        ${billingPeriod(p) ? `<span class="shop-badge"><i class="icon-loop"></i>${esc(billingPeriod(p).badge)}</span>` : ''}
       </div>
       <div class="shop-name">${esc(p.name)}</div>
       <div class="shop-cat">${esc(p.cat || p.pill || '')}</div>
@@ -88,7 +88,7 @@ export function productPageHTML() {
           <h1 class="site-h1 pdp-name">${esc(p.name)}</h1>
           <div class="pdp-price">${esc(priceText(p))}</div>
           ${sub ? `
-            <div class="site-note"><i class="icon-loop"></i><span>Billed automatically every month to your saved card — cancel any time.</span></div>` : ''}
+            <div class="site-note"><i class="icon-loop"></i><span>Billed automatically every ${esc(billingPeriod(p).noun)} to your saved card — cancel any time.</span></div>` : ''}
           <button type="button" class="co-cta site-cta" id="site-add" data-product="${esc(p.id)}">
             <i class="icon-bag"></i>${esc(sub ? (p.cta || 'Subscribe') : 'Add to bag')}
           </button>
@@ -132,9 +132,9 @@ function bagLineHTML({ product: p, qty }) {
           <div>
             <div class="bag-name">${esc(p.name)}</div>
             <div class="bag-desc">${esc([p.cat, p.desc].filter(Boolean).join(' · '))}</div>
-            ${sub ? `<span class="shop-badge inline"><i class="icon-loop"></i>Recurring monthly</span>` : ''}
+            ${sub ? `<span class="shop-badge inline"><i class="icon-loop"></i>Recurring ${esc(billingPeriod(p).adverb)}</span>` : ''}
           </div>
-          <div class="bag-amt">${esc(moneyText(lineTotal(p, qty), p.currency))}${sub ? '<span class="per-mo">/mo</span>' : ''}</div>
+          <div class="bag-amt">${esc(moneyText(lineTotal(p, qty), p.currency))}${sub ? `<span class="per-mo">/${esc(billingPeriod(p).short)}</span>` : ''}</div>
         </div>
         <div class="bag-ctl">
           ${sub
@@ -171,8 +171,9 @@ export function bagPageHTML() {
   const block = bagBlocker();
   const total = cartTotal(lines);
   const count = lines.reduce((n, l) => n + l.qty, 0);
-  // "/mo" only when the whole bag bills monthly — a mixed bag is blocked anyway.
-  const sub = lines.every((l) => l.product.billing === 'subscription');
+  // "/mo" ("/yr") only when the whole bag is a subscription — a mixed bag is
+  // blocked anyway, and a subscription checks out alone.
+  const sub = lines.every((l) => l.product.billing === 'subscription') ? billingPeriod(lines[0].product) : null;
   const delivery = lines[0].product.delivery;
   return `${head}
       <div class="bag">
@@ -181,7 +182,7 @@ export function bagPageHTML() {
           <div class="bag-sum-h">Summary</div>
           <div class="co-line"><span>${esc(count)} item${count === 1 ? '' : 's'}</span><span>${total.amount ? esc(moneyText(total.amount, total.currency)) : '—'}</span></div>
           <div class="co-line"><span>${delivery ? 'Delivery' : 'Fees'}</span><span class="free">${esc(delivery || 'Free')}</span></div>
-          <div class="co-line total"><span>Total</span><span class="co-total-amt">${total.amount ? esc(moneyText(total.amount, total.currency)) : '—'}${sub ? ' <span class="per-mo">/mo</span>' : ''}</span></div>
+          <div class="co-line total"><span>Total</span><span class="co-total-amt">${total.amount ? esc(moneyText(total.amount, total.currency)) : '—'}${sub ? ` <span class="per-mo">/${esc(sub.short)}</span>` : ''}</span></div>
           ${block && block.message ? `
             <div class="site-alert" role="note">
               <span>${esc(block.message)}</span>

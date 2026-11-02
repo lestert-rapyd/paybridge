@@ -2,8 +2,8 @@
    Verticals — the composed view the flows read: a skin (whose site,
    js/skins.js) laid over an industry pack (what it sells, js/packs.js).
    The built-in skins are Rapyd's own demo merchants (rapyd.shop,
-   rapyd.coin, rapyd.spin); a customer skin swaps the identity without
-   touching the pack.
+   rapyd.coin, rapyd.spin, rapyd.fx, rapyd.stream); a customer skin
+   swaps the identity without touching the pack.
 
    VERTICALS[id] keeps the shape every caller already reads — label,
    dot, merchant, descriptor, domain from the skin; headline, cta,
@@ -101,7 +101,8 @@ export function cartProduct(verticalId = state.vertical) {
 /** What a payment bought, for the ledger and the shopper's Orders page:
     the bag's lines, or the single product as one line. Text only. */
 export function orderItems(p = activeProduct()) {
-  return p.lines || [{ id: p.id, name: p.name, qty: 1, amount: p.amount, currency: p.currency, billing: p.billing }];
+  return p.lines || [{ id: p.id, name: p.name, qty: 1, amount: p.amount, currency: p.currency, billing: p.billing,
+    ...(p.interval ? { interval: p.interval } : {}) }];
 }
 
 /** The pay-button verb for the active product ("Pay" / "Subscribe" / "Start DCA"…). */

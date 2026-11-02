@@ -18,7 +18,7 @@
      products; charge modes per credential: PAN+CVV re-entry, CVV-less
      PAN+network_reference_id (PCI), or the card_*** token. All CIT:
      initiation_type stays customer_present.
-   · AFT (crypto products) — enriched customer + payment_method_options
+   · AFT (crypto / forex products) — enriched customer + payment_method_options
      {aft, purpose_code, special_condition_indicator, is_direct_purchase};
      the is_direct_purchase fork is a customer-facing toggle (buy now vs
      fund the fiat wallet). MIT recurring charges live in the back office,
@@ -72,6 +72,7 @@ import {
   terminalHandler, cardSaveSlot, pendingCardSave,
 } from './shared.js';
 import { signOut } from '../site/session.js';
+import { billingPeriod } from '../site/cart.js';
 import { ownsPanel as directOwnsPanel, paintPanels as paintDirectPanels } from './direct-wallet.js';
 import { repaintSite } from '../steps.js';
 
@@ -290,7 +291,8 @@ function displayBody() {
     pmo.aft = true;
     pmo.is_direct_purchase = isDirectPurchase();
     pmo.purpose_code = p.purpose_code;
-    pmo.special_condition_indicator = p.special_condition_indicator;
+    // Only where the pack sets one — forex's AFT carries none (packs.js).
+    if (p.special_condition_indicator) pmo.special_condition_indicator = p.special_condition_indicator;
   }
   if (Object.keys(pmo).length) body.payment_method_options = pmo;
 
@@ -316,11 +318,13 @@ function postBody() {
 
 /* ── Left panel markup ───────────────────────────────────── */
 function directPurchaseHTML() {
-  // Customer-facing AFT fork — direct purchase vs funding the fiat balance.
+  // Customer-facing AFT fork — direct purchase vs funding the balance. The
+  // words are the product's (packs.js `dpLabels`): "Buy BTC now" on crypto.
+  const [now, later] = Array.isArray(activeProduct().dpLabels) ? activeProduct().dpLabels : ['Buy now', 'Add funds, buy later'];
   return `
     <div class="cof-dp" id="cof-dp">
-      <button type="button" data-dp="1" class="${directPurchase ? 'active' : ''}">Buy BTC now</button>
-      <button type="button" data-dp="0" class="${!directPurchase ? 'active' : ''}">Add funds, buy later</button>
+      <button type="button" data-dp="1" class="${directPurchase ? 'active' : ''}">${esc(now)}</button>
+      <button type="button" data-dp="0" class="${!directPurchase ? 'active' : ''}">${esc(later)}</button>
     </div>`;
 }
 
@@ -723,7 +727,10 @@ const onTerminalFor = (reference) => terminalHandler({ reference, paidLabel: 'Pa
 let payRef = null;         // the reference the in-flight pay() created — a crash marks only that one
 let payDispatched = false; // the POST went out — from here the payment may exist at Rapyd
 
-const payCta = () => `${productCta()} ${chargeText(customerCharge())}${isSubscription() ? ' /mo' : ''}`;
+const payCta = () => {
+  const per = billingPeriod(activeProduct());
+  return `${productCta()} ${chargeText(customerCharge())}${per ? ` /${per.short}` : ''}`;
+};
 
 function payCrashed(err) {
   console.error('own-fields pay failed:', err);
