@@ -24,6 +24,7 @@ import * as toolkit from './flows/toolkit.js';
 import * as backOffice from './flows/back-office.js';
 import { totalsHTML } from './flows/shared.js';
 import { thumbHTML } from './site/chrome.js';
+import { billingPeriod } from './site/cart.js';
 import { SEAM_PATHS, seamPathKey, seamLinesHTML, seamStripHTML, setAddress, pagePath, isSeamOn, setSeamOn, applySeam } from './seam.js';
 import { EXT3DS_OUTCOMES, ext3dsPreset, setExt3dsPreset } from './ext3ds.js';
 import { WALLET_INTEGRATIONS, walletIntegration, setWalletIntegration, walletAvailability, effectiveWalletIntegration } from './direct-wallet.js';
@@ -199,11 +200,11 @@ function syncFx() {
 function refreshCharge() {
   const c = customerCharge();
   const p = activeProduct();
-  const sub = p.billing === 'subscription';
+  const per = billingPeriod(p);
   const totalsEl = $('#order-totals');
-  if (totalsEl) totalsEl.innerHTML = totalsHTML(c, p.delivery ? 'Delivery' : 'Fees', p.delivery || 'Free', sub);
+  if (totalsEl) totalsEl.innerHTML = totalsHTML(c, p.delivery ? 'Delivery' : 'Fees', p.delivery || 'Free', per);
   const payBtn = $('#pay-btn');
-  if (payBtn) payBtn.textContent = `${productCta()} ${chargeText(c)}${sub ? ' /mo' : ''}`;
+  if (payBtn) payBtn.textContent = `${productCta()} ${chargeText(c)}${per ? ` /${per.short}` : ''}`;
   syncAmountGate();
   refreshDirectSlot(); // the merchant's wallet buttons follow the amount gate too
   FLOWS[state.model].refreshSummary?.();
@@ -420,7 +421,7 @@ function renderCheckout() {
         <button type="button" class="fx-trigger${state.fx.enabled ? ' configured' : ''}" id="fx-trigger" title="Configure currency conversion">FX</button>
       </div>
 
-      <div class="co-totals" id="order-totals">${totalsHTML(customerCharge(), feeLabel, feeValue, p.billing === 'subscription')}</div>
+      <div class="co-totals" id="order-totals">${totalsHTML(customerCharge(), feeLabel, feeValue, billingPeriod(p))}</div>
 
       <div class="dw-slot">${directWalletBlockHTML()}</div>
       ${payLabel}

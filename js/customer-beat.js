@@ -305,8 +305,9 @@ export async function fireCreateCustomer() {
 
    `kyc: true` marks the four enrichment fields. The BODY always carries them
    (one cus_*** has to be AFT-ready across all three verticals), but only a
-   vertical where a real site would ask SHOWS them: a crypto onramp asks your
-   nationality and occupation, a furniture shop does not. */
+   vertical where a real site would ask SHOWS them: a crypto onramp or a
+   forex broker asks your nationality and occupation, a furniture shop does
+   not. */
 const ACCOUNT_FIELDS = [
   { id: 'f-cus-name',    path: 'name',            label: 'Full name',        autocomplete: 'name' },
   { id: 'f-cus-email',   path: 'email',           label: 'Email',            autocomplete: 'email', type: 'email' },
@@ -320,7 +321,7 @@ const ACCOUNT_FIELDS = [
   { id: 'f-cus-zip',     path: 'address.zip',     label: 'Postcode',         autocomplete: 'postal-code' },
 ];
 /** KYC fields show when the active industry pack's real-world merchants run
-    KYC at signup (packs.js kycAtSignup — crypto today). */
+    KYC at signup (packs.js kycAtSignup — crypto and forex today). */
 const visibleAccountFields = () =>
   ACCOUNT_FIELDS.filter((f) => !f.kyc || VERTICALS[state.vertical]?.kycAtSignup);
 

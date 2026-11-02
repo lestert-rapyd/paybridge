@@ -1,8 +1,9 @@
 # Rapyd Demo
 
 A sales-engineering demo of Rapyd card payments. The left pane is a merchant's
-storefront — one of three Rapyd demo merchants: **rapyd.shop** (e-commerce),
-**rapyd.coin** (crypto) and **rapyd.spin** (gambling) — plus its back office;
+storefront — one of five Rapyd demo merchants: **rapyd.shop** (e-commerce),
+**rapyd.coin** (crypto), **rapyd.spin** (gambling), **rapyd.fx** (forex
+trading) and **rapyd.stream** (digital content) — plus its back office;
 the right pane is the "engine room" — the real request, signed headers, Rapyd's
 response and the webhooks it fires, updating as the SE clicks through. Every SE
 control lives in one **demo-controls drawer** (header button, or the `` ` `` key).
@@ -109,10 +110,11 @@ retrieve-apple-pay-session (`.html`).
 ### Merchant wallet (deposit / withdraw)
 
 Gambling, forex and crypto merchants run a deposit / withdraw journey, so the
-**rapyd.spin** (gambling) and **rapyd.coin** (crypto) packs opt in to a
-**Wallet** page (`js/packs.js` `wallet` rule; rapyd.shop's home pack keeps it
-off — its prototype's store credit was refund credit spent at checkout, not a
-cash-out balance). Signed-in shoppers see a Wallet nav item:
+**rapyd.spin** (gambling), **rapyd.coin** (crypto) and **rapyd.fx** (forex)
+packs opt in to a **Wallet** page (`js/packs.js` `wallet` rule; rapyd.shop's
+home pack keeps it off — its prototype's store credit was refund credit spent
+at checkout, not a cash-out balance — and so does rapyd.stream: digital
+content has nothing to hold a balance for). Signed-in shoppers see a Wallet nav item:
 
 - **Balance** — the merchant's own ledger of what the shopper holds (store
   credit / a player or trading balance), *not* a Rapyd wallet: deposits land in
@@ -121,12 +123,15 @@ cash-out balance). Signed-in shoppers see a Wallet nav item:
   (only a trusted outcome completes them) minus their refunds minus every payout
   that hasn't failed (in-flight ones are reserved). A withdrawal can never
   exceed the available balance, and amounts pass `validAmount`.
-- **Deposit** ("Deposit" for gambling/crypto; "Top up" for a pack that doesn't
+- **Deposit** ("Deposit" for gambling/crypto/forex; "Top up" for a pack that doesn't
   name it) — the amount becomes the checkout's product, so the shopper pays
   through the existing flow on the selected path (own fields, toolkit, express
   saved card, hosted page) with the seam, FX and the live 0.01 clamp as usual.
-  Crypto deposits carry the pack's AFT indicators with `is_direct_purchase:
-  false` (they fund a balance); gambling deposits carry none, as before.
+  Crypto and forex deposits carry the pack's AFT indicators with
+  `is_direct_purchase: false` (they fund a balance) — forex with
+  `purpose_code: high_risk_securities` only (Rapyd's AFT guide,
+  docs.rapyd.net/en/creating-an-aft-payment.html, documents no
+  `special_condition_indicator`); gambling deposits carry none, as before.
 - **Withdraw** — a real Rapyd **card payout**, four beats in the engine room:
   `POST /v1/cards/eligibility` (`transaction_type: oct`, the card as `card_id`
   or — sandbox — the test card's `card_number`): the card's `issuer_country`
@@ -303,8 +308,8 @@ shown as declined. Everything rendered into HTML goes through `ui.js esc()`.
 | `js/state.js` | Tiny reactive store. `vertical`/`model`/`env` changes reset the client flow; most other fields are mutated directly. |
 | `js/steps.js` | Router for the merchant site: sign in / register / guest → shop → product → bag → checkout, plus Orders, Payment methods and the Wallet; paints the engine room per page. |
 | `js/identity.js` | Guest / account / returning checkout identity. |
-| `js/skins.js` | Skins — whose site it is: merchant name, descriptor, domain and the site tokens, applied by `applySkin()` to the browser frame only. Built-in: `ecommerce` (rapyd.shop), `crypto` (rapyd.coin), `gaming` (rapyd.spin). |
-| `js/packs.js` | Industry packs — what the merchant sells: catalog, copy, journey rules (`kycAtSignup`, `wallet`). |
+| `js/skins.js` | Skins — whose site it is: merchant name, descriptor, domain and the site tokens, applied by `applySkin()` to the browser frame only. Built-in: `ecommerce` (rapyd.shop), `crypto` (rapyd.coin), `gaming` (rapyd.spin), `forex` (rapyd.fx), `content` (rapyd.stream). |
+| `js/packs.js` | Industry packs — what the merchant sells: catalog, copy, journey rules (`kycAtSignup`, `wallet`). Built-in: `home`, `crypto`, `igaming`, `forex`, `content`. |
 | `js/verticals.js` | Skin × pack composition (`VERTICALS`), `activeProduct()` (a valid bag folds into one product here), FX-aware customer/merchant amounts. |
 | `js/site/cart.js` | The bag: lines, minor-unit totals, one-currency + subscription-alone rules, the composite product the flows charge. |
 | `js/site/chrome.js` | The site header (wordmark, nav, account, bag) and shared product-tile / money helpers. |

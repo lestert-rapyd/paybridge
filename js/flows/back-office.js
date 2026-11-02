@@ -618,11 +618,16 @@ function mitBody(c, amountInput, ref) {
       } };
   body.initiation_type = 'recurring';
   if (c.aft) {
+    // The product's own indicators when it carries AFT (only those it sets —
+    // forex's has no special_condition_indicator); the crypto pair for an
+    // AFT credential whose product carries none (sync-discovered, no origin).
+    const ind = p.aft
+      ? { purpose_code: p.purpose_code, ...(p.special_condition_indicator ? { special_condition_indicator: p.special_condition_indicator } : {}) }
+      : { purpose_code: 'crypto_currency', special_condition_indicator: 'cryptocurrency' };
     body.payment_method_options = {
       aft: true,
       is_direct_purchase: true, // each DCA cycle buys — that's the plan
-      purpose_code: p.purpose_code || 'crypto_currency',
-      special_condition_indicator: p.special_condition_indicator || 'cryptocurrency',
+      ...ind,
     };
   }
   return body;

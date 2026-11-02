@@ -23,7 +23,7 @@
    Rapyd defaults in css/tokens.css; applySkin() clears every token
    another skin set before painting this one.
 
-   The three built-in skins are Rapyd's own demo merchants and share
+   The five built-in skins are Rapyd's own demo merchants and share
    the Rapyd palette (Inter, cool greys, #7437F5) — they differ in
    identity and catalog, not in colour.
    ───────────────────────────────────────────────────────────── */
@@ -75,10 +75,35 @@ export const SKINS = {
     domain: 'rapyd.spin',
     tokens: { ...RAPYD_SITE },
   },
+
+  // rapyd.fx — a forex / CFD broker: KYC at signup, AFT-funded trading
+  // account (deposit / withdraw), signals and data subscriptions.
+  forex: {
+    id: 'forex',
+    label: 'Forex trading',
+    pack: 'forex',
+    dot: '#7437F5',
+    merchant: 'rapyd.fx',
+    descriptor: 'RAPYD FX',
+    domain: 'rapyd.fx',
+    tokens: { ...RAPYD_SITE },
+  },
+
+  // rapyd.stream — digital content: monthly / annual plans, rent or buy.
+  content: {
+    id: 'content',
+    label: 'Digital content',
+    pack: 'content',
+    dot: '#7437F5',
+    merchant: 'rapyd.stream',
+    descriptor: 'RAPYD STREAM',
+    domain: 'rapyd.stream',
+    tokens: { ...RAPYD_SITE },
+  },
 };
 
 /** The order the demo-controls drawer lists them in. */
-export const SKIN_ORDER = ['ecommerce', 'crypto', 'gaming'];
+export const SKIN_ORDER = ['ecommerce', 'crypto', 'gaming', 'forex', 'content'];
 
 /* Every token ANY skin sets — cleared before a skin paints, so switching from a
    skin that sets an optional token (a font, a neutral) to one that doesn't
