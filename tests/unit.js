@@ -58,6 +58,8 @@ import {
   GOOGLE_AUTH_METHODS, googleAuthMethod, setGoogleAuthMethod, GATEWAY_ID_PLACEHOLDER, needsRapyd3DS,
 } from '../js/direct-wallet.js';
 import { WALLET_SEAMS, seamWalletLine } from '../js/seam.js';
+// AFT block shared by every customer-present path (js/flows/shared.js).
+import { aftOptions } from '../js/flows/shared.js';
 
 // The Wallet's rules — pure (balance, limits, payout body); nothing here
 // records into the ledger (its poller would fetch).
@@ -949,6 +951,16 @@ test('direct wallet: steps outside Rapyd, seam lines', () => {
   eq(seamWalletLine('own-fields', null), null);
   ok(seamLinesHTML('own-fields', { wallet: 'decrypted' }).includes('<b>Wallets</b>'), 'explainer gets a Wallets line');
   ok(seamLinesHTML('embedded', { wallet: 'encrypted' }).includes('seam-who third'), 'Apple / Google as a third party');
+});
+
+test('aftOptions: every AFT payment carries the block, no exemptions', () => {
+  const crypto = { aft: true, purpose_code: 'crypto_currency', special_condition_indicator: 'cryptocurrency' };
+  eq(aftOptions(crypto), { aft: true, is_direct_purchase: true, purpose_code: 'crypto_currency', special_condition_indicator: 'cryptocurrency' });
+  eq(aftOptions(crypto, false).is_direct_purchase, false, 'the page\'s fund-wallet fork');
+  eq(aftOptions({ ...crypto, is_direct_purchase: false }, true).is_direct_purchase, false, 'a wallet deposit is never a direct purchase');
+  eq(aftOptions({ aft: true, purpose_code: 'high_risk_securities' }), { aft: true, is_direct_purchase: true, purpose_code: 'high_risk_securities' }, 'no indicator unless the pack sets one');
+  eq(aftOptions({ aft: false }), null);
+  eq(aftOptions({}), null);
 });
 
 /* ── Wallet (site/wallet.js) ── */
