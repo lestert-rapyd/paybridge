@@ -112,16 +112,28 @@ function paidLabel() {
   return `${p.amount} ${p.currency}`;
 }
 
-/** `title` / `sub` are plain text (every caller passes a literal). */
+const PROC_LOCK_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2.5"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>`;
+
+/** `title` / `sub` are plain text (every caller passes a literal). A page of
+    the merchant site, like the result screens — its header on top, then a
+    calm, centred card: spinner, the step, and what is being paid to whom.
+    Not a result: markResultShown() is left to the terminal screen. */
 export function renderProcessing(title = 'Confirming payment…', sub = 'This only takes a moment — please don’t close this page.') {
   resetWide();
   setOffstage(null);
-  host().innerHTML = `
-    <div class="screen">
-      <div class="screen-spinner"></div>
-      <div class="screen-title">${esc(title)}</div>
-      <div class="screen-sub">${esc(sub)}</div>
-    </div>`;
+  const v = VERTICALS[state.vertical];
+  host().innerHTML = `${siteHeaderHTML('checkout')}<main class="site-main site-narrow">
+    <div class="screen proc" role="status" aria-live="polite">
+      <div class="proc-spinner" aria-hidden="true"></div>
+      <div class="proc-title">${esc(title)}</div>
+      <div class="proc-sub">${esc(sub)}</div>
+      <div class="proc-meta">
+        <span>${esc(v.merchant)}</span>
+        <span class="proc-amt">${esc(paidLabel())}</span>
+      </div>
+      <div class="proc-secure">${PROC_LOCK_SVG}Secure payment</div>
+    </div>
+  </main>`;
 }
 
 const LOCK_SVG = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#5b564d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2.5"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path><circle cx="12" cy="15.5" r="1.3" fill="#5b564d"></circle></svg>`;
