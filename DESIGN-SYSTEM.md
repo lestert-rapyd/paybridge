@@ -222,10 +222,10 @@ before any Rapyd call.
 - **Fail.** The merchant's skinned decline with "We couldn't verify this payment with your bank"; the
   payment card reads "not sent", the response panel says no request was made; no ledger entry.
 
-### 5.5 Direct Apple Pay / Google Pay (`js/direct-wallet.js`, `js/flows/direct-wallet.js`) — simulated
+### 5.5 Direct Apple Pay / Google Pay (`js/direct-wallet.js`, `js/flows/direct-wallet.js`) — mock token, real sandbox call
 Drawer → Integration path → **Wallet integration**: Checkout (real) / Direct — encrypted / Direct —
-decrypted. The direct variants are sandbox-only; decrypted is Own Card Fields only (disabled with its
-reason elsewhere).
+decrypted (mock token). The direct variants are sandbox-only; decrypted is Own Card Fields only
+(disabled with its reason elsewhere) and adds a Google Pay authMethod segment (CRYPTOGRAM_3DS / PAN_ONLY).
 
 - **Merchant buttons** (`.dw-express`, `.dw-btn`). On the merchant's own checkout — above "Pay by card"
   (Own Card Fields, with an "or pay by card" rule) or in the toolkit's order summary (stacked). Black,
@@ -236,13 +236,14 @@ reason elsewhere).
   a `#171717` Confirm button (fingerprint for Apple, lock for Google), a SIMULATED tag and a footnote.
   Fixed neutral values — never skin tokens, never `--rapyd`; grey `.seam-ext` marker "Apple Pay sheet
   (simulated)".
-- **Engine room.** A "Simulated" intro line, then one box per Apple / Google / merchant step
+- **Engine room.** A "Mock token" intro line, then one box per Apple / Google / merchant step
   (`.dw-step` — dashed, grey left edge, "Apple · outside Rapyd" pill, ONE line + the wallet's docs
   link; the merchant's decrypt step carries a red "PCI scope" pill; steps not reached yet are faded),
-  then the `beat-card.sim` POST /v1/payments with the field guide, a 3DS line, the body (the wallet's
-  data marked `.inject-hit`) and the Rapyd doc link; the response panel holds the simulated answer.
-- **Result.** The skinned success screen with a small neutral `.screen-sim` tag "Simulated — no payment
-  was made"; no order number, no bank-statement view, the bag is kept, no ledger entry.
+  then the plain `beat-card` POST /v1/payments (a real sandbox call) with the field guide, a 3DS line,
+  the body (the wallet's data marked `.inject-hit`) and the Rapyd doc link; the response panel holds
+  Rapyd's answer in the standard payment response card.
+- **Result.** The same as any payment: processing, Rapyd's 3DS if it asks, then the webhook-confirmed
+  success or decline screen.
 
 ## 6. Voice: the shopper / SE split (a hard rule)
 
