@@ -129,7 +129,7 @@ export function seamExtWrapHTML(inner, label = EXT_TDS_LABEL) {
 /* ── Apple Pay / Google Pay on the seam ──────────────────────
    The wallet integration (js/direct-wallet.js) moves the seam for wallet
    payments only. Checkout (real): the wallet buttons are Rapyd's — inside
-   its toolkit iframe or hosted page. Direct (simulated): the buttons are
+   its toolkit iframe or hosted page. Direct (mock token): the buttons are
    the merchant's own, the payment sheet is Apple's / Google's (a third
    party in the frame — the grey .seam-ext marker, like the external 3DS
    provider), and the merchant calls POST /v1/payments itself. Encrypted:
@@ -142,11 +142,11 @@ export const WALLET_SEAMS = {
     ownFields: 'Apple Pay / Google Pay come with Rapyd’s toolkit or hosted page — this page has no wallet buttons of its own.',
   },
   encrypted: {
-    label: 'Direct — encrypted (simulated)',
+    label: 'Direct — encrypted (mock token)',
     line: 'The merchant’s own button opens Apple’s / Google’s sheet on the merchant’s page; the merchant forwards the encrypted token and Rapyd decrypts it server-side — no card data at the merchant.',
   },
   decrypted: {
-    label: 'Direct — decrypted (simulated)',
+    label: 'Direct — decrypted (mock token)',
     line: 'The merchant’s own button and Apple’s / Google’s sheet; the merchant holds the wallet’s decryption keys and sends Rapyd the DPAN + cryptogram — card data on its servers, PCI scope (Own Card Fields only).',
   },
 };

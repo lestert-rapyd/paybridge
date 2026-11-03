@@ -1,7 +1,8 @@
 /* ─────────────────────────────────────────────────────────────
-   Direct Apple Pay / Google Pay — SIMULATED. The merchant puts the
-   wallet's own button on its own checkout, takes the token the wallet
-   sheet returns and calls POST /v1/payments itself. Two variants:
+   Direct Apple Pay / Google Pay — MOCK wallet token, REAL sandbox call.
+   The merchant puts the wallet's own button on its own checkout, takes
+   the token the wallet sheet returns and calls POST /v1/payments itself.
+   Two variants:
 
      encrypted · the merchant forwards the wallet's ENCRYPTED token,
                  unchanged; Rapyd decrypts it server-side. No card data
@@ -16,11 +17,16 @@
    iframe ("Wallet buttons") or hosted page — are real and untouched
    (flows/toolkit.js); in the drawer they're "Checkout (real)".
 
-   Nothing here (or in the page that drives it, flows/direct-wallet.js)
-   talks to Apple, Google, the backend or Rapyd. Every token, DPAN,
-   cryptogram and response is an obviously dummy value carrying a
-   SIMULATED marker, and the ledger records nothing (it mirrors payments
-   that exist at Rapyd — this one never will).
+   What's mock and what's real: there is no Apple / Google session — the
+   sheet is drawn by the page and the token it "returns" is built here,
+   every opaque value an obviously dummy one carrying a SIMULATED marker.
+   That token then goes to Rapyd for real: the Rapyd SANDBOX accepts mock
+   wallet payloads and creates a genuine payment (checked 2026-11-03 on
+   all five shapes — each answered CLO, paid; the sandbox charges its own
+   test card, not the 4111 in the mock). So the payment, its webhook and
+   its ledger entry are real; only the wallet side is pretend. Sandbox
+   only — a mock token has no place beside live money (and the backend
+   refuses a decrypted PAN in live: utils/live-guards.js hasRawCard).
 
    Rapyd field names — exactly as documented, checked against:
      · docs.rapyd.net/en/creating-a-payment-with-apple-pay--encrypted-.html
@@ -28,9 +34,10 @@
        "apple_pay", details { token { paymentData { data, signature,
        header { publicKeyHash, ephemeralPublicKey, transactionId },
        version: "EC_v1" }, paymentMethod { displayName, network, type },
-       transactionIdentifier } } } } — "the entire token object … without
-       modification" (also creating-an-apple-pay-payment-on-a-customized-
-       checkout-page.html)
+       transactionIdentifier } } } } — "token.paymentData to
+       payment_method.digital_wallet.details.token" (also creating-an-apple-
+       pay-payment-on-a-customized-checkout-page.html); metadata {
+       digital_wallet: "apple_pay" } and capture: true as in the sample
      · docs.rapyd.net/en/creating-a-payment-with-apple-pay--decrypted-.html
        details { decrypted_data { applicationPrimaryAccountNumber,
        applicationExpirationDate (YYMMDD), currencyCode (ISO 4217 numeric),
@@ -40,18 +47,22 @@
        to decrypted_data and token.paymentMethod to brand_data"
      · docs.rapyd.net/en/creating-a-payment-with-google-pay---encrypted-.html
        details { token { apiVersionMinor, apiVersion, paymentMethodData {
-       description, tokenizationData { type: "PAYMENT_GATEWAY", token
-       (a JSON string) }, info { cardNetwork, cardDetails } } }, type:
-       "CARD" } — note the doc's "type": "CARD" sits in `details`, beside
-       `token` (not inside paymentMethodData, as in Google's own object);
-       payment_method.metadata {} in the sample is omitted here
+       description, info { cardNetwork, cardDetails }, tokenizationData {
+       type: "PAYMENT_GATEWAY", token { signature, … } } } }, type: "CARD" }
+       — the doc's "type": "CARD" sits in `details`, beside `token`, and its
+       sample carries tokenizationData.token as an OBJECT (Google hands the
+       page a JSON string; the sample's shape is what's sent here)
      · docs.rapyd.net/en/creating-a-payment-with-google-pay---decrypted-.html
        details { decrypted_data { gatewayMerchantId, messageExpiration,
        messageId, paymentMethod: "CARD", paymentMethodDetails { pan,
        expirationMonth, expirationYear, authMethod: "CRYPTOGRAM_3DS" |
        "PAN_ONLY", cryptogram, eciIndicator } }, brand_data { cardDetails,
-       cardNetwork } } — CRYPTOGRAM_3DS answers CLO at once; PAN_ONLY comes
-       back ACT + next_action 3d_verification (Rapyd's 3DS)
+       cardNetwork } } — gatewayMerchantId is the merchant's Rapyd ACCESS
+       KEY: the browser never holds it, so this sends a placeholder and the
+       backend writes the key in before signing (create-direct-payment.js
+       withGatewayMerchantId). PAN_ONLY carries no cryptogram / ECI; Rapyd
+       may answer it ACT + next_action 3d_verification (Rapyd's 3DS) — the
+       sandbox answered CLO
      · docs.rapyd.net/en/creating-a-google-pay--payment-on-a-customized-
        checkout-page.html — tokenizationSpecification PAYMENT_GATEWAY,
        gateway "Rapyd", gatewayMerchantId = the merchant's Rapyd access
@@ -61,7 +72,7 @@
        initiative_context } returns the Apple Pay session (merchant
        validation through Rapyd)
    payment_method.type is the CARD's method type (the docs' samples use
-   by_/gb_/is_visa_card — there is no *_apple_pay type); this demo sends
+   gb_/sg_ visa and mastercard types — there is no *_apple_pay type); this demo sends
    gb_visa_card like every other card body here (sync.js detectBrand).
    The docs say nothing about PCI for the decrypted variant — "decrypted
    = PCI scope" is the card-data rule (the DPAN is a card number), not a
@@ -69,14 +80,15 @@
    the payment processing certificate is set up for Rapyd to decrypt —
    the Apple box says "set up with Rapyd", not more.
 
-   Pure data + builders (tests/unit.js imports this) — no DOM, no network.
+   Pure data + builders (tests/unit.js imports this) — no DOM, no network;
+   the call itself is flows/direct-wallet.js.
    ───────────────────────────────────────────────────────────── */
 
 /** The drawer's choices (Integration path → Wallet integration). Text only. */
 export const WALLET_INTEGRATIONS = [
   ['checkout', 'Checkout (real)'],
-  ['encrypted', 'Direct — encrypted (simulated)'],
-  ['decrypted', 'Direct — decrypted (simulated)'],
+  ['encrypted', 'Direct — encrypted (mock token)'],
+  ['decrypted', 'Direct — decrypted (mock token)'],
 ];
 let integration = 'checkout';
 export const walletIntegration = () => integration;
@@ -84,14 +96,24 @@ export function setWalletIntegration(v) {
   if (WALLET_INTEGRATIONS.some(([k]) => k === v)) integration = v;
 }
 
+/** Google Pay's decrypted authMethod (drawer: shown under a decrypted pick).
+    CRYPTOGRAM_3DS — a tokenised card with a cryptogram + ECI; PAN_ONLY — a
+    card on file in the Google account, no cryptogram. */
+export const GOOGLE_AUTH_METHODS = ['CRYPTOGRAM_3DS', 'PAN_ONLY'];
+let googleAuth = 'CRYPTOGRAM_3DS';
+export const googleAuthMethod = () => googleAuth;
+export function setGoogleAuthMethod(v) {
+  if (GOOGLE_AUTH_METHODS.includes(v)) googleAuth = v;
+}
+
 /** Whether a variant can run on this path. Text only — callers escape.
     Decrypted puts a card number on the merchant's servers: PCI path only.
-    Both direct variants are sandbox-only — a simulation has no place
+    Both direct variants are sandbox-only — a mock token has no place
     beside live money. */
 export function walletAvailability(variant, { model, env } = {}) {
   if (variant === 'checkout') return { ok: true, reason: '' };
   if (!WALLET_INTEGRATIONS.some(([k]) => k === variant)) return { ok: false, reason: 'Unknown wallet integration.' };
-  if (env === 'live') return { ok: false, reason: 'Simulated — sandbox only.' };
+  if (env === 'live') return { ok: false, reason: 'Mock wallet tokens — sandbox only.' };
   if (variant === 'decrypted' && model !== 'own-fields') {
     return { ok: false, reason: 'Own Card Fields only — decrypting the token puts the card (DPAN) on the merchant’s servers: PCI scope.' };
   }
@@ -122,7 +144,9 @@ export const SIM_LAST4 = SIM_DPAN.slice(-4);
 /* 20 bytes, like a real cryptogram — decodes to "SIMULATED-CRYPTOGRAM". */
 export const SIM_CRYPTOGRAM = b64('SIMULATED-CRYPTOGRAM');
 export const SIM_EXPIRY = { month: 12, year: 2029 };
-export const SIM_PAYMENT_ID = 'payment_SIMULATED_not_a_real_payment';
+/* Google decrypted: what the page sends for gatewayMerchantId — the backend
+   replaces it with the merchant's Rapyd access key before signing. */
+export const GATEWAY_ID_PLACEHOLDER = 'RAPYD_ACCESS_KEY';
 const SIM_TXN = hex('SIMULATED-APPLE-PAY-TXN').toUpperCase();
 
 /** Rapyd's card method type for the wallet's card (see the header). */
@@ -161,7 +185,8 @@ export function encryptedToken(wallet) {
     };
   }
   if (wallet === 'google') {
-    // Google's ECv2 envelope — a JSON STRING inside tokenizationData.token.
+    // Google's ECv2 envelope. Google hands it over as a JSON string; Rapyd's
+    // sample carries it as an object, which is what is sent (see the header).
     const inner = {
       signature: b64('SIMULATED-ECDSA-SIGNATURE'),
       intermediateSigningKey: {
@@ -175,9 +200,9 @@ export function encryptedToken(wallet) {
       apiVersionMinor: 0,
       apiVersion: 2,
       paymentMethodData: {
-        description: `Visa •••• ${SIM_LAST4}`,
-        tokenizationData: { type: 'PAYMENT_GATEWAY', token: JSON.stringify(inner) },
+        description: `VISA ****${SIM_LAST4}`,
         info: { cardNetwork: 'VISA', cardDetails: SIM_LAST4 },
+        tokenizationData: { type: 'PAYMENT_GATEWAY', token: inner },
       },
     };
   }
@@ -186,8 +211,8 @@ export function encryptedToken(wallet) {
 
 /** What the MERCHANT gets after decrypting the token with its own keys —
     already in Rapyd's decrypted_data / brand_data shape. `now` (ms) only
-    feeds Google's messageExpiration. */
-export function decryptedDetails(wallet, { amount, currency, decimals = 2, now = Date.now() } = {}) {
+    feeds Google's messageExpiration; `authMethod` is Google's (see above). */
+export function decryptedDetails(wallet, { amount, currency, decimals = 2, now = Date.now(), authMethod = 'CRYPTOGRAM_3DS' } = {}) {
   if (wallet === 'apple') {
     const yy = String(SIM_EXPIRY.year).slice(-2);
     return {
@@ -198,25 +223,25 @@ export function decryptedDetails(wallet, { amount, currency, decimals = 2, now =
         transactionAmount: minorUnits(amount, decimals),
         deviceManufacturerIdentifier: 'SIMULATED-DEVICE',
         paymentDataType: '3DSecure',
-        paymentData: { onlinePaymentCryptogram: SIM_CRYPTOGRAM, eciIndicator: '7' },
+        paymentData: { onlinePaymentCryptogram: SIM_CRYPTOGRAM, eciIndicator: '07' },
       },
       brand_data: { displayName: `Visa ${SIM_LAST4}`, network: 'Visa', type: 'credit' },
     };
   }
   if (wallet === 'google') {
+    const pan = authMethod === 'PAN_ONLY';
     return {
       decrypted_data: {
-        gatewayMerchantId: 'SIMULATED-GATEWAY-MERCHANT-ID',
+        gatewayMerchantId: GATEWAY_ID_PLACEHOLDER,
         messageExpiration: String(now + 7 * 24 * 3600 * 1000),
         messageId: 'SIMULATED-MESSAGE-ID-0001',
         paymentMethod: 'CARD',
         paymentMethodDetails: {
           pan: SIM_DPAN,
-          expirationMonth: SIM_EXPIRY.month,
-          expirationYear: SIM_EXPIRY.year,
-          authMethod: 'CRYPTOGRAM_3DS',
-          cryptogram: SIM_CRYPTOGRAM,
-          eciIndicator: '05',
+          expirationMonth: String(SIM_EXPIRY.month).padStart(2, '0'),
+          expirationYear: String(SIM_EXPIRY.year),
+          authMethod: pan ? 'PAN_ONLY' : 'CRYPTOGRAM_3DS',
+          ...(pan ? {} : { cryptogram: SIM_CRYPTOGRAM, eciIndicator: '07' }),
         },
       },
       brand_data: { cardDetails: SIM_LAST4, cardNetwork: 'VISA' },
@@ -236,27 +261,33 @@ export function walletDetails(wallet, variant, opts = {}) {
   throw new Error(`Not a direct wallet variant: ${variant}`);
 }
 
-/** The simulated POST /v1/payments body. Throws when the variant isn't
-    allowed on this path — a decrypted body is never built off the PCI path.
-    `amount` / `currency` are Rapyd's (the price); `charge` is what the sheet
-    showed the shopper (differs under FX) and feeds the wallet's own data. */
-export function directPaymentBody({ wallet, variant, model, env = 'sandbox', amount, currency, charge = null, decimals = 2, description, reference, now } = {}) {
+/** The POST /v1/payments body (mock token inside). Throws when the variant
+    isn't allowed on this path — a decrypted body is never built off the PCI
+    path, nor in live. `amount` / `currency` are Rapyd's (the price); `charge`
+    is what the sheet showed the shopper (differs under FX) and feeds the
+    wallet's own data. `ewallet` / `descriptor` as on every other payment. */
+export function directPaymentBody({ wallet, variant, model, env = 'sandbox', amount, currency, charge = null, decimals = 2, description, reference, descriptor, ewallet, authMethod, now } = {}) {
   if (!WALLETS[wallet]) throw new Error(`Unknown wallet: ${wallet}`);
   if (!isDirect(variant)) throw new Error(`Not a direct wallet variant: ${variant}`);
   const avail = walletAvailability(variant, { model, env });
   if (!avail.ok) throw new Error(`${WALLETS[wallet].label} ${variant} refused: ${avail.reason}`);
+  const type = WALLETS[wallet].type;
   const body = {
     amount: Number(amount),
     currency,
+    capture: true,
     merchant_reference_id: reference || `${SIM_MARK}-ref`,
+    metadata: { digital_wallet: type }, // as in Rapyd's samples
     payment_method: {
       type: DIRECT_METHOD_TYPE,
       digital_wallet: {
-        type: WALLETS[wallet].type,
-        details: walletDetails(wallet, variant, { amount: charge?.amount ?? amount, currency: charge?.currency ?? currency, decimals, now }),
+        type,
+        details: walletDetails(wallet, variant, { amount: charge?.amount ?? amount, currency: charge?.currency ?? currency, decimals, now, authMethod }),
       },
     },
   };
+  if (ewallet) body.ewallet = ewallet;
+  if (descriptor) body.statement_descriptor = descriptor;
   if (description) body.description = description;
   return body;
 }
@@ -281,32 +312,11 @@ export function leafPathsUnder(obj, prefixes) {
   return out;
 }
 
-/** Rapyd's (simulated) answer: a captured CLO payment, every id fake. */
-export function simulatedResponse(body) {
-  const dw = body?.payment_method?.digital_wallet || {};
-  return {
-    status: { error_code: '', status: 'SUCCESS', message: '', response_code: '', operation_id: `${SIM_MARK}-operation` },
-    data: {
-      id: SIM_PAYMENT_ID,
-      amount: body?.amount,
-      currency_code: body?.currency,
-      status: 'CLO',
-      paid: true,
-      captured: true,
-      merchant_reference_id: body?.merchant_reference_id,
-      payment_method_type: body?.payment_method?.type,
-      payment_method_data: { type: body?.payment_method?.type, last4: SIM_LAST4, digital_wallet: { type: dw.type } },
-      next_action: 'not_applicable',
-      auth_code: SIM_MARK,
-    },
-  };
-}
-
 /* ── The sequence, per wallet × variant ──────────────────────
    Steps outside Rapyd (`party` apple / google / merchant) are ONE line + a
    link to the wallet's own docs — Rapyd doesn't author Apple's or Google's
-   guidance. The single `rapyd` step is the simulated POST /v1/payments the
-   engine room details in full. `pci` marks the merchant handling card data.
+   guidance. The single `rapyd` step is the real (sandbox) POST /v1/payments
+   the engine room details in full. `pci` marks the merchant handling card data.
    Text only — callers escape. */
 const DOCS = {
   appleSetup: 'https://developer.apple.com/help/account/capabilities/configure-apple-pay-on-the-web/',

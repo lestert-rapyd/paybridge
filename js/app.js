@@ -27,7 +27,10 @@ import { thumbHTML } from './site/chrome.js';
 import { billingPeriod } from './site/cart.js';
 import { SEAM_PATHS, seamPathKey, seamLinesHTML, seamStripHTML, setAddress, pagePath, isSeamOn, setSeamOn, applySeam } from './seam.js';
 import { EXT3DS_OUTCOMES, ext3dsPreset, setExt3dsPreset } from './ext3ds.js';
-import { WALLET_INTEGRATIONS, walletIntegration, setWalletIntegration, walletAvailability, effectiveWalletIntegration } from './direct-wallet.js';
+import {
+  WALLET_INTEGRATIONS, walletIntegration, setWalletIntegration, walletAvailability, effectiveWalletIntegration,
+  GOOGLE_AUTH_METHODS, googleAuthMethod, setGoogleAuthMethod,
+} from './direct-wallet.js';
 import { directWalletBlockHTML, refreshDirectSlot, resetDirectWallet, setDirectWalletRepainter } from './flows/direct-wallet.js';
 
 // Patch keys that mean "the customer's flow/context actually changed" —
@@ -353,8 +356,9 @@ function renderCheckout() {
   const host = $('#checkout');
 
   closeCurDropdown();
-  // A simulated direct-wallet run (sheet / result) belongs to the page being
-  // replaced — drop it, so the flow's own engine room comes back.
+  // A direct-wallet run (sheet / result) belongs to the page being replaced —
+  // drop it, so the flow's own engine room comes back. A payment it already
+  // sent keeps settling through the ledger and its webhook watch.
   resetDirectWallet();
   // The tile is about to be rebuilt from activeProduct() — always a valid
   // amount — so any invalid draft the SE left in the old one is gone with it.
@@ -484,7 +488,8 @@ function toggleLeftView() {
                          the toolkit's mode (full toolkit / wallets / hosted)
                          and the Apple Pay / Google Pay integration
                          (Checkout (real) / Direct encrypted / decrypted —
-                         the direct ones simulated, js/direct-wallet.js)
+                         the direct ones send a mock wallet token to the
+                         Rapyd sandbox, js/direct-wallet.js)
      Account           · Sandbox / Live (the live-token dialog gates Live),
                          the SC1–SC3 credential picker with its feature
                          badges, the MID's 3DS provider (fixed by the MID;
@@ -557,7 +562,8 @@ function pathHTML() {
 
 /* Apple Pay / Google Pay integration (js/direct-wallet.js). Checkout (real)
    is the toolkit's / hosted page's own wallet buttons; the two Direct
-   variants are SIMULATED on the merchant's own page. A variant that can't run
+   variants run on the merchant's own page — a simulated wallet sheet whose
+   mock token goes to the Rapyd sandbox for real. A variant that can't run
    here (decrypted off Own Card Fields, anything direct in live) is disabled
    with its reason. */
 function walletFieldHTML() {
@@ -578,7 +584,15 @@ function walletFieldHTML() {
       </div>
       ${reasons.map(([label, a]) => `<p class="dc-note fine">${esc(label)}: ${esc(a.reason)}</p>`).join('')}
       ${pick !== eff ? `<p class="dc-note warn">${esc(WALLET_INTEGRATIONS.find(([v]) => v === pick)?.[1] || '')} doesn’t apply here — showing Checkout (real).</p>` : ''}
-    </div>`;
+    </div>
+    ${eff === 'decrypted' ? `
+    <div class="dc-field">
+      <div class="dc-label">Google Pay authMethod<span class="dc-label-note">decrypted token</span></div>
+      <div class="dc-seg" id="dc-gauth">
+        ${GOOGLE_AUTH_METHODS.map((m) => `<button type="button" data-val="${esc(m)}" class="${googleAuthMethod() === m ? 'active' : ''}">${esc(m)}</button>`).join('')}
+      </div>
+      <p class="dc-note fine">CRYPTOGRAM_3DS sends the wallet’s cryptogram + ECI; PAN_ONLY sends neither, and Rapyd may ask for its own 3DS.</p>
+    </div>` : ''}`;
 }
 
 function credRowsHTML() {
@@ -849,6 +863,8 @@ function wire() {
       refreshDirectSlot(); // the merchant's own buttons appear / go — nothing else repaints
       return;
     }
+    const ga = t.closest('#dc-gauth button[data-val]');
+    if (ga) { setGoogleAuthMethod(ga.dataset.val); renderDrawer(); return; } // read when the sheet opens
     const ext = t.closest('#dc-ext3ds button[data-val]');
     if (ext) { setExt3dsPreset(ext.dataset.val); renderDrawer(); return; }
     if (t.closest('#dc-forget')) {
