@@ -47,7 +47,7 @@ import {
 import {
   productTotalsHTML, fxCardHTML, paymentResponseCardHTML, httpLabel, httpOk,
   amountProblem, bodyAmount, LIVE_GATE_ERRORS, failureStatusText, httpsUrl, sendIdempotent, isUnknownOutcome,
-  terminalHandler, cardSaveSlot, pendingCardSave,
+  terminalHandler, cardSaveSlot, pendingCardSave, aftOptions,
 } from './shared.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -151,6 +151,10 @@ function displayBody() {
     // demo corridor: everything flows through DE regardless of vertical skin
     // (US/MT aren't enabled on this sandbox MID and fail the session)
     country: 'DE',
+    // An AFT needs its sender, guest or not (no exemptions): a guest's AFT
+    // checkout carries the enriched customer inline — Rapyd creates the
+    // cus_*** with the session; an account's is the session cus_*** below.
+    ...(!cofOn && p.aft ? { customer: customers.enrichedCustomerBody() } : {}),
     // Card on file: `customer` alone gives the hosted page its save-card
     // option AND lists the customer's saved cards on a return visit.
     ...(cofOn ? {
@@ -168,7 +172,9 @@ function displayBody() {
     cancel_checkout_url: returnUrl('cancel'),
     custom_elements: { display_description: true, ...(cofOn ? { save_card_default: saveDefault } : {}) },
     payment_method_type_categories: ['card'],
-    payment_method_options: { '3d_required': tds },
+    // AFT products carry the AFT block on every toolkit mode — full toolkit,
+    // wallet buttons and the hosted page (Rapyd copies it onto the payment).
+    payment_method_options: { '3d_required': tds, ...aftOptions(p) },
     // No-FX flows must omit all three fields entirely — sending any of them
     // without the others errors the call.
     ...(state.fx.enabled && state.fx.requestedCurrency ? {
@@ -210,12 +216,7 @@ function expressBody(cred) {
   body.initiation_type = 'customer_present'; // the customer clicked — still CIT
   const pmo = {};
   if (tds) pmo['3d_required'] = true;
-  if (p.aft) {
-    pmo.aft = true;
-    pmo.is_direct_purchase = p.is_direct_purchase ?? true; // false for a wallet deposit (site/wallet.js)
-    pmo.purpose_code = p.purpose_code;
-    if (p.special_condition_indicator) pmo.special_condition_indicator = p.special_condition_indicator; // forex sets none
-  }
+  Object.assign(pmo, aftOptions(p)); // false is_direct_purchase for a wallet deposit (site/wallet.js)
   if (Object.keys(pmo).length) body.payment_method_options = pmo;
   body.address = customers.demoAddress();
   body.client_details = clientDetails(); // ip_address injected server-side
@@ -893,10 +894,11 @@ async function launch() {
       customer_id: effectiveCof() ? customers.getCustomerId() : null,
       credential_label: effectiveCof() ? 'Yes' : null,
       initiation_type: 'customer_present',
-      note: p.successNote || v.successNote,
+      aft: !!p.aft, is_direct_purchase: p.aft ? aftOptions(p).is_direct_purchase : null,
+      note: p.aft && p.is_direct_purchase === false ? (p.fundedNote || p.successNote || v.successNote) : (p.successNote || v.successNote),
     };
     ledger.recordPayment(reference, {
-      model: 'toolkit', vertical: state.vertical, amount: p.amount, currency: p.currency,
+      model: 'toolkit', aft: !!p.aft, vertical: state.vertical, amount: p.amount, currency: p.currency,
       requested_currency: fxOn ? state.fx.requestedCurrency : null, fixed_side: fxOn ? state.fx.fixedSide : null,
       origin: 'client', initiation_type: 'customer_present', profile: state.profile,
       items: orderItems(p),
@@ -905,7 +907,7 @@ async function launch() {
     // Armed synchronously before the POST — captures this session's reference
     // and customer bucket (env:profile) against a mid-flight profile switch.
     cofSlot.arm(effectiveCof() ? pendingCardSave({
-      token: true, recurrence_type: recurrence(), aft: false,
+      token: true, recurrence_type: recurrence(), aft: !!p.aft,
       origin_model: 'toolkit', origin_product: p.id,
     }) : null);
   }

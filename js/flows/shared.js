@@ -130,6 +130,19 @@ export function bodyAmount(p = activeProduct()) {
 /** The backend's live-gate refusals (see the backend contract). api.js already
     raises paybridge:live-auth-failed for the auth pair; the flows just render
     them as a normal failure with the server's message. */
+/** The AFT block of payment_method_options for an AFT product, else null.
+    No exemptions: every customer-present AFT payment carries it, whatever
+    the path (card fields, wallet, toolkit, hosted, express). `directPurchase`
+    is the page's buy-now / fund-wallet fork where it has one; a wallet
+    deposit (site/wallet.js) fixes it at false. */
+export function aftOptions(p = activeProduct(), directPurchase = true) {
+  if (!p.aft) return null;
+  const o = { aft: true, is_direct_purchase: p.is_direct_purchase === false ? false : directPurchase !== false, purpose_code: p.purpose_code };
+  // Only where the pack sets one — forex's AFT carries none (packs.js).
+  if (p.special_condition_indicator) o.special_condition_indicator = p.special_condition_indicator;
+  return o;
+}
+
 export const LIVE_GATE_ERRORS = new Set([
   'LIVE_AUTH_REQUIRED', 'LIVE_DISABLED', 'LIVE_LIMIT', 'LIVE_RAW_CARD_FORBIDDEN', 'LIVE_FIELD_NOT_ALLOWED',
 ]);
