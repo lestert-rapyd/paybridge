@@ -487,7 +487,7 @@ function toggleLeftView() {
      Integration path  · Own Card Fields / Checkout Toolkit (state.model),
                          the toolkit's mode (full toolkit / wallets / hosted)
                          and the Apple Pay / Google Pay integration
-                         (Checkout (real) / Direct encrypted / decrypted —
+                         (Own Card Fields only: Off / Direct encrypted / decrypted —
                          the direct ones send a mock wallet token to the
                          Rapyd sandbox, js/direct-wallet.js)
      Account           · Sandbox / Live (the live-token dialog gates Live),
@@ -560,13 +560,13 @@ function pathHTML() {
     </div>`;
 }
 
-/* Apple Pay / Google Pay integration (js/direct-wallet.js). Checkout (real)
-   is the toolkit's / hosted page's own wallet buttons; the two Direct
-   variants run on the merchant's own page — a simulated wallet sheet whose
-   mock token goes to the Rapyd sandbox for real. A variant that can't run
-   here (decrypted off Own Card Fields, anything direct in live) is disabled
-   with its reason. */
+/* Apple Pay / Google Pay integration (js/direct-wallet.js) — Own Card Fields
+   (PCI-DSS merchants) only; the toolkit / hosted page keep Rapyd's own wallet
+   buttons. The two Direct variants run on the merchant's own page — a
+   simulated wallet sheet whose mock token goes to the Rapyd sandbox for real.
+   In live both are disabled with their reason. */
 function walletFieldHTML() {
+  if (state.model !== 'own-fields') return '';
   const ctx = { model: state.model, env: state.env };
   const pick = walletIntegration();
   const eff = effectiveWalletIntegration(ctx);
@@ -583,7 +583,7 @@ function walletFieldHTML() {
         }).join('')}
       </div>
       ${reasons.map(([label, a]) => `<p class="dc-note fine">${esc(label)}: ${esc(a.reason)}</p>`).join('')}
-      ${pick !== eff ? `<p class="dc-note warn">${esc(WALLET_INTEGRATIONS.find(([v]) => v === pick)?.[1] || '')} doesn’t apply here — showing Checkout (real).</p>` : ''}
+      ${pick !== eff ? `<p class="dc-note warn">${esc(WALLET_INTEGRATIONS.find(([v]) => v === pick)?.[1] || '')} doesn’t apply here — showing Off.</p>` : ''}
     </div>
     ${eff === 'decrypted' ? `
     <div class="dc-field">
@@ -591,7 +591,6 @@ function walletFieldHTML() {
       <div class="dc-seg" id="dc-gauth">
         ${GOOGLE_AUTH_METHODS.map((m) => `<button type="button" data-val="${esc(m)}" class="${googleAuthMethod() === m ? 'active' : ''}">${esc(m)}</button>`).join('')}
       </div>
-      <p class="dc-note fine">CRYPTOGRAM_3DS sends the wallet’s cryptogram + ECI; PAN_ONLY sends neither, and Rapyd may ask for its own 3DS.</p>
     </div>` : ''}`;
 }
 

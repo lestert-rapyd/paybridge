@@ -55,7 +55,7 @@ import {
   WALLET_INTEGRATIONS, walletIntegration, setWalletIntegration, walletAvailability, effectiveWalletIntegration,
   encryptedToken, decryptedDetails, directPaymentBody, walletSteps, walletDataPaths,
   currencyNumeric, minorUnits, leafPathsUnder, SIM_MARK, SIM_CRYPTOGRAM, DIRECT_METHOD_TYPE,
-  GOOGLE_AUTH_METHODS, googleAuthMethod, setGoogleAuthMethod, GATEWAY_ID_PLACEHOLDER,
+  GOOGLE_AUTH_METHODS, googleAuthMethod, setGoogleAuthMethod, GATEWAY_ID_PLACEHOLDER, needsRapyd3DS,
 } from '../js/direct-wallet.js';
 import { WALLET_SEAMS, seamWalletLine } from '../js/seam.js';
 
@@ -801,16 +801,18 @@ const dwBody = (wallet, variant, ctx = PCI) => directPaymentBody({
 const hasSimMarker = (o) => JSON.stringify(o).includes(SIM_MARK)
   || JSON.stringify(o).includes(btoa('SIMULATED').slice(0, 10)); // base64 of a SIMULATED-… string
 
-test('direct wallet: availability — decrypted is PCI-path only, nothing direct in live', () => {
+test('direct wallet: availability — Own Card Fields (PCI) only, nothing direct in live', () => {
   eq(WALLET_INTEGRATIONS.map(([k]) => k), ['checkout', 'encrypted', 'decrypted']);
   ok(walletAvailability('checkout', TK).ok && walletAvailability('checkout', { model: 'toolkit', env: 'live' }).ok, 'checkout (real) everywhere');
-  ok(walletAvailability('encrypted', PCI).ok && walletAvailability('encrypted', TK).ok, 'encrypted on both paths');
-  ok(walletAvailability('decrypted', PCI).ok, 'decrypted on Own Card Fields');
-  const off = walletAvailability('decrypted', TK);
-  ok(!off.ok && /Own Card Fields only/.test(off.reason) && /PCI/.test(off.reason), 'decrypted refused off the PCI path, with a reason');
+  ok(walletAvailability('encrypted', PCI).ok && walletAvailability('decrypted', PCI).ok, 'both on Own Card Fields');
+  for (const v of ['encrypted', 'decrypted']) {
+    const off = walletAvailability(v, TK);
+    ok(!off.ok && /Own Card Fields only/.test(off.reason) && /PCI/.test(off.reason), `${v}: refused on the toolkit, with a reason`);
+  }
+  eq(effectiveWalletIntegration(TK, 'encrypted'), 'checkout', 'encrypted falls back to Off on the toolkit');
   for (const v of ['encrypted', 'decrypted']) ok(!walletAvailability(v, { model: 'own-fields', env: 'live' }).ok, `${v}: never in live`);
   ok(!walletAvailability('bogus', PCI).ok, 'unknown variant');
-  eq(effectiveWalletIntegration(TK, 'decrypted'), 'checkout', 'falls back to Checkout (real)');
+  eq(effectiveWalletIntegration(TK, 'decrypted'), 'checkout', 'falls back to Off');
   eq(effectiveWalletIntegration(PCI, 'decrypted'), 'decrypted');
   const before = walletIntegration();
   setWalletIntegration('encrypted'); eq(walletIntegration(), 'encrypted');
@@ -819,7 +821,7 @@ test('direct wallet: availability — decrypted is PCI-path only, nothing direct
 });
 
 test('direct wallet: encrypted bodies forward the token unchanged (Rapyd\'s shape)', () => {
-  const a = dwBody('apple', 'encrypted', TK);
+  const a = dwBody('apple', 'encrypted');
   eq(a.payment_method.type, DIRECT_METHOD_TYPE, 'the card\'s method type, no *_apple_pay');
   eq(a.payment_method.digital_wallet.type, 'apple_pay');
   eq(Object.keys(a.payment_method.digital_wallet.details), ['token']);
@@ -834,15 +836,16 @@ test('direct wallet: encrypted bodies forward the token unchanged (Rapyd\'s shap
   eq([a.amount, a.currency, a.capture], [149.99, 'USD', true]);
   eq(a.metadata, { digital_wallet: 'apple_pay' }, 'metadata as in Rapyd\'s sample');
 
-  const g = dwBody('google', 'encrypted', TK);
+  const g = dwBody('google', 'encrypted');
   eq(g.payment_method.digital_wallet.type, 'google_pay');
   const d = g.payment_method.digital_wallet.details;
   eq(d.type, 'CARD', 'details.type beside token, as Rapyd\'s sample has it');
   eq([d.token.apiVersion, d.token.apiVersionMinor], [2, 0]);
   eq(d.token.paymentMethodData.tokenizationData.type, 'PAYMENT_GATEWAY');
-  const inner = d.token.paymentMethodData.tokenizationData.token; // an object, as in Rapyd's sample
-  eq([typeof inner, inner.protocolVersion], ['object', 'ECv2']);
-  eq(d.token.paymentMethodData.info, { cardNetwork: 'VISA', cardDetails: '1111' });
+  const raw = d.token.paymentMethodData.tokenizationData.token; // Google's JSON string, unchanged
+  eq([typeof raw, JSON.parse(raw).protocolVersion], ['string', 'ECv2']);
+  eq(d.token.paymentMethodData.type, 'CARD', 'Google\'s own shape');
+  eq([d.token.paymentMethodData.info.cardNetwork, d.token.paymentMethodData.info.cardDetails], ['VISA', '1111']);
   eq(g.metadata, { digital_wallet: 'google_pay' });
   ok(hasSimMarker(a) && hasSimMarker(g), 'fake markers present');
   ok(!JSON.stringify(g).includes('4111'), 'no PAN anywhere in an encrypted body');
@@ -858,7 +861,7 @@ test('direct wallet: decrypted bodies carry DPAN + cryptogram (+ ECI)', () => {
   ok(/^\d{6}$/.test(dd.applicationExpirationDate), 'YYMMDD');
   eq([dd.currencyCode, dd.transactionAmount, dd.paymentDataType], ['840', 14999, '3DSecure']);
   eq(Object.keys(dd.paymentData), ['onlinePaymentCryptogram', 'eciIndicator']);
-  eq(dd.paymentData, { onlinePaymentCryptogram: SIM_CRYPTOGRAM, eciIndicator: '07' });
+  eq(dd.paymentData, { onlinePaymentCryptogram: SIM_CRYPTOGRAM, eciIndicator: '7' });
   eq(atob(SIM_CRYPTOGRAM), 'SIMULATED-CRYPTOGRAM');
   eq(atob(SIM_CRYPTOGRAM).length, 20, 'a cryptogram-sized dummy');
   eq(Object.keys(ad.brand_data), ['displayName', 'network', 'type']);
@@ -869,7 +872,7 @@ test('direct wallet: decrypted bodies carry DPAN + cryptogram (+ ECI)', () => {
   eq(Object.keys(gd.decrypted_data), ['gatewayMerchantId', 'messageExpiration', 'messageId', 'paymentMethod', 'paymentMethodDetails']);
   const pmd = gd.decrypted_data.paymentMethodDetails;
   eq(Object.keys(pmd), ['pan', 'expirationMonth', 'expirationYear', 'authMethod', 'cryptogram', 'eciIndicator']);
-  eq([pmd.authMethod, pmd.eciIndicator, pmd.expirationMonth, pmd.expirationYear], ['CRYPTOGRAM_3DS', '07', '12', '2029']);
+  eq([pmd.authMethod, pmd.eciIndicator, pmd.expirationMonth, pmd.expirationYear], ['CRYPTOGRAM_3DS', '07', 12, 2029], 'expiry as numbers');
   ok(/^\d{13}$/.test(gd.decrypted_data.messageExpiration), '13-digit ms timestamp');
   eq(Object.keys(gd.brand_data), ['cardDetails', 'cardNetwork']);
   ok(gd.decrypted_data.messageId.startsWith(SIM_MARK), 'fake marker');
@@ -878,8 +881,14 @@ test('direct wallet: decrypted bodies carry DPAN + cryptogram (+ ECI)', () => {
   const po = directPaymentBody({ wallet: 'google', variant: 'decrypted', ...PCI, amount: '1', currency: 'USD', authMethod: 'PAN_ONLY' });
   eq(Object.keys(po.payment_method.digital_wallet.details.decrypted_data.paymentMethodDetails), ['pan', 'expirationMonth', 'expirationYear', 'authMethod']);
   eq(po.payment_method.digital_wallet.details.decrypted_data.paymentMethodDetails.authMethod, 'PAN_ONLY');
+  // no "6DS": Rapyd's 3DS only for Google PAN_ONLY
+  eq(po.payment_method_options, { '3d_required': true }, 'PAN_ONLY asks for Rapyd 3DS');
+  for (const [w, v] of [['apple', 'encrypted'], ['apple', 'decrypted'], ['google', 'encrypted'], ['google', 'decrypted']]) {
+    eq(dwBody(w, v).payment_method_options, { '3d_required': false }, `${w}/${v}: the wallet's SCA stands`);
+  }
+  ok(!needsRapyd3DS('apple', 'decrypted', 'PAN_ONLY') && !needsRapyd3DS('google', 'encrypted', 'PAN_ONLY'), 'PAN_ONLY means Google decrypted only');
   // routing fields as on every other payment, only when given
-  const routed = directPaymentBody({ wallet: 'apple', variant: 'encrypted', ...TK, amount: '1', currency: 'USD', ewallet: 'ewallet_x', descriptor: 'RAPYD SHOP' });
+  const routed = directPaymentBody({ wallet: 'apple', variant: 'encrypted', ...PCI, amount: '1', currency: 'USD', ewallet: 'ewallet_x', descriptor: 'RAPYD SHOP' });
   eq([routed.ewallet, routed.statement_descriptor], ['ewallet_x', 'RAPYD SHOP']);
   ok(!('ewallet' in g) && !('statement_descriptor' in g), 'absent when not given');
   // FX: the wallet's own data follows what the sheet charged, Rapyd's amount the price
@@ -891,7 +900,7 @@ test('direct wallet: decrypted bodies carry DPAN + cryptogram (+ ECI)', () => {
 test('direct wallet: decrypted refused off the PCI path; bad input throws', () => {
   let threw = null;
   try { dwBody('apple', 'decrypted', TK); } catch (e) { threw = e.message; }
-  ok(threw && /refused/.test(threw) && /PCI/.test(threw), 'no decrypted body on the toolkit');
+  ok(threw && /refused/.test(threw) && /PCI/.test(threw), 'no direct body on the toolkit');
   for (const bad of [() => dwBody('google', 'decrypted', { model: 'own-fields', env: 'live' }),
     () => dwBody('samsung', 'encrypted'), () => dwBody('apple', 'checkout')]) {
     let t = false; try { bad(); } catch { t = true; }

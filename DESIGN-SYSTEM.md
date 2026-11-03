@@ -223,12 +223,12 @@ before any Rapyd call.
   payment card reads "not sent", the response panel says no request was made; no ledger entry.
 
 ### 5.5 Direct Apple Pay / Google Pay (`js/direct-wallet.js`, `js/flows/direct-wallet.js`) — mock token, real sandbox call
-Drawer → Integration path → **Wallet integration**: Checkout (real) / Direct — encrypted / Direct —
-decrypted (mock token). The direct variants are sandbox-only; decrypted is Own Card Fields only
-(disabled with its reason elsewhere) and adds a Google Pay authMethod segment (CRYPTOGRAM_3DS / PAN_ONLY).
+Drawer → Integration path → **Wallet integration** (Own Card Fields only — PCI-DSS merchants): Off /
+Direct — encrypted / Direct — decrypted (mock token). Sandbox-only; decrypted adds a Google Pay
+authMethod segment (CRYPTOGRAM_3DS / PAN_ONLY).
 
 - **Merchant buttons** (`.dw-express`, `.dw-btn`). On the merchant's own checkout — above "Pay by card"
-  (Own Card Fields, with an "or pay by card" rule) or in the toolkit's order summary (stacked). Black,
+  with an "or pay by card" rule (Own Card Fields only). Black,
   8px radius, white wallet NAME as text in the platform face — no official Apple / Google artwork is
   embedded; a real integration uses the wallets' own button assets.
 - **Wallet sheet** (`.dw-sheet`). Apple's / Google's surface, after the storefront prototype's
@@ -239,8 +239,7 @@ decrypted (mock token). The direct variants are sandbox-only; decrypted is Own C
 - **Engine room.** A "Mock token" intro line, then one box per Apple / Google / merchant step
   (`.dw-step` — dashed, grey left edge, "Apple · outside Rapyd" pill, ONE line + the wallet's docs
   link; the merchant's decrypt step carries a red "PCI scope" pill; steps not reached yet are faded),
-  then the plain `beat-card` POST /v1/payments (a real sandbox call) with the field guide, a 3DS line,
-  the body (the wallet's data marked `.inject-hit`) and the Rapyd doc link; the response panel holds
+  then the plain `beat-card` POST /v1/payments (a real sandbox call) with the body (the wallet's data marked `.inject-hit`) and the Rapyd doc link; the response panel holds
   Rapyd's answer in the standard payment response card.
 - **Result.** The same as any payment: processing, Rapyd's 3DS if it asks, then the webhook-confirmed
   success or decline screen.
@@ -294,7 +293,7 @@ reason it exists is the SE's line.
 | `se-` / `sc-` | stored-credential strategy (rendered in the drawer) |
 | `fx-` / `cur-` | FX preview + the currency picker |
 | `tk-` / `tkc-` | toolkit stage + its config panel |
-| `screen-` / `cs-` / `bank-` / `tds-` | result screens, result badge, bank-app mock, 3DS |
+| `screen-` / `proc-` / `cs-` / `bank-` / `tds-` | result screens, processing page, result badge, bank-app mock, 3DS |
 | `x3ds-` / `seam-ext` | the external 3DS provider's simulated page and its marker |
 | `bo-` | back office |
 | `req-` / `eng-` / `beat-` / `jsonv` / `wh-` / `cl-` | engine room |

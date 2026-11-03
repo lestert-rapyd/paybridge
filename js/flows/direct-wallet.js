@@ -4,13 +4,14 @@
    js/direct-wallet.js.
 
    left  · the merchant's OWN Apple Pay / Google Pay buttons on its own
-           checkout (Own Card Fields: above "Pay by card"; Checkout
-           Toolkit: in the order summary, encrypted only). A click opens a
+           checkout, above "Pay by card" (Own Card Fields — PCI-DSS
+           merchants — only). A click opens a
            neutral, OS-like wallet sheet over the page — Apple's / Google's
            surface, so it gets the grey third-party seam marker, never the
            skin and never Rapyd's. Approving it sends the mock token to
            Rapyd for real, and the payment ends like any other: processing,
-           Rapyd's 3DS if it asks, then the webhook-confirmed result.
+           Rapyd's 3DS for Google Pay PAN_ONLY only (everything else already
+           had the wallet's SCA), then the webhook-confirmed result.
    right · the whole sequence: Apple / Google / merchant steps as one-line
            boxes OUTSIDE Rapyd (each links the wallet's own docs), then the
            POST /v1/payments in full and Rapyd's real answer.
@@ -59,39 +60,6 @@ const RAPYD_DOCS = {
   'google:decrypted': 'https://docs.rapyd.net/en/creating-a-payment-with-google-pay---decrypted-.html',
 };
 
-/* The Rapyd fields, explained — Rapyd's part gets the full detail. Text with
-   <code> only (literals here, no data). */
-const FIELD_GUIDE = {
-  'apple:encrypted': [
-    '<code>payment_method.type</code> — the card’s method type (here <code>gb_visa_card</code>); there is no Apple Pay method type.',
-    '<code>digital_wallet.type</code> — <code>apple_pay</code>.',
-    '<code>details.token</code> — the whole token from <code>onpaymentauthorized</code> (<code>paymentData</code>, <code>paymentMethod</code>, <code>transactionIdentifier</code>), unchanged. Rapyd decrypts it.',
-    '<code>metadata.digital_wallet</code> — <code>apple_pay</code>, as in Rapyd’s sample (the merchant’s own label).',
-  ],
-  'apple:decrypted': [
-    '<code>payment_method.type</code> — the card’s method type (here <code>gb_visa_card</code>).',
-    '<code>details.decrypted_data</code> — the decrypted <code>token.paymentData</code>: <code>applicationPrimaryAccountNumber</code> (the DPAN), <code>applicationExpirationDate</code> (YYMMDD), <code>currencyCode</code> (ISO 4217 numeric), <code>transactionAmount</code>, <code>deviceManufacturerIdentifier</code>, <code>paymentDataType</code>.',
-    '<code>decrypted_data.paymentData</code> — <code>onlinePaymentCryptogram</code> + <code>eciIndicator</code>.',
-    '<code>details.brand_data</code> — <code>token.paymentMethod</code> as is (<code>displayName</code>, <code>network</code>, <code>type</code>).',
-  ],
-  'google:encrypted': [
-    '<code>payment_method.type</code> — the card’s method type (here <code>gb_visa_card</code>); there is no Google Pay method type.',
-    '<code>digital_wallet.type</code> — <code>google_pay</code>.',
-    '<code>details.token</code> — <code>apiVersion</code> 2, <code>apiVersionMinor</code> 0 and <code>paymentMethodData</code> (<code>description</code>, <code>info</code>, <code>tokenizationData</code> type <code>PAYMENT_GATEWAY</code>), its <code>token</code> encrypted for Rapyd. <code>details.type</code> — <code>CARD</code>.',
-    '<code>metadata.digital_wallet</code> — <code>google_pay</code>, as in Rapyd’s sample.',
-  ],
-  'google:decrypted': [
-    '<code>payment_method.type</code> — the card’s method type (here <code>gb_visa_card</code>).',
-    '<code>details.decrypted_data</code> — the decrypted message: <code>gatewayMerchantId</code>, <code>messageExpiration</code>, <code>messageId</code>, <code>paymentMethod</code>, and <code>paymentMethodDetails</code> (<code>pan</code>, <code>expirationMonth</code>, <code>expirationYear</code>, <code>authMethod</code>; <code>cryptogram</code> + <code>eciIndicator</code> for <code>CRYPTOGRAM_3DS</code> only).',
-    '<code>gatewayMerchantId</code> — the merchant’s Rapyd <b>access key</b>. The browser never holds it: the backend writes it in before signing, so the body here shows a placeholder.',
-    '<code>details.brand_data</code> — <code>cardDetails</code> (last 4) + <code>cardNetwork</code>.',
-  ],
-};
-const TDS_NOTE = {
-  apple: 'The token carries the wallet’s own cryptogram (<code>paymentDataType: "3DSecure"</code>) — Rapyd’s documented flow has no separate 3DS step.',
-  google: '<code>CRYPTOGRAM_3DS</code> carries the wallet’s cryptogram + ECI. <code>PAN_ONLY</code> (a card on file in the Google account) carries neither, so Rapyd may answer <code>ACT</code> with <code>next_action: 3d_verification</code> — its own 3DS, which this page then follows. Pick the method in the drawer.',
-};
-
 /* ── The run ─────────────────────────────────────────────────
    One wallet payment: { wallet, variant, phase, body, reference, httpStatus,
    response, amountText, merchant }. phase: 'sheet' (waiting on the shopper)
@@ -115,21 +83,20 @@ const variantNow = () => effectiveWalletIntegration(ctx());
 
 /* ── Left: the merchant's buttons ──────────────────────────── */
 /** The express block for the active checkout, or '' when no direct variant
-    applies (Checkout (real), live, a subscription). */
+    applies (Off, the toolkit, live, a subscription). */
 export function directWalletBlockHTML() {
   const variant = variantNow();
   if (!isDirect(variant)) return '';
   const p = activeProduct();
   if (p.billing === 'subscription') return '';
   const disabled = amountProblem(p) ? 'disabled' : '';
-  const own = state.model === 'own-fields';
   return `
     <div class="dw-express">
       <div class="dw-express-label">Express checkout</div>
       <div class="dw-buttons">
         ${WALLET_ORDER.map((id) => `<button type="button" class="dw-btn dw-btn-${esc(id)}" data-dw-wallet="${esc(id)}" ${disabled} aria-label="Pay with ${esc(WALLETS[id].label)}">${esc(WALLETS[id].label)}</button>`).join('')}
       </div>
-      ${own ? `<div class="dw-or"><span>or pay by card</span></div>` : ''}
+      <div class="dw-or"><span>or pay by card</span></div>
     </div>`;
 }
 /** Repaint the slot(s) after a drawer change — the rest of the page stays. */
@@ -341,8 +308,6 @@ export function paintPanels() {
         badge: sent ? 'Sent · sandbox' : 'Sandbox', badgeKind: sent ? 'live' : '',
         inner: `
           <div class="ext-who">Rapyd · the merchant’s server → Rapyd. A real, signed call to the sandbox; only the wallet data inside is mock.</div>
-          <ul class="dw-guide">${FIELD_GUIDE[key].map((li) => `<li>${li}</li>`).join('')}</ul>
-          <div class="dw-guide-3ds"><b>3DS</b> ${TDS_NOTE[r.wallet]}</div>
           <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${sent ? 'sent after the sheet returned' : 'sent once the shopper approves'} · mock wallet values</span><span class="hint"><span class="inject-key"></span>from the wallet</span></div>
           <div id="req-json-dw">${renderJSONView(r.body)}</div>
           <div class="beat-foot">Signed like any <code>POST /v1/payments</code> (access_key, salt, timestamp, signature). Prerequisite: ${esc(w.label)} activated for the account in the Client Portal${r.variant === 'encrypted' && r.wallet === 'apple' ? ', and Apple’s payment processing certificate registered with Rapyd so it can decrypt' : ''}. The sandbox accepts mock wallet payloads and charges its own test card. Reference: <a href="${esc(RAPYD_DOCS[key])}" target="_blank" rel="noopener noreferrer">Rapyd docs ↗</a></div>`,

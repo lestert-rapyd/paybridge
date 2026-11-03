@@ -40,7 +40,6 @@ import * as customers from '../customers.js';
 import { identityMode, usesCustomer, refreshIdentityChooser } from '../identity.js';
 import { stepRailHTML } from '../steps.js';
 import { thumbHTML } from '../site/chrome.js';
-import { directWalletBlockHTML, ownsPanel as directOwnsPanel, paintPanels as paintDirectPanels } from './direct-wallet.js';
 import {
   accountPanelHTML, beatCardHTML, customerRequestCardHTML, customerResponseCardHTML,
   fillCustomerSignature, fireCreateCustomer, refreshAccountPanel,
@@ -286,7 +285,6 @@ function summaryHTML() {
       </div>
       <div class="co-totals" id="tk-order-totals">${productTotalsHTML()}</div>
       <div id="tk-express-slot">${expressHTML()}</div>
-      <div class="dw-slot">${directWalletBlockHTML()}</div>
       <div class="tk-secure">
         <div class="tk-secure-head">🔒 Secure checkout</div>
         <p>Payments are encrypted end-to-end and processed by Rapyd.</p>
@@ -462,7 +460,6 @@ function syncControlVisibility() {
    visible. The client-side toolkit.config JSON stays OUTSIDE the cards: it
    isn't an API call. */
 function renderRequest() {
-  if (directOwnsPanel()) { paintDirectPanels(); return; }
   const el = $('#panel-request');
   if (!el) return;
   const st = newSaltTimestamp();
@@ -484,7 +481,6 @@ function renderRequest() {
 }
 
 function renderResponse() {
-  if (directOwnsPanel()) { paintDirectPanels(); return; }
   const el = $('#panel-response');
   if (!el) return;
   const cusCard = customerResponseCardHTML();
@@ -535,8 +531,6 @@ function paintExpressResponse(httpStatus, data) {
     here already reads off persisted `lastSession`, so it's idempotent. An
     express charge supersedes the session panels until the next launch. */
 export function refreshRightPanel() {
-  // A simulated direct-wallet run owns the engine room until it ends.
-  if (directOwnsPanel()) { paintDirectPanels(); return; }
   if (lastExpress) {
     paintExpressRequest(lastExpress.body);
     if (lastExpress.httpStatus != null) paintExpressResponse(lastExpress.httpStatus, lastExpress.data);

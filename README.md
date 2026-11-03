@@ -70,19 +70,19 @@ docs.rapyd.net/en/creating-a-card-payment-with-3ds-authentication---external-3ds
 
 ### Apple Pay / Google Pay — checkout (real) vs direct (mock token, real sandbox call)
 
-Drawer → Integration path → **Wallet integration**:
+Apple Pay / Google Pay inside Rapyd's toolkit iframe ("Wallet buttons" mode)
+or hosted page are unchanged: real calls, real sheet. The merchant's OWN
+wallet buttons are demoed for PCI-DSS merchants only — Drawer → Integration
+path → **Wallet integration** appears on **Own Card Fields** only:
 
-- **Checkout (real)** — Apple Pay / Google Pay inside Rapyd's toolkit iframe
-  ("Wallet buttons" mode) or hosted page, unchanged: real calls, real sheet.
+- **Off** — no merchant wallet buttons.
 - **Direct — encrypted (mock token)** — the merchant's own Apple Pay / Google Pay
-  buttons on its own checkout (Own Card Fields: above "Pay by card"; Checkout
-  Toolkit: in the order summary). The token the wallet sheet returns is
+  buttons above "Pay by card". The token the wallet sheet returns is
   forwarded unchanged in `payment_method.digital_wallet.details.token`; Rapyd
   decrypts it.
 - **Direct — decrypted (mock token)** — the merchant decrypts the token with its
   own keys and sends `details.decrypted_data` (DPAN + cryptogram + ECI) and
-  `details.brand_data`. The card is then on the merchant's servers, so it's
-  offered on **Own Card Fields only** (disabled with the reason on the toolkit).
+  `details.brand_data`. The card is then on the merchant's servers — PCI scope.
 
 Both direct variants are sandbox-only. The wallet side is simulated — no Apple
 or Google session; the click opens a neutral, OS-like wallet sheet marked
@@ -92,16 +92,20 @@ DPAN). That token then goes to Rapyd **for real**: `POST /v1/payments` through
 the backend, in the shape of Rapyd's samples (`capture: true`,
 `metadata.digital_wallet`). The Rapyd sandbox accepts mock wallet payloads and
 creates a genuine payment against its own test card, so the payment gets a
-ledger entry, a webhook watch, Rapyd's 3DS if it asks, and the normal success
-screen. Google Pay decrypted has an **authMethod** choice in the drawer
-(`CRYPTOGRAM_3DS` / `PAN_ONLY`); its `gatewayMerchantId` must be the
+ledger entry, a webhook watch and the normal success screen. No "6DS": the
+wallet's Face ID / Touch ID (or cryptogram) is the SCA, so every body sends
+`payment_method_options.3d_required: false` — except Google Pay **PAN_ONLY**
+(a card on file, no cryptogram), which sends `true` and goes through Rapyd's
+3DS. Payload shapes follow docs.rapyd.net's Digital Wallet pages (Google's
+`tokenizationData.token` as the JSON string Google returns, numeric expiry on
+Google decrypted, Apple `eciIndicator` "7"). Google Pay decrypted has an
+**authMethod** choice in the drawer (`CRYPTOGRAM_3DS` / `PAN_ONLY`); its `gatewayMerchantId` must be the
 merchant's Rapyd access key, which the browser never holds — the backend
 writes it in before signing. The engine room shows the whole sequence —
 Apple / Google / merchant steps as one-line boxes *outside Rapyd* with a link
 to Apple's / Google's own docs (merchant ID and certificates, merchant
 validation, the sheet, gateway vs DIRECT tokenization, token decryption), then
-`POST /v1/payments` in full (field guide, 3DS note, body with the wallet's data
-highlighted) and Rapyd's response (`js/direct-wallet.js` builds the payloads,
+`POST /v1/payments` in full (body with the wallet's data highlighted) and Rapyd's response (`js/direct-wallet.js` builds the payloads,
 `js/flows/direct-wallet.js` drives the page). The buttons use the wallet's name as text on a black button — no
 official Apple / Google artwork is embedded.
 
@@ -236,8 +240,8 @@ One drawer, toggled by the header button or the `` ` `` key (Esc closes):
 - **Customer** — which merchant skin is on screen.
 - **Integration path** — Own Card Fields / Checkout Toolkit, the toolkit's
   mode (full toolkit, wallet buttons, hosted page), the **Wallet integration**
-  (Checkout (real) / Direct — encrypted / Direct — decrypted, the direct ones
-  simulated), and **Show seam** with the path's seam explainer.
+  (Own Card Fields only: Off / Direct — encrypted / Direct — decrypted, mock
+  wallet tokens sent to the sandbox), and **Show seam** with the path's seam explainer.
 - **Account** — Sandbox / Live (live asks for its token first, see below), the
   sandbox credential picker over three MIDs (`SC1`–`SC3`, `js/profiles.js`) with
   their AFT / `network_reference_id` badges, the MID's 3DS provider (Rapyd vs
