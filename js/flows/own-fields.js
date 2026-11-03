@@ -73,7 +73,7 @@ import {
 } from './shared.js';
 import { signOut } from '../site/session.js';
 import { billingPeriod } from '../site/cart.js';
-import { ownsPanel as directOwnsPanel, paintPanels as paintDirectPanels } from './direct-wallet.js';
+import { ownsPanel as directOwnsPanel, paintPanels as paintDirectPanels, setDirectPurchaseSource } from './direct-wallet.js';
 import { repaintSite } from '../steps.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -158,6 +158,7 @@ const isDirectPurchase = () => {
   if (p.is_direct_purchase === false) return false;
   return isSubscription() ? true : directPurchase;
 };
+setDirectPurchaseSource(isDirectPurchase); // the wallet buttons on this page share the fork
 const showsDirectPurchase = (p) => p.aft && !isSubscription() && p.is_direct_purchase !== false;
 
 /* ── External 3DS (js/ext3ds.js) ─────────────────────────────
@@ -225,9 +226,12 @@ function displayBody() {
 
   // customer: token saves/charges always reference the session cus_***;
   // a token-less AFT carries the enriched customer INLINE instead — both
-  // documented shapes get demonstrated. A GUEST carries neither: no account
-  // is created, so nothing may reference or inline one.
-  if (usesCustomer()) {
+  // documented shapes get demonstrated. A GUEST references no account — but
+  // an AFT always needs its sender (Rapyd: MISSING_FIELDS CUSTOMER.DATE_OF_
+  // BIRTH without one), so a guest's AFT carries the sender inline too.
+  if (!usesCustomer()) {
+    if (aft) body.customer = customers.enrichedCustomerBody();
+  } else {
     // A token-less AFT with no customer yet carries the enriched customer
     // INLINE — the other documented shape, still worth demonstrating.
     const inlineAft = !cus && aft && !saveToken && !(returning && cred?.kind === 'token');

@@ -275,8 +275,12 @@ export function walletDetails(wallet, variant, opts = {}) {
     isn't allowed on this path — a decrypted body is never built off the PCI
     path, nor in live. `amount` / `currency` are Rapyd's (the price); `charge`
     is what the sheet showed the shopper (differs under FX) and feeds the
-    wallet's own data. `ewallet` / `descriptor` as on every other payment. */
-export function directPaymentBody({ wallet, variant, model, env = 'sandbox', amount, currency, charge = null, decimals = 2, description, reference, descriptor, ewallet, authMethod, now } = {}) {
+    wallet's own data. `ewallet` / `descriptor` as on every other payment.
+    `aft` — { is_direct_purchase, purpose_code, special_condition_indicator? }
+    for an AFT product: the same payment_method_options as the card checkout
+    (flows/own-fields.js displayBody), beside 3d_required. A wallet payment is
+    still an AFT when the product is one. */
+export function directPaymentBody({ wallet, variant, model, env = 'sandbox', amount, currency, charge = null, decimals = 2, description, reference, descriptor, ewallet, authMethod, aft = null, now } = {}) {
   if (!WALLETS[wallet]) throw new Error(`Unknown wallet: ${wallet}`);
   if (!isDirect(variant)) throw new Error(`Not a direct wallet variant: ${variant}`);
   const avail = walletAvailability(variant, { model, env });
@@ -298,6 +302,13 @@ export function directPaymentBody({ wallet, variant, model, env = 'sandbox', amo
   };
   // Rapyd's 3DS only where the wallet did no SCA of its own (see the header).
   body.payment_method_options = { '3d_required': needsRapyd3DS(wallet, variant, authMethod) };
+  if (aft) {
+    Object.assign(body.payment_method_options, {
+      aft: true, is_direct_purchase: aft.is_direct_purchase !== false, purpose_code: aft.purpose_code,
+    });
+    // Only where the pack sets one — forex's AFT carries none (packs.js).
+    if (aft.special_condition_indicator) body.payment_method_options.special_condition_indicator = aft.special_condition_indicator;
+  }
   if (ewallet) body.ewallet = ewallet;
   if (descriptor) body.statement_descriptor = descriptor;
   if (description) body.description = description;

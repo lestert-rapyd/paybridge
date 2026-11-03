@@ -887,6 +887,14 @@ test('direct wallet: decrypted bodies carry DPAN + cryptogram (+ ECI)', () => {
     eq(dwBody(w, v).payment_method_options, { '3d_required': false }, `${w}/${v}: the wallet's SCA stands`);
   }
   ok(!needsRapyd3DS('apple', 'decrypted', 'PAN_ONLY') && !needsRapyd3DS('google', 'encrypted', 'PAN_ONLY'), 'PAN_ONLY means Google decrypted only');
+  // AFT products stay AFT on a wallet payment — same options as the card checkout
+  const aftBody = (aft, extra = {}) => directPaymentBody({ wallet: 'apple', variant: 'encrypted', ...PCI, amount: '50', currency: 'USD', aft, ...extra });
+  eq(aftBody({ is_direct_purchase: true, purpose_code: 'crypto_currency', special_condition_indicator: 'crypto_currency_purchase' }).payment_method_options,
+    { '3d_required': false, aft: true, is_direct_purchase: true, purpose_code: 'crypto_currency', special_condition_indicator: 'crypto_currency_purchase' });
+  eq(aftBody({ is_direct_purchase: false, purpose_code: 'investment' }).payment_method_options,
+    { '3d_required': false, aft: true, is_direct_purchase: false, purpose_code: 'investment' }, 'no special_condition_indicator unless the pack sets one');
+  eq(aftBody({ is_direct_purchase: true, purpose_code: 'x' }, { wallet: 'google', variant: 'decrypted', authMethod: 'PAN_ONLY' }).payment_method_options['3d_required'], true, 'AFT keeps PAN_ONLY\'s 3DS');
+  ok(!('aft' in aftBody(null).payment_method_options), 'no AFT fields for a non-AFT product');
   // routing fields as on every other payment, only when given
   const routed = directPaymentBody({ wallet: 'apple', variant: 'encrypted', ...PCI, amount: '1', currency: 'USD', ewallet: 'ewallet_x', descriptor: 'RAPYD SHOP' });
   eq([routed.ewallet, routed.statement_descriptor], ['ewallet_x', 'RAPYD SHOP']);

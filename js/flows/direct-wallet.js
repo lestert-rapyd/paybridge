@@ -33,6 +33,9 @@ import { state } from '../state.js';
 import { VERTICALS, activeProduct, customerCharge, chargeText, fxSnapshot, orderItems } from '../verticals.js';
 import { createDirectPayment, newReference } from '../api.js';
 import { profileEwallet } from '../profiles.js';
+import { clientDetails } from '../client-details.js';
+import * as customers from '../customers.js';
+import { usesCustomer } from '../identity.js';
 import { setActiveTab, setStatus, esc } from '../ui.js';
 import { currencyDecimals } from '../sync.js';
 import { renderJSONView, highlightPaths } from '../json-view.js';
@@ -72,6 +75,12 @@ let repaintFlowPanels = () => {};
 export function setDirectWalletRepainter(fn) { repaintFlowPanels = fn; }
 /** While a run is up the engine room is the run's — the flows defer to it. */
 export const ownsPanel = () => !!run && run.phase !== 'cancelled';
+
+/* The AFT "buy now / fund the wallet" fork lives on the card checkout
+   (own-fields.js), which hands its reader over at load — the wallet buttons
+   sit on that same page, so the shopper's choice applies to both. */
+let directPurchase = () => true;
+export function setDirectPurchaseSource(fn) { directPurchase = fn; }
 
 export function resetDirectWallet() {
   run = null;
@@ -161,7 +170,19 @@ function buildBody(wallet, variant, p, charge) {
     descriptor: VERTICALS[state.vertical].descriptor,
     ewallet: profileEwallet(), // sandbox profile's collection wallet
     authMethod: googleAuthMethod(),
+    aft: p.aft ? { is_direct_purchase: directPurchase(), purpose_code: p.purpose_code, special_condition_indicator: p.special_condition_indicator } : null,
   });
+  // The rest of a customer-present card payment, as the card checkout sends
+  // it (own-fields.js displayBody): the customer — the session cus_***, or,
+  // for an AFT with none (a guest included — an AFT always needs its
+  // sender), the enriched sender inline — then CIT, and the 3DS-context
+  // address + client_details.
+  const cus = usesCustomer() ? customers.getCustomerId() : null;
+  if (cus) body.customer = cus;
+  else if (p.aft) body.customer = customers.enrichedCustomerBody();
+  body.initiation_type = 'customer_present';
+  body.address = customers.demoAddress();
+  body.client_details = clientDetails(); // ip_address injected server-side
   if (state.fx.enabled && state.fx.requestedCurrency) {
     body.requested_currency = state.fx.requestedCurrency;
     body.fixed_side = state.fx.fixedSide;
@@ -196,17 +217,20 @@ async function confirm() {
   const reference = state.reference;
   r.reference = reference;
   r.body.merchant_reference_id = reference;
+  const funded = p.aft && r.body.payment_method_options?.is_direct_purchase === false;
   state.lastPayment = {
     descriptor: v.descriptor, amount: charge.amount ?? p.amount, currency: charge.currency,
-    last4: SIM_LAST4, network: w.label, fx: fxSnapshot(),
-    initiation_type: 'customer_present', note: p.successNote || v.successNote,
+    last4: SIM_LAST4, network: w.label, fx: fxSnapshot(), customer_id: r.body.customer && typeof r.body.customer === 'string' ? r.body.customer : null,
+    initiation_type: 'customer_present', aft: !!p.aft, is_direct_purchase: p.aft ? !funded : null,
+    note: funded ? (p.fundedNote || p.successNote) : (p.successNote || v.successNote),
   };
   ledger.recordPayment(reference, {
     model: state.model, vertical: state.vertical, amount: p.amount, currency: p.currency,
     requested_currency: fx.enabled ? fx.requestedCurrency : null, fixed_side: fx.enabled ? fx.fixedSide : null,
     last4: SIM_LAST4, brand: w.label,
     origin: 'client', initiation_type: 'customer_present', profile: state.profile,
-    aft: !!p.aft, items: orderItems(p), customer_id: null,
+    aft: !!p.aft, items: orderItems(p),
+    customer_id: typeof r.body.customer === 'string' ? r.body.customer : null,
   });
 
   renderProcessing(`${w.label} approved`, 'Completing your payment…');
