@@ -291,6 +291,20 @@ export async function fetchCustomerWebhooks(customerId, { env } = {}) {
   };
 }
 
+/** GET /api/webhooks?card=card_… → the card's own events
+    (CUSTOMER_PAYMENT_METHOD_CREATED, CARD_ADDED_SUCCESSFULLY). They carry no
+    cus_*** and no merchant_reference_id, so the receiver files them under the
+    card_*** id — the add-card page asks once it knows the card. */
+export async function fetchCardWebhooks(cardId) {
+  if (!cardId) return { events: [], configured: null, ok: false };
+  const { ok, data } = await request('/api/webhooks', { query: { card: cardId } });
+  return {
+    events: ok && Array.isArray(data?.events) ? data.events : [],
+    configured: typeof data?.configured === 'boolean' ? data.configured : null,
+    ok,
+  };
+}
+
 /** GET /api/webhooks?refs=ref1,ref2,... → batched status for the back-office
     ledger poller. Chunked to the backend's 20-ref cap and merged, so a long
     session never has refs silently dropped. Returns { byRef, configured }. */

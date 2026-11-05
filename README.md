@@ -206,7 +206,14 @@ demo, and the live token, to someone else's server. If the backend sets
 
 Webhooks need the backend's KV store and `/api/webhook` registered with Rapyd
 for the MID in use; without them the Webhooks tab says so and the demo falls
-back to polling `GET /v1/payments/{id}`.
+back to polling `GET /v1/payments/{id}`. The receiver files each event under
+every id it carries — `merchant_reference_id`, the `cus_***` (`customer`, or
+`customer_token` on payments) and, for the card's own events, the `card_***` —
+so the **Add a card** page can stitch one run's events together: the $0-auth's
+`PAYMENT_*` by its reference and customer, `CUSTOMER_PAYMENT_METHOD_CREATED` /
+`CARD_ADDED_SUCCESSFULLY` by the card id the payment (or the add-card response)
+reveals. Only the receiver Rapyd actually posts to does this filing — register
+the deployment that runs the current `rapyd-backend` for the MID.
 
 ### Hosted checkout return pages
 

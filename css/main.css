@@ -824,6 +824,17 @@ details[open] > .beat-head > .beat-chev { transform: rotate(90deg); }
 .wh-expect { padding: 4px 10px; font-size: 10.5px; font-weight: 700; letter-spacing: .03em; border: 1px dashed var(--eng-line); border-radius: var(--r-sm); color: var(--eng-faint); }
 .wh-expect-note { margin-bottom: 14px; font-family: var(--font-ui); font-size: 12px; line-height: 1.55; color: var(--eng-faint); }
 .wh-expect-note code { color: var(--eng-muted); }
+.wh-expect.got { border-style: solid; border-color: color-mix(in srgb, var(--eng-ok) 45%, transparent); color: var(--eng-ok); }
+/* add-card: one run's events, stitched — each with what it says and the id that linked it */
+.wh-stitch { margin-bottom: 16px; }
+.wh-stitch-head { display: flex; align-items: flex-start; gap: 9px; margin-bottom: 6px; }
+.wh-stitch-head .wh-beat-n { margin-top: 1px; }
+.wh-stitch-note { font-family: var(--font-ui); font-size: 12px; line-height: 1.5; color: var(--eng-muted); }
+.wh-stitch-links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 8px 27px; }
+.wh-stitch-by { font-family: var(--font-ui); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--eng-faint); }
+.wh-link { padding: 2px 8px; border: 1px solid var(--eng-line); border-radius: var(--r-pill); font-family: var(--font-ui); font-size: 11px; color: var(--eng-muted); }
+.wh-link code { font-family: var(--font-mono); font-size: 10.5px; color: var(--syn-num); }
+.wh-stitch .wh-card { margin-bottom: 0; }
 .eng-pillrow { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .wh-pill { font-family: var(--font-mono); font-size: 10.5px; font-weight: 700; letter-spacing: .03em; padding: 3px 9px; border-radius: var(--r-sm); background: var(--eng-surface-2); color: var(--eng-muted); }
 .wh-pill.evt { color: var(--eng-text); }

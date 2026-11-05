@@ -39,7 +39,7 @@ import * as ledger from '../ledger.js';
 import * as customers from '../customers.js';
 import { identityMode, usesCustomer, refreshIdentityChooser } from '../identity.js';
 import { stepRailHTML } from '../steps.js';
-import { logConsole as logEvent, renderConsole, consoleHeartbeat, clearConsole, returnUrl, noteToolkitMode } from './toolkit-common.js';
+import { logConsole as logEvent, renderConsole, consoleHeartbeat, clearConsole, returnUrl, setToolkitModeSource } from './toolkit-common.js';
 import { thumbHTML } from '../site/chrome.js';
 import {
   accountPanelHTML, beatCardHTML, customerRequestCardHTML, customerResponseCardHTML,
@@ -399,10 +399,10 @@ export function renderPageHTML() {
     and set from the demo-controls drawer as well as the config panel here. */
 export const TOOLKIT_MODES = [['embedded', 'Full toolkit'], ['wallets', 'Wallet buttons'], ['hosted', 'Hosted page']];
 export function toolkitMode() { return mode; }
+setToolkitModeSource(toolkitMode); // the add-card page follows it (site/add-card.js)
 export function setToolkitMode(m) {
   if (!TOOLKIT_MODES.some(([v]) => v === m) || m === mode) return;
   mode = m;
-  noteToolkitMode(m); // the add-card page follows it (site/add-card.js)
   // Mirror into the config panel when it's on screen (pre-launch).
   document.querySelectorAll('.tkc-seg[data-opt="mode"] button[data-val]')
     .forEach((b) => b.classList.toggle('active', b.dataset.val === mode));
