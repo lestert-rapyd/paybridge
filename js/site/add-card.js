@@ -774,10 +774,13 @@ export const ADD_CARD_EVENTS = {
   CARD_ADDED_SUCCESSFULLY: 'The same card object as CUSTOMER_PAYMENT_METHOD_CREATED, now carrying data.payment_account_reference.',
   PAYMENT_UPDATED: 'The 3DS result landed on the payment — authentication data, with the cus_*** and the card_*** both recorded. This is the event that ties the card to the shopper.',
 };
-/** The events a route should produce, in the order they usually arrive. */
+/** The events a route should produce, in the order they usually arrive. The
+    hosted page (redirect or toolkit) verifies the card with the same
+    payment + 3DS as the $0-auth, so it fires the same four; only the
+    external-3DS route makes no Rapyd payment. */
 export function expectedAddCardEvents(method) {
-  if (method === 's2s-rapyd') return ['PAYMENT_SUCCEEDED', 'CUSTOMER_PAYMENT_METHOD_CREATED', 'CARD_ADDED_SUCCESSFULLY', 'PAYMENT_UPDATED'];
-  return ['CUSTOMER_PAYMENT_METHOD_CREATED', 'CARD_ADDED_SUCCESSFULLY'];
+  if (method === 's2s-external') return ['CUSTOMER_PAYMENT_METHOD_CREATED', 'CARD_ADDED_SUCCESSFULLY'];
+  return ['PAYMENT_SUCCEEDED', 'CUSTOMER_PAYMENT_METHOD_CREATED', 'CARD_ADDED_SUCCESSFULLY', 'PAYMENT_UPDATED'];
 }
 const LINK_LABEL = { ref: 'merchant_reference_id', customer: 'customer_token / customer', card: 'card id' };
 const WATCH_MS = 15 * 60000;   // the 3DS window
@@ -874,18 +877,16 @@ export function addCardWebhooksHTML() {
   let html = `${label}
     <div class="wh-status ${whLive ? 'live' : ''}"><span class="wh-status-dot"></span>${esc(status)}<span class="wh-ref">${esc(ids)}</span></div>
     <div class="wh-expect-row">${expected.map((t) => `<span class="wh-expect${got.has(t) ? ' got' : ''}">${got.has(t) ? '✓ ' : ''}${esc(t)}</span>`).join('')}</div>
-    <div class="wh-expect-note">${isHtp(run.method)
-    ? 'Rapyd’s page saves the card; when it checks the card with 3DS, that payment’s <code>PAYMENT_*</code> events arrive too.'
-    : run.method === 's2s-rapyd'
-      ? 'No single id links these: the payment carries the reference and the <code>cus_***</code>, the card events only their <code>card_***</code> — which <code>PAYMENT_UPDATED</code> reveals.'
-      : 'The card events carry only their <code>card_***</code> — the add-card response names it.'}</div>`;
+    <div class="wh-expect-note">${run.method === 's2s-external'
+    ? 'The card events carry only their <code>card_***</code> — the add-card response names it.'
+    : `No single id links these: the payment carries ${run.method === 's2s-rapyd' ? 'the reference and ' : ''}the <code>cus_***</code> (<code>customer_token</code>), the card events only their <code>card_***</code> — which <code>PAYMENT_UPDATED</code>${isHtp(run.method) ? ' or Rapyd’s page' : ''} reveals.`}</div>`;
   if (!whEvents.length) {
     return html + (whLive ? '<div class="wh-waiting">Waiting for Rapyd to POST the first event to <code>/api/webhook</code>…</div>'
       : `<div class="wh-note">Nothing delivered for this run. Rapyd sends these only for events registered for the MID (Client Portal → Developers → Webhooks).</div>`);
   }
   const missingCard = !whLive && ['CUSTOMER_PAYMENT_METHOD_CREATED', 'CARD_ADDED_SUCCESSFULLY'].some((t) => expected.includes(t) && !got.has(t));
   if (missingCard) {
-    html += `<div class="wh-note">The card events carry no <code>merchant_reference_id</code> and no <code>cus_***</code> — only their <code>card_***</code>. They show here only when the receiver Rapyd posts to files them by card id (rapyd-backend’s <code>/api/webhook</code> from 2026-11-05) and they’re registered for the MID.</div>`;
+    html += `<div class="wh-note">No card event arrived for <code>${esc(run.cardId || 'the card')}</code>. They carry only their <code>card_***</code>, and Rapyd sends them only when they’re registered for the MID (Client Portal → Developers → Webhooks).</div>`;
   }
   const last = whEvents.length - 1;
   return html + whEvents.map((e, i) => `
