@@ -60,6 +60,8 @@ import {
 import { WALLET_SEAMS, seamWalletLine } from '../js/seam.js';
 // AFT block shared by every customer-present path (js/flows/shared.js).
 import { aftOptions } from '../js/flows/shared.js';
+// Add a card (site/add-card.js): the route picker and the three request bodies.
+import { addCardMethod, htpBody, zeroAuthBody, externalAddBody, cardToolkitConfig } from '../js/site/add-card.js';
 
 // The Wallet's rules — pure (balance, limits, payout body); nothing here
 // records into the ledger (its poller would fetch).
@@ -961,6 +963,41 @@ test('aftOptions: every AFT payment carries the block, no exemptions', () => {
   eq(aftOptions({ aft: true, purpose_code: 'high_risk_securities' }), { aft: true, is_direct_purchase: true, purpose_code: 'high_risk_securities' }, 'no indicator unless the pack sets one');
   eq(aftOptions({ aft: false }), null);
   eq(aftOptions({}), null);
+});
+
+test('add a card: the route follows the integration path, the toolkit mode and the MID\'s 3DS', () => {
+  eq(addCardMethod({ model: 'toolkit', env: 'sandbox', profile: 'SC1', toolkitMode: 'hosted' }), 'htp-redirect');
+  eq(addCardMethod({ model: 'toolkit', env: 'sandbox', profile: 'SC1', toolkitMode: 'embedded' }), 'htp-toolkit');
+  eq(addCardMethod({ model: 'toolkit', env: 'live', toolkitMode: 'wallets' }), 'htp-toolkit');
+  eq(addCardMethod({ model: 'own-fields', env: 'sandbox', profile: 'SC1' }), 's2s-rapyd');
+  eq(addCardMethod({ model: 'own-fields', env: 'sandbox', profile: 'SC3' }), 's2s-rapyd');
+  eq(addCardMethod({ model: 'own-fields', env: 'sandbox', profile: 'SC2' }), 's2s-external', 'SC2 runs an external 3DS provider');
+  eq(addCardMethod({ model: 'own-fields', env: 'live', profile: 'SC2' }), 'htp-toolkit', 'no raw card in live');
+});
+
+test('add a card: HTP, $0-auth and external-3DS bodies', () => {
+  const urls = { complete: 'https://x.test/complete/?for=card', cancel: 'https://x.test/cancel/?for=card' };
+  const h = htpBody({ customer: 'cus_1', country: 'GB', recurrence_type: 'recurring', urls, now: 1767225600000 });
+  eq(h, {
+    customer: 'cus_1', country: 'GB', language: 'en', complete_url: urls.complete, cancel_url: urls.cancel,
+    complete_payment_url: urls.complete, error_payment_url: urls.cancel, page_expiration: 1767229200,
+    card_fields: { recurrence_type: 'recurring' },
+  });
+  const card = { number: '4111 1111 1111 1111', expiry: '12 / 27', cvv: '123', name: 'Jordan Taylor' };
+  const z = zeroAuthBody({ card, recurrence_type: 'unscheduled', customer: 'cus_1', currency: 'GBP', reference: 'pb_x', descriptor: 'RAPYD SHOP',
+    ewallet: 'ewallet_1', address: { country: 'GB' }, email: 'j@example.com', client: { language: 'en' }, urls });
+  eq([z.amount, z.capture, z.save_payment_method, z.initiation_type, z.customer, z.ewallet], [0, false, true, 'customer_present', 'cus_1', 'ewallet_1']);
+  eq(z.payment_method_options, { '3d_required': true }, '3DS is mandatory for card verification');
+  eq(z.payment_method.fields.number, '4111111111111111');
+  eq(z.payment_method.fields.recurrence_type, 'unscheduled');
+  ok(z.address && z.receipt_email && z.client_details, 'the 3DS context Rapyd asks for');
+  const tds = { '3d_version': '2.2.0', cavv: 'x', eci: '05', ds_trans_id: 'y' };
+  const e = externalAddBody({ card, recurrence_type: 'recurring', customer: 'cus_1', tds, urls });
+  eq(Object.keys(e), ['customer', 'type', 'fields', 'complete_payment_url', 'error_payment_url', 'payment_method_options']);
+  eq([e.type, e.fields.recurrence_type, e.payment_method_options], ['gb_visa_card', 'recurring', tds]);
+  ok(!('3d_required' in e.payment_method_options), 'no Rapyd 3DS alongside the merchant\'s results');
+  const c = cardToolkitConfig('hp_card_1', '#7437F5');
+  eq([c.id, c.page_type, c.wait_on_payment_redirect], ['hp_card_1', 'card_token', true]);
 });
 
 /* ── Wallet (site/wallet.js) ── */
