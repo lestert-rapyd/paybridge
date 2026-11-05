@@ -39,6 +39,7 @@ import * as ledger from '../ledger.js';
 import * as customers from '../customers.js';
 import { identityMode, usesCustomer, refreshIdentityChooser } from '../identity.js';
 import { stepRailHTML } from '../steps.js';
+import { logConsole as logEvent, renderConsole, consoleHeartbeat, clearConsole, returnUrl, noteToolkitMode } from './toolkit-common.js';
 import { thumbHTML } from '../site/chrome.js';
 import {
   accountPanelHTML, beatCardHTML, customerRequestCardHTML, customerResponseCardHTML,
@@ -70,8 +71,6 @@ const custom = {
   gp: { button_color: 'black', button_type: 'buy' },
 };
 const wallets = { apple_pay: true, google_pay: true }; // digital_wallets_include_methods
-let events = [];
-let lastHeartbeat = null;
 let listenersBound = false;
 let lastSession = null;
 let lastSessionStatus = 0;    // HTTP status of the POST /v1/checkout that produced lastSession
@@ -99,31 +98,6 @@ const AP_COLORS = ['black', 'white', 'white-outline'];
 const GP_COLORS = ['black', 'white'];
 
 const accent = () => custom.btnColor || VERTICALS[state.vertical].dot;
-
-/* Where the hosted page sends the customer afterwards. This site ships its
-   own complete/ and cancel/ pages; Rapyd requires https, so:
-     1. served over https → this deployment's own pages;
-     2. else (http://localhost, file://) → the https deployment named in
-        <meta name="paybridge-public-url" content="https://…/"> (index.html);
-     3. else the legacy fixed URL, only so the call still validates — NOTE
-        rapydtoolkit.com currently 404s (Vercel DEPLOYMENT_NOT_FOUND); set the
-        meta tag to fix local runs. */
-const LEGACY_RETURN_ORIGIN = 'https://rapydtoolkit.com/';
-function publicUrl() {
-  try {
-    const v = document.querySelector('meta[name="paybridge-public-url"]')?.getAttribute('content')?.trim();
-    if (v && new URL(v).protocol === 'https:') return v.endsWith('/') ? v : `${v}/`;
-  } catch { /* malformed — ignore */ }
-  return null;
-}
-function returnUrl(page) {
-  try {
-    if (typeof location !== 'undefined' && location.protocol === 'https:') return new URL(`${page}/`, location.href).href;
-    const pub = publicUrl();
-    if (pub) return new URL(`${page}/`, pub).href;
-  } catch { /* fall through */ }
-  return `${LEGACY_RETURN_ORIGIN}${page}`;
-}
 
 /* The toolkit script, per environment. Its iframe is the only window the
    custom pay button's postMessage may reach — never '*'. */
@@ -428,6 +402,7 @@ export function toolkitMode() { return mode; }
 export function setToolkitMode(m) {
   if (!TOOLKIT_MODES.some(([v]) => v === m) || m === mode) return;
   mode = m;
+  noteToolkitMode(m); // the add-card page follows it (site/add-card.js)
   // Mirror into the config panel when it's on screen (pre-launch).
   document.querySelectorAll('.tkc-seg[data-opt="mode"] button[data-val]')
     .forEach((b) => b.classList.toggle('active', b.dataset.val === mode));
@@ -553,33 +528,6 @@ export function refreshProfile() {
 
 // Terminal-style log, tagged like a real dev console: HH:MM:SS  tag  message.
 // Messages carry server / toolkit-event text (error messages, ids) — escaped.
-const fmtTime = (d) => d.toLocaleTimeString('en-GB', { hour12: false });
-function logLineHTML(e) {
-  return `
-    <div class="cl-line">
-      <span class="cl-time">${fmtTime(e.at)}</span>
-      <span class="cl-tag cl-${esc(e.tag)}">${esc(e.tag)}</span>
-      <span class="cl-msg${e.kind ? ` cl-${esc(e.kind)}` : ''}">${esc(e.name)}${e.detail ? ` <span class="cl-detail">${esc(e.detail)}</span>` : ''}</span>
-    </div>`;
-}
-
-function renderConsole() {
-  const el = $('#panel-console');
-  if (!el) return;
-  if (!events.length && !lastHeartbeat) {
-    el.innerHTML = `<div class="eng-empty"><div class="ee-ico">▸</div><div class="ee-text">Toolkit lifecycle events stream here once the toolkit renders.</div></div>`;
-    return;
-  }
-  const lines = events.map(logLineHTML).join('');
-  const heartbeat = lastHeartbeat ? logLineHTML({ name: 'heartbeat', tag: 'poll', at: lastHeartbeat }) : '';
-  el.innerHTML = `<div class="tk-console">${lines}${heartbeat}<span class="cl-cursor">▏</span></div>`;
-}
-
-function logEvent(name, detail = '', tag = 'tk', kind = '') {
-  events.push({ name, detail, tag, kind, at: new Date() });
-  renderConsole();
-}
-
 /* ── Terminal (trusted webhook or Retrieve) → left screen ─────
    shared.js terminalHandler(): webhooks.js only fires it with a TRUSTED event
    (never PAYMENT_SUCCEEDED, never an unverified webhook). The HCP saved the
@@ -625,6 +573,7 @@ function listenForReturn() {
   try {
     returnChannel = new BroadcastChannel(RETURN_CHANNEL);
     returnChannel.onmessage = (e) => {
+      if (e.data?.for === 'card') return; // the hosted tokenisation page's return (site/add-card.js)
       const page = e.data?.page;
       if (page === 'complete' || page === 'cancel') hostedReturn(page, 'return page');
     };
@@ -744,7 +693,8 @@ function loadToolkitScript(env) {
 function bindToolkitEvents() {
   if (listenersBound) return;
   listenersBound = true;
-  window.addEventListener('onLoading', e => logEvent('onLoading', `loading: ${e.detail?.loading}`, 'tk'));
+  // onLoading is shared with the card-token toolkit — site/add-card.js logs its own.
+  window.addEventListener('onLoading', e => { if (state.step === 'checkout') logEvent('onLoading', `loading: ${e.detail?.loading}`, 'tk'); });
   window.addEventListener('onCheckoutPaymentPending', e => {
     if (e.detail?.id) { setWatchPaymentId(e.detail.id); ledger.setPaymentId(state.reference, e.detail.id); }
     document.getElementById('tk-own-pay')?.remove(); // payment sent for authorisation
@@ -847,8 +797,7 @@ async function launch() {
   btn.dataset.busy = '1'; // a double click must not create a second session
   btn.textContent = 'Creating session…';
   setStatus('Creating session…', 'processing');
-  events = [];
-  lastHeartbeat = null;
+  clearConsole();
   lastSession = null;
   lastSessionStatus = 0;
   lastExpress = null;
@@ -943,7 +892,7 @@ async function launch() {
   }
 
   logEvent('POST /v1/checkout', `${id} · ${httpStatus}`, 'api', 'ok');
-  startWebhookWatch({ reference, onTerminal: onTerminalFor(reference), onPoll: () => { lastHeartbeat = new Date(); renderConsole(); } });
+  startWebhookWatch({ reference, onTerminal: onTerminalFor(reference), onPoll: consoleHeartbeat });
 
   // Only #tk-area is replaced below, so the summary column survives the
   // launch — including its profile row. Refresh it, or the row painted before
@@ -1069,7 +1018,7 @@ async function expressCharge(cred) {
     logEvent('POST /v1/payments', `${httpLabel(httpStatus)} — outcome unknown, confirming via webhook / Retrieve Payment`, 'api', 'err');
     renderProcessing('Confirming payment…', 'We didn’t hear back in time — checking whether your payment went through. Please don’t pay again.');
     ledger.updateStatus(reference, { phase: 'unconfirmed' });
-    startWebhookWatch({ reference, onTerminal: onTerminalFor(reference), onPoll: () => { lastHeartbeat = new Date(); renderConsole(); } });
+    startWebhookWatch({ reference, onTerminal: onTerminalFor(reference), onPoll: consoleHeartbeat });
     return;
   }
   // api.js never throws — httpStatus 0 + NETWORK_ERROR is the transport failure.
@@ -1091,7 +1040,7 @@ async function expressCharge(cred) {
     renderProcessing('Payment received', 'Just a moment while we confirm your payment…');
     ledger.updateStatus(reference, { phase: 'awaiting_confirmation' });
   }
-  startWebhookWatch({ reference, payment_id: d.id, onTerminal: onTerminalFor(reference), onPoll: () => { lastHeartbeat = new Date(); renderConsole(); } });
+  startWebhookWatch({ reference, payment_id: d.id, onTerminal: onTerminalFor(reference), onPoll: consoleHeartbeat });
 }
 
 /* ── Mount ───────────────────────────────────────────────── */
@@ -1100,8 +1049,7 @@ export function mount() {
   if (!panel) return;
   hosted = null; // a fresh checkout page — no redirect in flight
   renderRequest();
-  events = [];
-  lastHeartbeat = null;
+  clearConsole();
   lastSession = null;
   lastSessionStatus = 0;
   logEvent(`${state.env} session started`, '', 'sys');

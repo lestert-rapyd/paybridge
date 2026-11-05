@@ -304,6 +304,25 @@
 .screen-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; width: 100%; margin-top: 24px; }
 .screen-actions .co-cta, .screen-actions .cs-secondary { margin-top: 0; height: 50px; }
 
+/* ── Add a card (site/add-card.js) ───────────────────────── */
+.pm-add-more { margin-top: 14px; }
+.ac-use { margin: 4px 0 18px; }
+.ac-use-label { font-size: 13px; font-weight: 500; color: var(--site-text, var(--text)); }
+.ac-use .cof-dp { margin-top: 8px; }
+.ac-form { margin-bottom: 6px; }
+.ac-form-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--site-muted, var(--muted)); }
+.ac-form .co-field:first-of-type label { margin-top: 10px; }
+.co-input input#ac-name { font-family: inherit; }
+.ac-intro { padding: 16px 18px; border: 1px solid var(--site-line, var(--line)); border-radius: var(--r-lg); background: var(--site-soft, var(--soft)); }
+.ac-intro-t { font-size: 14.5px; font-weight: 600; color: var(--site-ink, var(--ink)); }
+.ac-intro p { margin: 6px 0 0; font-size: 13.5px; line-height: 1.55; color: var(--site-muted, var(--muted)); }
+.ac-note { margin: 14px 0 0; font-size: 13px; color: var(--site-muted, var(--muted)); }
+.site-main .screen.ac-result { gap: 0; padding: 48px 0 32px; }
+.ac-result-badge { display: grid; place-items: center; width: 56px; height: 56px; margin-bottom: 22px; border-radius: 50%; font-size: 26px; font-weight: 700; color: #fff; }
+.ac-result-badge.ok { background: var(--ok, #1f9d55); }
+.ac-result-badge.bad { background: var(--err, #d92d20); }
+.ac-result .screen-actions { max-width: 380px; margin-top: 28px; }
+
 /* Processing — a quiet waypoint between Pay and the result: generous air,
    one accent (the spinner's arc), the amount in a soft card. */
 .site-main .screen.proc { gap: 0; padding: 56px 0 40px; }

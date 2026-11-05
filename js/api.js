@@ -174,6 +174,20 @@ export function createCustomer(body, opts = {}) {
   return post('/api/create-customer', body, opts);
 }
 
+/** POST /api/create-card-token-page → Rapyd POST /v1/hosted/collect/card —
+    the Hosted Tokenisation Page (add a card, no card data at the merchant). */
+export function createCardTokenPage(body, opts = {}) {
+  return post('/api/create-card-token-page', body, opts);
+}
+
+/** POST /api/add-customer-payment-method → Rapyd POST
+    /v1/customers/{customer}/payment_methods — add a card with the merchant's
+    own (external) 3DS results. `body.customer` names the cus_***; the backend
+    takes it out of the body and into the path. Sandbox only. */
+export function addCustomerPaymentMethod(body, opts = {}) {
+  return post('/api/add-customer-payment-method', body, opts);
+}
+
 /** GET /api/retrieve-customer?id=cus_xxx&env=…&profile=… → Rapyd GET
     /v1/customers/{id}. The back office's customer view reads the object back
     from Rapyd (payment_methods, created_at) rather than narrating local state.

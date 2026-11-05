@@ -143,10 +143,12 @@ export function methodsPageHTML() {
         <button type="button" class="site-link-btn accent pm-refresh" id="pm-refresh" ${syncing ? 'disabled' : ''}><i class="icon-refresh"></i>${syncing ? 'Refreshing…' : 'Refresh'}</button>
       </div>
       ${creds.length
-        ? `<div class="ord-list">${creds.map(methodRowHTML).join('')}</div>`
+        ? `<div class="ord-list">${creds.map(methodRowHTML).join('')}</div>
+           <button type="button" class="site-link-btn accent pm-add-more" data-nav="add-card">+ Add a card</button>`
         : `<div class="site-empty">
              <img src="assets/no-results.svg" alt="" />
-             <div>Save a card at checkout to pay faster next time — subscriptions save theirs automatically.</div>
+             <div>Add a card now to pay faster next time — or save one at checkout. Subscriptions save theirs automatically.</div>
+             <button type="button" class="co-cta site-cta compact" data-nav="add-card">Add a card</button>
            </div>`}
     </main>`;
 }

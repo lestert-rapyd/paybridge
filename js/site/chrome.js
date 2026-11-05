@@ -23,7 +23,7 @@ import { cartCount, billingPeriod } from './cart.js';
 import { isSignedIn } from './session.js';
 
 /* Which nav item a page lights up. */
-const NAV_OF = { shop: 'shop', product: 'shop', bag: 'shop', checkout: 'shop', orders: 'orders', methods: 'methods', wallet: 'wallet' };
+const NAV_OF = { shop: 'shop', product: 'shop', bag: 'shop', checkout: 'shop', orders: 'orders', methods: 'methods', 'add-card': 'methods', wallet: 'wallet' };
 
 /** "rapyd.shop" → rapyd + accented ".shop"; a name without a dot is one word.
     Both halves are escaped text. */

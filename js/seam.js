@@ -99,6 +99,8 @@ export const SEAM_LABELS = {
   wallets: 'Rapyd · wallet buttons iframe',
   tds: 'Rapyd · 3-D Secure (redirect_url)',
   hosted: 'Rapyd · hosted checkout page',
+  cardToken: 'Rapyd · card-token toolkit iframe',
+  hostedCard: 'Rapyd · hosted tokenisation page',
 };
 
 /* ── External 3DS on the seam ────────────────────────────────
@@ -197,7 +199,7 @@ export function hostedAddress(redirectUrl, env = 'sandbox') {
 /* A plausible path per site page (display only — the site is one SPA). */
 const PAGE_PATHS = {
   'account-q': '/signin', account: '/register', shop: '/', product: '/product', bag: '/bag',
-  checkout: '/checkout', orders: '/account/orders', methods: '/account/payment-methods', wallet: '/account/wallet',
+  checkout: '/checkout', orders: '/account/orders', methods: '/account/payment-methods', 'add-card': '/account/payment-methods/new', wallet: '/account/wallet',
   complete: '/checkout/complete', cancel: '/checkout/cancel',
 };
 export const pagePath = (page) => PAGE_PATHS[page] ?? '/';

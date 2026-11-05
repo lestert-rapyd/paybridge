@@ -17,6 +17,11 @@
      checkout  · the cart (owned by app.js/flow)      → POST /v1/payments …
      orders    · the shopper's orders (ledger.js)     → no call
      methods   · saved cards (customers.js)           → GET …/payment_methods
+     add-card  · add a card (site/add-card.js)        → POST /v1/hosted/collect/card
+                 — route follows the drawer's path       (+ toolkit / redirect), or
+                                                          POST /v1/payments ($0-auth,
+                                                          Rapyd 3DS), or POST …/
+                                                          payment_methods (external 3DS)
      wallet    · balance, deposit, withdraw            → deposit: the checkout's
                  (packs with a `wallet` rule only)        POST /v1/payments …;
                                                           withdraw: GET payout
@@ -65,6 +70,11 @@ import {
   signInWithCustomerId, lookupStatus, lookupRequestCardHTML, lookupResponseCardHTML, fillLookupSignature,
 } from './site/lookup.js';
 import { clearPendingDeposit } from './site/wallet.js';
+import {
+  addCardPageHTML, addCardRequestCardsHTML, fillAddCardSignatures, addCardResponseCardsHTML, addCardWebhooksHTML,
+  setAddCardHooks, enterAddCard, resetAddCard, startAddCard, setAddCardUse, setAddCardField, fillAddCardTestCard,
+  retryAddCard, returnFromRapyd, reopenAddCardPage,
+} from './site/add-card.js';
 import { repaintWebhooks, setExtraWebhookSection } from './webhooks.js';
 import {
   walletPageHTML, refreshWalletRegions, setWalletTab, setWalletAmount, pickWalletChip, pickWalletDest,
@@ -74,9 +84,9 @@ import {
 
 const $ = (s, r = document) => r.querySelector(s);
 
-export const STEPS = ['account-q', 'account', 'shop', 'product', 'bag', 'checkout', 'orders', 'methods', 'wallet'];
+export const STEPS = ['account-q', 'account', 'shop', 'product', 'bag', 'checkout', 'orders', 'methods', 'add-card', 'wallet'];
 /* Pages that need a signed-in shopper; anyone else lands on sign-in. */
-const MEMBERS_ONLY = new Set(['orders', 'methods', 'wallet']);
+const MEMBERS_ONLY = new Set(['orders', 'methods', 'add-card', 'wallet']);
 
 /* Whether the sign-in page has actually been answered — state.identityMode
    defaults to 'guest', which would otherwise render as a choice the SE never
@@ -118,6 +128,7 @@ export function goStep(step) {
   const same = step === state.step;
   state.step = step;   // direct mutation — a page change is not a flow reset
   if (step === 'methods' && !same) syncMethods();
+  if (step === 'add-card' && !same) enterAddCard();
   repaintClient();
 }
 
@@ -156,6 +167,7 @@ export function resetSteps() {
   // A real reset (skin / path / env) forgets the last withdrawal's beats; a
   // result screen's "Back to wallet" keeps them (a landing was requested).
   if (!landed) resetWalletPage();
+  resetAddCard(); // a reset changes path / env / MID — the route the page follows
   state.step = next;
 }
 
@@ -264,6 +276,7 @@ export function frameHTML() {
     case 'bag':      return bagPageHTML();
     case 'orders':   return ordersPageHTML();
     case 'methods':  return methodsPageHTML();
+    case 'add-card': return addCardPageHTML();
     case 'wallet':   return walletPageHTML();
     default:         return accountQPageHTML();
   }
@@ -337,6 +350,7 @@ export function renderStepPanels() {
   }
 
   if (state.step === 'wallet') { paintWalletPanels(); return; }
+  if (state.step === 'add-card') { paintAddCardPanels(); return; }
 
   // shop / product / bag / orders — browsing calls nothing; earlier beats stay inspectable.
   req.innerHTML = customerRequestCardHTML() || emptyRequestHTML();
@@ -356,7 +370,20 @@ function paintWalletPanels() {
   if (res && resCards) res.innerHTML = resCards;
   repaintWebhooks(); // webhooks.js stays the one writer — the payout section is registered below
 }
-setExtraWebhookSection(() => (state.step === 'wallet' ? walletWebhooksHTML() : ''));
+
+/* The add-card page: its beats own Request; Response and Webhooks once the
+   first call has answered (before that they keep the last real call's). */
+function paintAddCardPanels() {
+  const req = $('#panel-request');
+  const res = $('#panel-response');
+  req.innerHTML = addCardRequestCardsHTML() || emptyRequestHTML();
+  fillAddCardSignatures();
+  const resCards = addCardResponseCardsHTML();
+  if (res && resCards) res.innerHTML = resCards;
+  repaintWebhooks();
+}
+setAddCardHooks({ page: () => repaintClient(), panels: () => paintAddCardPanels() });
+setExtraWebhookSection(() => (state.step === 'wallet' ? walletWebhooksHTML() : state.step === 'add-card' ? addCardWebhooksHTML() : ''));
 
 /* The Request tab's own resting state, matching app.js's other empty panels. */
 function emptyRequestHTML() {
@@ -473,6 +500,15 @@ document.addEventListener('click', (e) => {
     return;
   }
 
+  // Add a card.
+  const acUse = t.closest('[data-ac-use]');
+  if (acUse) { setAddCardUse(acUse.dataset.acUse); repaintClient(); return; }
+  if (t.closest('#ac-test')) { fillAddCardTestCard(); repaintClient(); return; }
+  if (t.closest('#ac-go')) { startAddCard(); return; }
+  if (t.closest('#ac-retry')) { retryAddCard(); repaintClient(); return; }
+  if (t.closest('#ac-reopen')) { reopenAddCardPage(); return; }
+  if (t.closest('#ac-back')) { returnFromRapyd('cancel', 'back link'); return; }
+
   // Wallet.
   const wtab = t.closest('[data-wal-tab]');
   if (wtab) { setWalletTab(wtab.dataset.walTab); repaintClient(); return; }
@@ -524,11 +560,17 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
   if (e.target.id === 'site-cusid') { $('#site-cusid-go')?.click(); return; }
   if (e.target.id === 'wal-amount') { ($('#wal-deposit') || $('#wal-withdraw'))?.click(); return; }
+  if (/^ac-/.test(e.target.id || '')) { $('#ac-go')?.click(); return; }
   if (!e.target.closest?.('#checkout .site-form')) return;
   $('#site-signin')?.click();
 });
 document.addEventListener('input', (e) => {
   if (e.target.id === 'site-cusid') cusIdDraft = e.target.value;
+  if (/^ac-(number|expiry|cvv|name)$/.test(e.target.id || '')) {
+    const v = setAddCardField(e.target.id, e.target.value);
+    if (v != null && v !== e.target.value) e.target.value = v; // formatted in place
+    if (state.leftView === 'client') paintAddCardPanels(); // the prepared body follows the form
+  }
   if (e.target.id === 'wal-amount') {
     setWalletAmount(e.target.value);
     // only the regions that follow the amount — the input keeps its caret

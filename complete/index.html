@@ -46,7 +46,14 @@
        the same channel): its browser frame then shows the merchant's own
        complete page. Same-origin only; it moves the frame, never marks a payment. -->
   <script>
-    try { new BroadcastChannel('rapyd-demo-hosted').postMessage({ page: 'complete' }); } catch (e) { /* unsupported — the demo follows the webhook */ }
+    // ?for=card — the hosted tokenisation page (add a card), not a checkout.
+    var forCard = /[?&]for=card\b/.test(location.search);
+    if (forCard) {
+      document.title = 'Card saved · Rapyd Demo';
+      document.querySelector('h1').textContent = 'Card saved';
+      document.querySelector('main p').textContent = 'Your card is saved. You can close this tab — the demo is checking your saved cards.';
+    }
+    try { new BroadcastChannel('rapyd-demo-hosted').postMessage(forCard ? { page: 'complete', for: 'card' } : { page: 'complete' }); } catch (e) { /* unsupported — the demo follows the webhook */ }
   </script>
 </body>
 </html>
