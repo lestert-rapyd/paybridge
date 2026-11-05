@@ -1023,7 +1023,9 @@ test('add a card: webhooks are stitched across ref / customer / card scopes', ()
   eq(out[1].via, ['card'], 'a card event links only by its card id');
   eq(stitchEvents({ customer: [{ type: 'X', received_at: 7 }, { type: 'X', received_at: 7 }] }).length, 1, 'no event id → type + time');
   eq(expectedAddCardEvents('s2s-rapyd'), ['PAYMENT_SUCCEEDED', 'CUSTOMER_PAYMENT_METHOD_CREATED', 'CARD_ADDED_SUCCESSFULLY', 'PAYMENT_UPDATED']);
-  eq(expectedAddCardEvents('htp-toolkit'), ['CUSTOMER_PAYMENT_METHOD_CREATED', 'CARD_ADDED_SUCCESSFULLY']);
+  eq(expectedAddCardEvents('htp-toolkit'), expectedAddCardEvents('s2s-rapyd'), 'the hosted page verifies the card the same way');
+  eq(expectedAddCardEvents('htp-redirect'), expectedAddCardEvents('s2s-rapyd'));
+  eq(expectedAddCardEvents('s2s-external'), ['CUSTOMER_PAYMENT_METHOD_CREATED', 'CARD_ADDED_SUCCESSFULLY'], 'no Rapyd payment');
   ok(expectedAddCardEvents('s2s-rapyd').every((t) => ADD_CARD_EVENTS[t]), 'every expected event is explained');
 });
 
