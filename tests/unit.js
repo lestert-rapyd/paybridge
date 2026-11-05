@@ -61,7 +61,9 @@ import { WALLET_SEAMS, seamWalletLine } from '../js/seam.js';
 // AFT block shared by every customer-present path (js/flows/shared.js).
 import { aftOptions } from '../js/flows/shared.js';
 // Add a card (site/add-card.js): the route picker and the three request bodies.
-import { addCardMethod, htpBody, zeroAuthBody, externalAddBody, cardToolkitConfig } from '../js/site/add-card.js';
+import { addCardMethod, htpBody, zeroAuthBody, externalAddBody, cardToolkitConfig, stitchEvents, expectedAddCardEvents, ADD_CARD_EVENTS } from '../js/site/add-card.js';
+import { sharedToolkitMode } from '../js/flows/toolkit-common.js';
+import { toolkitMode, setToolkitMode } from '../js/flows/toolkit.js';
 
 // The Wallet's rules — pure (balance, limits, payout body); nothing here
 // records into the ledger (its poller would fetch).
@@ -998,6 +1000,31 @@ test('add a card: HTP, $0-auth and external-3DS bodies', () => {
   ok(!('3d_required' in e.payment_method_options), 'no Rapyd 3DS alongside the merchant\'s results');
   const c = cardToolkitConfig('hp_card_1', '#7437F5');
   eq([c.id, c.page_type, c.wait_on_payment_redirect], ['hp_card_1', 'card_token', true]);
+});
+
+test('add a card: follows the LIVE toolkit mode, wherever it was changed', () => {
+  const before = toolkitMode();
+  setToolkitMode('hosted');
+  eq(sharedToolkitMode(), 'hosted');
+  setToolkitMode('wallets');
+  eq(sharedToolkitMode(), 'wallets');
+  setToolkitMode(before);
+  eq(sharedToolkitMode(), before);
+});
+
+test('add a card: webhooks are stitched across ref / customer / card scopes', () => {
+  const ps = { event_id: 'wh_ps', type: 'PAYMENT_SUCCEEDED', received_at: 1000 };
+  const cpmc = { event_id: 'wh_c', type: 'CUSTOMER_PAYMENT_METHOD_CREATED', received_at: 2000 };
+  const pu = { event_id: 'wh_pu', type: 'PAYMENT_UPDATED', received_at: 4000 };
+  const old = { event_id: 'wh_old', type: 'PAYMENT_SUCCEEDED', received_at: 10 };
+  const out = stitchEvents({ ref: [pu, ps], customer: [pu, ps, old], card: [cpmc] }, 500);
+  eq(out.map((e) => e.event_id), ['wh_ps', 'wh_c', 'wh_pu'], 'deduped, oldest first, earlier runs dropped');
+  eq(out[0].via, ['ref', 'customer']);
+  eq(out[1].via, ['card'], 'a card event links only by its card id');
+  eq(stitchEvents({ customer: [{ type: 'X', received_at: 7 }, { type: 'X', received_at: 7 }] }).length, 1, 'no event id → type + time');
+  eq(expectedAddCardEvents('s2s-rapyd'), ['PAYMENT_SUCCEEDED', 'CUSTOMER_PAYMENT_METHOD_CREATED', 'CARD_ADDED_SUCCESSFULLY', 'PAYMENT_UPDATED']);
+  eq(expectedAddCardEvents('htp-toolkit'), ['CUSTOMER_PAYMENT_METHOD_CREATED', 'CARD_ADDED_SUCCESSFULLY']);
+  ok(expectedAddCardEvents('s2s-rapyd').every((t) => ADD_CARD_EVENTS[t]), 'every expected event is explained');
 });
 
 /* ── Wallet (site/wallet.js) ── */

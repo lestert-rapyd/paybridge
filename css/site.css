@@ -322,6 +322,13 @@
 .ac-result-badge.ok { background: var(--ok, #1f9d55); }
 .ac-result-badge.bad { background: var(--err, #d92d20); }
 .ac-result .screen-actions { max-width: 380px; margin-top: 28px; }
+/* The card-token toolkit. Rapyd's iframe sets min-width 500px / min-height
+   700px inline, so the column widens to hold it (480px would push it past
+   the seam outline) and the iframe fills it — the dashed seam then wraps
+   exactly Rapyd's surface. Narrow frames: the iframe yields to 100%. */
+.site-narrow.ac-tk { max-width: 580px; } /* 30px padding each side + Rapyd’s 500px + the outline */
+#rapyd-toolkit { min-height: 160px; }
+#rapyd-toolkit iframe { display: block; width: 100% !important; min-width: min(500px, 100%) !important; max-width: 100%; border: 0; }
 
 /* Processing — a quiet waypoint between Pay and the result: generous air,
    one accent (the spinner's arc), the amount in a soft card. */

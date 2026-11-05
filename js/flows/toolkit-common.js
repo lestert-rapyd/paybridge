@@ -51,12 +51,13 @@ export function consoleHeartbeat() { lastHeartbeat = new Date(); renderConsole()
 export function clearConsole() { events = []; lastHeartbeat = null; }
 
 /* ── The toolkit mode (drawer → Integration path → Toolkit mode) ──
-   flows/toolkit.js owns the control and notes every change here, so the
-   add-card page can follow it (hosted page → full redirect, else the
+   flows/toolkit.js owns the setting — the drawer AND the checkout's own
+   config panel change it — and registers a reader here, so the add-card
+   page always sees the live value (hosted page → full redirect, else the
    card-token toolkit) without importing the checkout flow. */
-let tkMode = 'embedded';
-export const sharedToolkitMode = () => tkMode;
-export function noteToolkitMode(m) { tkMode = m; }
+let readMode = () => 'embedded';
+export const sharedToolkitMode = () => readMode();
+export function setToolkitModeSource(fn) { if (typeof fn === 'function') readMode = fn; }
 
 /* ── Return URLs ─────────────────────────────────────────────
    Where a hosted page sends the customer afterwards. This site ships its
