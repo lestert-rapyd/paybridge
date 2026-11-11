@@ -33,6 +33,7 @@
      · One idempotency key per logical refund/charge (see the Actions block).
    ───────────────────────────────────────────────────────────── */
 
+import { resolveTag, httpCtx } from '../tags/resolve.js';
 import { state } from '../state.js';
 import { VERTICALS } from '../verticals.js';
 import {
@@ -659,7 +660,7 @@ function paintResponse(data, ok, label, httpStatus = null, owner = actionSeq) {
   if (!el || state.leftView !== 'backoffice') return;
   responseOwner = owner;
   const kind = httpStatus == null ? 'pending' : ok ? 'success' : 'failure';
-  const code = httpStatus == null ? 'HTTP …' : httpStatus ? `HTTP ${esc(httpStatus)}` : 'NO RESPONSE';
+  const code = httpStatus == null ? 'HTTP …' : esc(resolveTag('http.status', httpCtx(httpStatus)).label);
   el.innerHTML = `
     <div class="eng-pillrow">
       <span class="wh-pill ${kind}">${code}</span>

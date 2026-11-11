@@ -23,6 +23,7 @@
    Markup + the sync beat's record; js/steps.js routes, wires and paints.
    ───────────────────────────────────────────────────────────── */
 
+import { beatBadge, httpPillHTML } from '../tags/resolve.js';
 import { state } from '../state.js';
 import { VERTICALS } from '../verticals.js';
 import * as customers from '../customers.js';
@@ -192,8 +193,7 @@ export function methodsRequestCardHTML() {
   const ok = sync.status === 'done' && sync.httpStatus >= 200 && sync.httpStatus < 400 && !sync.data?.error;
   return beatCardHTML({
     id: 'beat-pm-list', method: 'GET', path: methodsPath(sync.cus), // text — beatCardHTML escapes
-    badge: sync.status === 'sending' ? 'sending…' : ok ? 'signed & sent' : 'failed',
-    badgeKind: sync.status === 'sending' ? 'live' : ok ? 'ok' : 'err',
+    ...beatBadge(sync.status === 'sending' ? 'request.sending' : ok ? 'request.sent' : 'request.failed'),
     inner: `
       ${headersHTML(sync.salt)}
       <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">a GET carries none</span></div>`,
@@ -210,12 +210,11 @@ export function fillMethodsSignature() {
 export function methodsResponseCardHTML() {
   if (sync.status !== 'done' || sync.key !== customers.bucketKey()) return '';
   const ok = sync.httpStatus >= 200 && sync.httpStatus < 400 && !sync.data?.error;
-  const code = sync.httpStatus ? `HTTP ${esc(sync.httpStatus)}` : 'NO RESPONSE';
   return beatCardHTML({
     id: 'beat-pm-list-res', method: 'GET', path: methodsPath(sync.cus),
-    badge: ok ? 'saved cards' : String(sync.data?.error || 'failed'), badgeKind: ok ? 'ok' : 'err',
+    ...(ok ? beatBadge('customer.saved_cards') : beatBadge('response.error', { error: String(sync.data?.error || 'failed') })),
     inner: `
-      <div class="eng-pillrow"><span class="wh-pill ${ok ? 'success' : 'failure'}">${code}</span></div>
+      <div class="eng-pillrow">${httpPillHTML(sync.httpStatus, sync.data?.error)}</div>
       ${renderJSONView(sync.data ?? { error: 'no response body' })}`,
   });
 }

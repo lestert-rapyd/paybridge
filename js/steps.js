@@ -45,6 +45,7 @@
      moves the tab (design system §5: never steal the tab mid-narration).
    ───────────────────────────────────────────────────────────── */
 
+import { beatBadge } from './tags/resolve.js';
 import { state, setState } from './state.js';
 import { VERTICALS, activeWallet, depositFor } from './verticals.js';
 import { setIdentityMode, identityChooserHTML, promoteToReturning } from './identity.js';
@@ -293,7 +294,7 @@ function customerGetCardHTML(cus) {
   getPainted = { salt, path: `/v1/customers/${cus}` };
   return beatCardHTML({
     // the cus_*** came back from Rapyd — beatCardHTML escapes the path text
-    id: 'beat-cus-get', method: 'GET', path: getPainted.path, badge: 'prepared', badgeKind: '',
+    id: 'beat-cus-get', method: 'GET', path: getPainted.path, ...beatBadge('request.prepared'),
     inner: `
       ${headersHTML(salt)}
       <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">a GET carries none</span></div>`,

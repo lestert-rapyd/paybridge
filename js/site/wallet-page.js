@@ -30,6 +30,7 @@
    right. js/steps.js routes, wires and paints.
    ───────────────────────────────────────────────────────────── */
 
+import { beatBadge, httpPillHTML } from '../tags/resolve.js';
 import { state } from '../state.js';
 import { VERTICALS, activeWallet } from '../verticals.js';
 import * as customers from '../customers.js';
@@ -480,14 +481,12 @@ function routeNote(r) {
 }
 
 function badgeOf(b) {
-  if (b.status === 'sending') return ['sending…', 'live'];
-  return ok(b) ? ['signed & sent', 'ok'] : ['failed', 'err'];
+  return beatBadge(b.status === 'sending' ? 'request.sending' : ok(b) ? 'request.sent' : 'request.failed');
 }
 
 function getCardHTML(id, n, path, b, hint) {
-  const [badge, kind] = badgeOf(b);
   return beatCardHTML({
-    id, n, method: 'GET', path, badge, badgeKind: kind,
+    id, n, method: 'GET', path, ...badgeOf(b),
     inner: `
       ${headersHTML(b.salt)}
       <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">a GET carries none · ${esc(hint)}</span></div>`,
@@ -503,7 +502,7 @@ export function walletRequestCardsHTML() {
     const st = newSaltTimestamp();
     preparedSalt = st;
     return beatCardHTML({
-      id: 'beat-po-create', method: 'POST', path: '/v1/payouts', badge: 'prepared', badgeKind: '',
+      id: 'beat-po-create', method: 'POST', path: '/v1/payouts', ...beatBadge('request.prepared'),
       inner: `
         ${headersHTML(st)}
         <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">updates as you edit · sent on Withdraw</span></div>
@@ -512,9 +511,8 @@ export function walletRequestCardsHTML() {
   }
   const parts = [];
   {
-    const [badge, kind] = badgeOf(wd.elig);
     parts.push(beatCardHTML({
-      id: 'beat-po-elig', n: 1, method: 'POST', path: ELIG_PATH, badge, badgeKind: kind,
+      id: 'beat-po-elig', n: 1, method: 'POST', path: ELIG_PATH, ...badgeOf(wd.elig),
       inner: `
         ${headersHTML(wd.elig.salt)}
         <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">transaction_type oct = a payout to this card · ${wd.dest.kind === 'token' ? 'card_id = the saved card_***' : 'sandbox payout test card'}</span></div>
@@ -530,10 +528,9 @@ export function walletRequestCardsHTML() {
     parts.push(getCardHTML('beat-po-fields', 3, wd.fields.path, wd.fields, `beneficiary + sender fields${missing}`));
   }
   if (wd.payout) {
-    const [badge, kind] = badgeOf(wd.payout);
     const fx = wd.route?.fx ? ` · FX ${wd.route.senderCurrency} → ${wd.route.payoutCurrency}` : '';
     parts.push(beatCardHTML({
-      id: 'beat-po-create', n: 4, method: 'POST', path: '/v1/payouts', badge, badgeKind: kind,
+      id: 'beat-po-create', n: 4, method: 'POST', path: '/v1/payouts', ...badgeOf(wd.payout),
       inner: `
         ${headersHTML(wd.payout.salt)}
         <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${esc(`${wd.dest.kind === 'token' ? 'beneficiary.card_id = the saved card_***' : 'sandbox payout test card'}${fx}`)}</span></div>
@@ -559,22 +556,23 @@ export function fillWalletSignatures() {
   if (wd.payout) sign('beat-po-create', 'post', '/v1/payouts', wd.payout.salt, wd.payout.body);
 }
 
-/* `verdict` (optional): { bad, label, pills: [[text, cls]], note: html } —
+/* `ok`: [beat.header key, vars] for a good answer. `verdict` (optional):
+   { bad, badge: [key, vars], pills: [[text, cls]], note: html } —
    overrides the badge of a call that answered 200 but stopped the flow
    (an ineligible card) and adds pills / a note above the JSON. */
-function responseCardHTML(id, n, method, path, b, okLabel, verdict = null) {
+function responseCardHTML(id, n, method, path, b, [okKey, okVars], verdict = null) {
   if (b.status === 'sending') {
-    return beatCardHTML({ id, n, method, path, badge: 'sending…', badgeKind: 'live',
+    return beatCardHTML({ id, n, method, path, ...beatBadge('request.sending'),
       inner: `<div class="eng-sending"><span class="spin"></span>Awaiting Rapyd response…</div>` });
   }
   const good = ok(b);
   const fine = good && !verdict?.bad;
-  const code = b.httpStatus ? `HTTP ${esc(b.httpStatus)}` : 'NO RESPONSE';
-  const badge = !good ? String(b.data?.raw?.error_code || b.data?.error || 'failed') : verdict?.label || okLabel;
+  const badge = !good ? beatBadge('response.error', { error: String(b.data?.raw?.error_code || b.data?.error || 'failed') })
+    : verdict?.badge ? beatBadge(...verdict.badge) : beatBadge(okKey, okVars);
   return beatCardHTML({
-    id, n, method, path, badge, badgeKind: fine ? 'ok' : 'err',
+    id, n, method, path, ...badge,
     inner: `
-      <div class="eng-pillrow"><span class="wh-pill ${good ? 'success' : 'failure'}">${code}</span>${(verdict?.pills || [])
+      <div class="eng-pillrow">${httpPillHTML(b.httpStatus, good ? null : b.data?.error || 'failed')}${(verdict?.pills || [])
         .map(([t, cls]) => `<span class="wh-pill ${esc(cls)}">${esc(t)}</span>`).join('')}</div>
       ${verdict?.note || ''}
       ${renderJSONView(b.data ?? { error: 'no response body' })}`,
@@ -585,7 +583,7 @@ function responseCardHTML(id, n, method, path, b, okLabel, verdict = null) {
 function eligVerdict() {
   const r = wd.route;
   if (!ok(wd.elig) || !r) return null;
-  if (!r.beneficiaryCountry) return { bad: true, label: 'no issuer_country', note: routeNote(r) };
+  if (!r.beneficiaryCountry) return { bad: true, badge: ['payout.no_country'], note: routeNote(r) };
   const pills = [
     [`ISSUER ${r.beneficiaryCountry}`, ''], [`BILLING ${r.payoutCurrency}`, ''],
     [`OCT ${r.scope.toUpperCase()} · ${(r.oct || 'unknown').toUpperCase()}`, r.ok ? (r.unknown ? '' : 'success') : 'failure'],
@@ -593,7 +591,7 @@ function eligVerdict() {
   if (r.ok && r.fx) pills.push([`FX ${r.senderCurrency} → ${r.payoutCurrency}`, '']);
   return {
     bad: !r.ok, pills, note: routeNote(r),
-    label: r.ok ? `→ ${r.beneficiaryCountry} · ${r.payoutCurrency}` : 'not eligible',
+    badge: r.ok ? ['payout.eligible', { country: r.beneficiaryCountry, currency: r.payoutCurrency }] : ['payout.not_eligible'],
   };
 }
 
@@ -601,10 +599,10 @@ function eligVerdict() {
 export function walletResponseCardsHTML() {
   if (!mine() || wd.elig.status !== 'done') return '';
   const parts = [];
-  if (wd.payout) parts.push(responseCardHTML('beat-po-create-res', 4, 'POST', '/v1/payouts', wd.payout, `payout · ${wd.payout.data?.data?.status || '…'}`));
-  if (wd.fields) parts.push(responseCardHTML('beat-po-fields-res', 3, 'GET', wd.fields.path, wd.fields, 'required fields'));
-  if (wd.types) parts.push(responseCardHTML('beat-po-types-res', 2, 'GET', wd.types.path, wd.types, wd.types.picked ? `→ ${wd.types.picked}` : 'method types'));
-  parts.push(responseCardHTML('beat-po-elig-res', 1, 'POST', ELIG_PATH, wd.elig, 'eligibility', eligVerdict()));
+  if (wd.payout) parts.push(responseCardHTML('beat-po-create-res', 4, 'POST', '/v1/payouts', wd.payout, ['payout.created', { status: wd.payout.data?.data?.status || '…' }]));
+  if (wd.fields) parts.push(responseCardHTML('beat-po-fields-res', 3, 'GET', wd.fields.path, wd.fields, ['payout.fields']));
+  if (wd.types) parts.push(responseCardHTML('beat-po-types-res', 2, 'GET', wd.types.path, wd.types, wd.types.picked ? ['payout.type_picked', { type: wd.types.picked }] : ['payout.types']));
+  parts.push(responseCardHTML('beat-po-elig-res', 1, 'POST', ELIG_PATH, wd.elig, ['payout.eligibility'], eligVerdict()));
   return parts.join('');
 }
 

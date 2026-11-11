@@ -47,6 +47,7 @@
    Markup, beats and orchestration; js/steps.js routes, wires and paints.
    ───────────────────────────────────────────────────────────── */
 
+import { beatBadge, badgePillHTML, httpPillHTML } from '../tags/resolve.js';
 import { state } from '../state.js';
 import { VERTICALS } from '../verticals.js';
 import * as customers from '../customers.js';
@@ -898,7 +899,7 @@ export function addCardWebhooksHTML() {
 }
 
 /* ── Engine room ─────────────────────────────────────────── */
-const badgeOf = (b) => (b.status === 'sending' ? ['sending…', 'live'] : ok(b) ? ['signed &amp; sent', 'ok'] : ['failed', 'err']);
+const badgeOf = (b) => beatBadge(b.status === 'sending' ? 'request.sending' : ok(b) ? 'request.sent' : 'request.failed');
 
 function preparedBody(method) {
   const cus = customers.getCustomerId();
@@ -920,10 +921,9 @@ const hintOf = (method) => (isHtp(method) ? 'no card data — Rapyd’s page col
 
 let painted = []; // [{ id, method, path, salt, body }] — signed after paint
 function cardHTML(id, n, b, hint) {
-  const [badge, kind] = b.status === 'prepared' ? ['prepared', ''] : badgeOf(b);
   painted.push({ id, method: (b?.method || 'POST').toLowerCase(), path: b.path, salt: b.salt, body: b.body });
   return beatCardHTML({
-    id, n: String(n), method: b.method, path: b.path, badge, badgeKind: kind,
+    id, n: String(n), method: b.method, path: b.path, ...(b.status === 'prepared' ? beatBadge('request.prepared') : badgeOf(b)),
     inner: `
       ${headersHTML(b.salt)}
       <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${b.body ? esc(hint) : 'a GET carries none'}</span></div>
@@ -965,7 +965,7 @@ function extCardHTML(n) {
   const res = run.ext.result;
   return beatCardHTML({
     id: 'beat-ac-ext', n: String(n), method: 'AUTH', path: 'merchant’s 3DS provider', sim: true,
-    badge: res ? (res.transStatus === 'Y' ? 'Simulated · passed' : 'Simulated · failed') : 'Simulated', badgeKind: 'sim',
+    ...beatBadge(res ? (res.transStatus === 'Y' ? 'sim.passed' : 'sim.failed') : 'sim.pending'),
     inner: `
       <div class="ext-who"><span class="sim-badge">Simulated</span>Outside Rapyd · the merchant authenticates the card with its own provider before calling Rapyd.</div>
       <div class="req-bodylabel"><p class="eng-label">Authentication request</p></div>
@@ -982,15 +982,15 @@ export function fillAddCardSignatures() {
   }
 }
 
-function responseHTML(id, n, b, okLabel) {
+/* `okBadge`: [beat.header key, vars] shown when the call succeeded. */
+function responseHTML(id, n, b, okBadge) {
   if (!b || b.status !== 'done') return '';
   const good = ok(b);
-  const code = b.httpStatus ? `HTTP ${esc(b.httpStatus)}` : 'NO RESPONSE';
-  const label = good ? okLabel : String(b.data?.error || 'failed');
+  const [key, vars] = good ? okBadge : ['response.error', { error: String(b.data?.error || 'failed') }];
   return beatCardHTML({
-    id, n: String(n), method: b.method, path: b.path, badge: label, badgeKind: good ? 'ok' : 'err',
+    id, n: String(n), method: b.method, path: b.path, ...beatBadge(key, vars),
     inner: `
-      <div class="eng-pillrow"><span class="wh-pill ${good ? 'success' : 'failure'}">${code}</span><span class="wh-pill ${good ? 'success' : 'failure'}">${esc(label)}</span></div>
+      <div class="eng-pillrow">${httpPillHTML(b.httpStatus, good ? null : b.data?.error || 'failed')}${badgePillHTML(key, vars)}</div>
       ${renderJSONView(b.data ?? { error: 'no response body' })}`,
   });
 }
@@ -1003,12 +1003,12 @@ export function addCardResponseCardsHTML() {
   let html = '';
   if (first) {
     const d = first.data?.data;
-    const label = run.create ? 'PAGE CREATED' : run.method === 's2s-rapyd'
-      ? (d?.next_action === '3d_verification' ? 'ACT · 3DS' : String(d?.status || 'OK'))
-      : (d?.id ? 'CARD ADDED' : 'OK');
+    const label = run.create ? ['addcard.page'] : run.method === 's2s-rapyd'
+      ? (d?.next_action === '3d_verification' ? ['addcard.3ds'] : ['addcard.status', { status: String(d?.status || 'OK') }])
+      : (d?.id ? ['addcard.added'] : ['addcard.status', { status: 'OK' }]);
     html += responseHTML('beat-ac-1-res', ++n, first, label);
   }
-  if (run.verify) html += responseHTML('beat-ac-verify-res', ++n, run.verify, run.verify.data?.data?.payment_method ? 'CARD SAVED' : String(run.verify.data?.data?.status || 'OK'));
-  if (run.list) html += responseHTML('beat-ac-list-res', ++n, run.list, 'SAVED CARDS');
+  if (run.verify) html += responseHTML('beat-ac-verify-res', ++n, run.verify, run.verify.data?.data?.payment_method ? ['addcard.saved'] : ['addcard.status', { status: String(run.verify.data?.data?.status || 'OK') }]);
+  if (run.list) html += responseHTML('beat-ac-list-res', ++n, run.list, ['addcard.saved_cards']);
   return html;
 }

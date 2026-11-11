@@ -28,6 +28,7 @@ import * as ledger from '../ledger.js';
 import * as customers from '../customers.js';
 import { promoteToReturning } from '../identity.js';
 import { beatCardHTML } from '../customer-beat.js';
+import { resolveTag, httpCtx, paymentCtx, beatClass, whClass, pillHTML, httpPillHTML, beatBadge } from '../tags/resolve.js';
 
 /* ── Markup ──────────────────────────────────────────────── */
 
@@ -60,40 +61,37 @@ export function fxCardHTML() {
   const ok = b.httpStatus >= 200 && b.httpStatus < 400 && !b.data?.error;
   return beatCardHTML({
     id: 'beat-fx', method: 'GET', path: fxBeatPath(), // text — beatCardHTML escapes path/badge
-    badge: ok ? 'quoted' : 'failed', badgeKind: ok ? 'ok' : 'err',
+    ...beatBadge(ok ? 'fx.quoted' : 'request.failed'),
     inner: `
-      <div class="eng-pillrow"><span class="wh-pill ${ok ? 'success' : 'failure'}">${httpLabel(b.httpStatus)}</span></div>
+      <div class="eng-pillrow">${httpPillHTML(b.httpStatus, b.data?.error)}</div>
       ${renderJSONView(b.data ?? { error: 'no response body' })}`,
   });
 }
 
-/** "HTTP 402", or "NO RESPONSE" for api.js's transport failure (httpStatus 0). */
-export const httpLabel = (s) => (s ? `HTTP ${esc(s)}` : 'NO RESPONSE');
+/** "HTTP 402", or "NO RESPONSE" for api.js's transport failure (httpStatus 0) —
+    the http.status tag's label (Tag Studio), escaped. Also used in log lines. */
+export const httpLabel = (s) => esc(resolveTag('http.status', httpCtx(s)).label);
 export const httpOk = (s) => s >= 200 && s < 400;
 
-/** [label, kind] for a POST /v1/payments response — kind feeds .wh-pill. */
+/** [label, tone] for a POST /v1/payments response — the payment.result tag.
+    label is TEXT ('' when an admin hid it); tone feeds .wh-pill. */
 export function paymentBadge(httpStatus, data) {
-  const d = data?.data;
-  if (d?.status === 'CLO' && d?.paid) return ['PAID · CLO', 'success'];
-  if (d?.status === 'ACT')           return ['ACTION · ACT', 'pending'];
-  if (data?.error)                   return [String(data.error), 'failure'];
-  if (d?.status)                     return [String(d.status), 'pending'];
-  return [httpLabel(httpStatus), httpOk(httpStatus) ? 'success' : 'failure'];
+  const t = resolveTag('payment.result', paymentCtx(httpStatus, data));
+  return [t.hidden ? '' : t.label, whClass(t.tone)];
 }
-const BADGE_KIND = { success: 'ok', failure: 'err', pending: 'live' };
 
 /** The POST /v1/payments response card — own-fields' payment and the
     toolkit's express token charge render the same call the same way.
     beatCardHTML escapes its badge (text); `inner` is ours to escape. */
 export function paymentResponseCardHTML({ id, n, httpStatus, data }) {
-  const [badge, kind] = paymentBadge(httpStatus, data);
+  const t = resolveTag('payment.result', paymentCtx(httpStatus, data));
   return beatCardHTML({
     id, n, method: 'POST', path: '/v1/payments',
-    badge, badgeKind: BADGE_KIND[kind] || '',
+    badge: t.hidden ? '' : t.label, badgeKind: beatClass(t.tone),
     inner: `
       <div class="eng-pillrow">
-        <span class="wh-pill ${httpOk(httpStatus) ? 'success' : 'failure'}">${httpLabel(httpStatus)}</span>
-        <span class="wh-pill ${kind}">${esc(badge)}</span>
+        ${httpPillHTML(httpStatus)}
+        ${pillHTML(t)}
       </div>
       ${renderJSONView(data ?? { error: 'no response body' })}`,
   });
