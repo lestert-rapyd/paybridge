@@ -77,7 +77,7 @@ import {
 // Tag registry (js/tags/) — the Tag Studio's data model and resolver.
 import { SLOTS } from '../js/tags/registry.js';
 import { resolveTag, resolveBadge, httpCtx, paymentCtx, beatBadge, pillHTML, beatClass, whClass } from '../js/tags/resolve.js';
-import { setPublished, setDraft, sanitizeConfig } from '../js/tags/store.js';
+import { setPublished, setDraft, sanitizeConfig, withConfig } from '../js/tags/store.js';
 import { paymentBadge, httpLabel, paymentResponseCardHTML } from '../js/flows/shared.js';
 
 /* ── Tiny harness ── */
@@ -1379,6 +1379,15 @@ test('tags: unknown tones/ops/slots degrade safely', () => {
   eq(whClass('rainbow'), 'neutral'); eq(beatClass('rainbow'), '');
   eq(sanitizeConfig({ slots: { 'not.a.slot': {} } }).slots, {});
   eq(sanitizeConfig('junk'), null);
+  setPublished(null);
+});
+
+test('tags: withConfig scopes an override without touching the app layers', () => {
+  setPublished({ slots: { 'beat.header': { entries: { 'request.sent': { label: 'PUB', tone: 'success' } } } } });
+  const scoped = withConfig({ slots: { 'beat.header': { entries: { 'request.sent': { label: 'DRAFT', tone: 'info' } } } } }, () => beatBadge('request.sent'));
+  eq(scoped, { badge: 'DRAFT', badgeKind: 'live' });
+  eq(withConfig({ slots: {} }, () => beatBadge('request.sent')), { badge: 'signed & sent', badgeKind: 'ok' }, 'scoped = defaults beneath');
+  eq(beatBadge('request.sent'), { badge: 'PUB', badgeKind: 'ok' }, 'published again outside');
   setPublished(null);
 });
 

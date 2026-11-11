@@ -32,6 +32,8 @@ import {
   GOOGLE_AUTH_METHODS, googleAuthMethod, setGoogleAuthMethod,
 } from './direct-wallet.js';
 import { directWalletBlockHTML, refreshDirectSlot, resetDirectWallet, setDirectWalletRepainter } from './flows/direct-wallet.js';
+import { loadTags } from './tags/loader.js';
+import { mountTagStudio } from './admin/studio.js';
 
 // Patch keys that mean "the customer's flow/context actually changed" —
 // only these trigger the full client-flow reset (mount() etc). Everything
@@ -694,7 +696,9 @@ function drawerBodyHTML() {
   return sec('customer', 'Customer', `<div class="dc-options" id="dc-skins">${skinCardsHTML()}</div>`)
     + sec('path', 'Integration path', pathHTML())
     + sec('account', 'Account', accountHTML())
-    + sec('behaviour', 'Payment behaviour', behaviourHTML());
+    + sec('behaviour', 'Payment behaviour', behaviourHTML())
+    // Admin-only Tag Studio — the token dialog gates it (js/admin/studio.js).
+    + `<div class="dc-admin"><button type="button" class="dc-admin-link" data-open-tag-studio><i class="icon-lock" aria-hidden="true"></i>Admin · Tag Studio</button></div>`;
 }
 
 function renderDrawer() {
@@ -1079,3 +1083,13 @@ wire();
 wireLiveGate();
 backOffice.mount();
 renderAll();
+// Published engine-room tags (Tag Studio): the cached copy paints now, the
+// backend's copy whenever it answers — repaint only the client flow's engine
+// room (the back office owns the panels while it is open).
+window.addEventListener('paybridge:tags-changed', () => {
+  if (state.leftView !== 'client') return;
+  if (isCheckout()) FLOWS[state.model].refreshRightPanel?.();
+  else renderStepPanels();
+});
+mountTagStudio();
+loadTags();

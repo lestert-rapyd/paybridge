@@ -14,6 +14,7 @@ import { SLOTS } from './registry.js';
 
 let published = null; // { version, updatedAt, updatedBy, note, slots }
 let draft = null;     // { slots } — the Studio's unpublished edit, this tab only
+let scoped = null;    // withConfig(): the Studio's preview pane, never seen by the app
 
 const listeners = new Set();
 /** Called whenever the effective config may have changed. */
@@ -52,5 +53,14 @@ export function getDraft() { return draft; }
 
 /** The override for one slot, or null → the defaults. Draft wins whole-slot. */
 export function overrideFor(slotId) {
+  if (scoped) return scoped.slots?.[slotId] || null;
   return draft?.slots?.[slotId] || published?.slots?.[slotId] || null;
+}
+
+/** Run `fn` as if `cfg` were the only override (defaults beneath it) —
+    the Studio renders its preview this way without repainting the app. */
+export function withConfig(cfg, fn) {
+  const prev = scoped;
+  scoped = sanitizeConfig(cfg) || { slots: {} };
+  try { return fn(); } finally { scoped = prev; }
 }

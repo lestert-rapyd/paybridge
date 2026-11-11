@@ -21,6 +21,18 @@
 
 export const TONES = ['success', 'failure', 'pending', 'info', 'neutral', 'sim'];
 export const OPS = ['eq', 'neq', 'in', 'exists', 'between'];
+export const OP_LABELS = { eq: 'is', neq: 'is not', in: 'is one of', exists: 'is present', between: 'between' };
+export const TONE_LABELS = { success: 'Success', failure: 'Failure', pending: 'Pending', info: 'Info', neutral: 'Neutral', sim: 'Simulated' };
+
+/** How the Studio coerces a typed condition value. */
+export const FIELD_TYPES = {
+  'http.status': 'number', error: 'string', 'data.status': 'string', 'data.paid': 'boolean', 'data.next_action': 'string',
+};
+
+/** Example values the Studio previews dictionary badges with. */
+export const SAMPLE_VARS = {
+  error: 'ERROR_PROCESSING_CARD', status: 'CLO', id: 'cus_9f2c41e0', type: 'gb_visa_card', country: 'GB', currency: 'GBP',
+};
 
 const HTTP_SAMPLES = [
   { id: 'ok', label: '200 OK', ctx: { http: { status: 200 } } },
