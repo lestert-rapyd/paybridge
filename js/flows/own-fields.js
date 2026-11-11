@@ -39,6 +39,7 @@
    data in live too (LIVE_RAW_CARD_FORBIDDEN) — this is the front door.
    ───────────────────────────────────────────────────────────── */
 
+import { beatBadge } from '../tags/resolve.js';
 import { state } from '../state.js';
 import { VERTICALS, activeProduct, customerCharge, chargeText, fxSnapshot, productCta, orderItems } from '../verticals.js';
 import { createDirectPayment, newReference } from '../api.js';
@@ -580,7 +581,7 @@ function renderRequest() {
     : isLive() ? 'own card fields are off in live' : 'updates as you type';
   el.innerHTML = cusCard + extCard + beatCardHTML({
     id: 'beat-pay', n: n > 1 ? n : null, method: 'POST', path: '/v1/payments',
-    badge: sent ? 'signed &amp; sent' : stopped ? 'not sent' : '', badgeKind: sent ? 'ok' : stopped ? 'err' : '',
+    ...(sent ? beatBadge('request.sent') : stopped ? beatBadge('request.not_sent') : {}),
     inner: `
       ${headersHTML(st)}
       <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${hint}</span>${extApplies() ? '<span class="hint"><span class="inject-key"></span>from the merchant’s 3DS provider</span>' : ''}</div>
@@ -634,7 +635,7 @@ function extCardHTML(n) {
   }
   return beatCardHTML({
     id: 'beat-ext3ds', n, method: '3DS', path: 'Merchant → its 3DS server', sim: true,
-    badge: 'Simulated', badgeKind: 'sim',
+    ...beatBadge('sim.pending'),
     inner: `
       <div class="ext-who"><span class="sim-badge">Simulated</span>Outside Rapyd — the merchant’s own 3DS server. Not a Rapyd call.</div>
       <div class="req-bodylabel"><p class="eng-label">Authentication request</p><span class="hint">AReq, summarised</span></div>
@@ -660,13 +661,13 @@ function paintResponsePanel() {
     // is the point.
     payCard = beatCardHTML({
       id: 'beat-pay-res', n: cusCard ? 2 : null, method: 'POST', path: '/v1/payments',
-      badge: 'not sent', badgeKind: 'err',
+      ...beatBadge('request.not_sent'),
       inner: `<div class="beat-foot">The merchant’s 3DS provider returned <code>transStatus: "N"</code>, so the merchant stopped before calling Rapyd — no request, no payment, nothing in Rapyd’s records or the ledger.</div>`,
     });
   } else if (responseSending) {
     payCard = beatCardHTML({
       id: 'beat-pay-res', n: cusCard ? 2 : null, method: 'POST', path: '/v1/payments',
-      badge: 'sending…', badgeKind: 'live',
+      ...beatBadge('request.sending'),
       inner: `<div class="eng-sending"><span class="spin"></span>Awaiting Rapyd response…</div>`,
     });
   } else if (lastResponse) {

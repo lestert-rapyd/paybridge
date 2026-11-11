@@ -16,6 +16,7 @@
    the sign-in page and wires the button.
    ───────────────────────────────────────────────────────────── */
 
+import { beatBadge, httpPillHTML } from '../tags/resolve.js';
 import { state } from '../state.js';
 import * as customers from '../customers.js';
 import { retrieveCustomer } from '../api.js';
@@ -74,8 +75,7 @@ export function lookupRequestCardHTML() {
   const ok = rec.status === 'done' && rec.httpStatus >= 200 && rec.httpStatus < 400 && !rec.data?.error;
   return beatCardHTML({
     id: 'beat-cus-lookup', method: 'GET', path: path(rec.cus), // text — beatCardHTML escapes
-    badge: rec.status === 'sending' ? 'sending…' : ok ? 'signed & sent' : 'failed',
-    badgeKind: rec.status === 'sending' ? 'live' : ok ? 'ok' : 'err',
+    ...beatBadge(rec.status === 'sending' ? 'request.sending' : ok ? 'request.sent' : 'request.failed'),
     inner: `
       ${headersHTML(rec.salt)}
       <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">a GET carries none · sign in with a customer ID</span></div>`,
@@ -93,18 +93,17 @@ export function lookupResponseCardHTML() {
   if (rec.key !== customers.bucketKey()) return '';
   if (rec.status === 'sending') {
     return beatCardHTML({
-      id: 'beat-cus-lookup-res', method: 'GET', path: path(rec.cus), badge: 'sending…', badgeKind: 'live',
+      id: 'beat-cus-lookup-res', method: 'GET', path: path(rec.cus), ...beatBadge('request.sending'),
       inner: `<div class="eng-sending"><span class="spin"></span>Awaiting Rapyd response…</div>`,
     });
   }
   if (rec.status !== 'done') return '';
   const ok = rec.httpStatus >= 200 && rec.httpStatus < 400 && !rec.data?.error;
-  const code = rec.httpStatus ? `HTTP ${esc(rec.httpStatus)}` : 'NO RESPONSE';
   return beatCardHTML({
     id: 'beat-cus-lookup-res', method: 'GET', path: path(rec.cus),
-    badge: ok ? 'customer' : String(rec.data?.error || 'failed'), badgeKind: ok ? 'ok' : 'err',
+    ...(ok ? beatBadge('customer.found') : beatBadge('response.error', { error: String(rec.data?.error || 'failed') })),
     inner: `
-      <div class="eng-pillrow"><span class="wh-pill ${ok ? 'success' : 'failure'}">${code}</span></div>
+      <div class="eng-pillrow">${httpPillHTML(rec.httpStatus, rec.data?.error)}</div>
       ${renderJSONView(rec.data ?? { error: 'no response body' })}`,
   });
 }

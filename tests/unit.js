@@ -74,6 +74,12 @@ import {
   eligibilityBody, payoutRoute, ELIGIBILITY_TRANSACTION_TYPE,
 } from '../js/site/wallet.js';
 
+// Tag registry (js/tags/) — the Tag Studio's data model and resolver.
+import { SLOTS } from '../js/tags/registry.js';
+import { resolveTag, resolveBadge, httpCtx, paymentCtx, beatBadge, pillHTML, beatClass, whClass } from '../js/tags/resolve.js';
+import { setPublished, setDraft, sanitizeConfig } from '../js/tags/store.js';
+import { paymentBadge, httpLabel, paymentResponseCardHTML } from '../js/flows/shared.js';
+
 /* ── Tiny harness ── */
 const cases = [];
 const test = (name, fn) => cases.push({ name, fn });
@@ -1278,6 +1284,112 @@ test('pickBackend: staging hosts use the staging backend, all others production'
   // no staging configured → production; nothing configured → the default
   eq(pickBackend({ hostname: 'staging.rapyd.shop', production: 'https://prod.example' }), 'https://prod.example');
   eq(pickBackend({ hostname: 'rapyd.shop' }), 'https://rapyd-backend.vercel.app');
+});
+
+
+/* ── tags (js/tags/) ── */
+// The pre-registry logic, verbatim — the defaults must reproduce it exactly.
+const OLD_httpLabel = (st) => (st ? `HTTP ${esc(st)}` : 'NO RESPONSE');
+const OLD_httpOk = (st) => st >= 200 && st < 400;
+function OLD_paymentBadge(httpStatus, data) {
+  const d = data?.data;
+  if (d?.status === 'CLO' && d?.paid) return ['PAID · CLO', 'success'];
+  if (d?.status === 'ACT') return ['ACTION · ACT', 'pending'];
+  if (data?.error) return [String(data.error), 'failure'];
+  if (d?.status) return [String(d.status), 'pending'];
+  return [OLD_httpLabel(httpStatus), OLD_httpOk(httpStatus) ? 'success' : 'failure'];
+}
+const TAG_FIXTURES = [
+  [200, { data: { status: 'CLO', paid: true } }], [200, { data: { status: 'CLO', paid: false } }],
+  [200, { data: { status: 'ACT', paid: false, next_action: '3d_verification' } }],
+  [400, { error: 'ERROR_PROCESSING_CARD' }], [402, null], [0, null], [500, {}], [undefined, undefined],
+  [200, { data: { status: 'ERR' } }], [302, { data: {} }],
+];
+
+test('tags: defaults reproduce the old paymentBadge for every fixture', () => {
+  setPublished(null); setDraft(null);
+  for (const [st, body] of TAG_FIXTURES) eq(paymentBadge(st, body), OLD_paymentBadge(st, body), `status ${st}`);
+});
+
+test('tags: defaults reproduce the old httpLabel + ok colour', () => {
+  for (const st of [200, 201, 302, 399, 400, 402, 500, 0, undefined, null]) {
+    eq(httpLabel(st), OLD_httpLabel(st), `label ${st}`);
+    eq(resolveTag('http.status', httpCtx(st)).tone, OLD_httpOk(st) ? 'success' : 'failure', `tone ${st}`);
+  }
+  // an error body turns a 200 red only where the caller passes it
+  eq(resolveTag('http.status', httpCtx(200, 'ERR')).tone, 'failure');
+  eq(resolveTag('http.status', httpCtx(200, 'ERR')).label, 'HTTP 200');
+});
+
+test('tags: the response card still paints HTTP 200 + PAID · CLO', () => {
+  const html = paymentResponseCardHTML({ id: 'x', n: '5', httpStatus: 200, data: { data: { status: 'CLO', paid: true } } });
+  ok(html.includes('<span class="wh-pill success">HTTP 200</span>'), 'http pill');
+  ok(html.includes('<span class="wh-pill success">PAID · CLO</span>'), 'result pill');
+  ok(html.includes('<span class="beat-state ok">PAID · CLO</span>'), 'header badge');
+});
+
+test('tags: beat.header defaults keep the old badge/kind pairs', () => {
+  eq(beatBadge('request.sent'), { badge: 'signed & sent', badgeKind: 'ok' });
+  eq(beatBadge('request.sending'), { badge: 'sending…', badgeKind: 'live' });
+  eq(beatBadge('request.prepared'), { badge: 'prepared', badgeKind: '' });
+  eq(beatBadge('sim.passed'), { badge: 'Simulated · passed', badgeKind: 'sim' });
+  eq(beatBadge('response.error', { error: 'ERROR_X' }), { badge: 'ERROR_X', badgeKind: 'err' });
+  eq(beatBadge('payout.eligible', { country: 'GB', currency: 'GBP' }), { badge: '→ GB · GBP', badgeKind: 'ok' });
+  eq(beatBadge('no.such.key'), { badge: '', badgeKind: '' });
+});
+
+test('tags: a published override changes the label + tone; draft wins; reset restores', () => {
+  setPublished({ version: 3, slots: { 'payment.result': { rules: [
+    { id: 'p', when: { all: [{ field: 'data.status', op: 'eq', value: 'CLO' }, { field: 'data.paid', op: 'eq', value: true }] }, label: 'Captured · {data.status}', tone: 'info' },
+  ], fallback: { slot: 'http.status' } } } });
+  eq(paymentBadge(200, { data: { status: 'CLO', paid: true } }), ['Captured · CLO', 'info']);
+  eq(paymentBadge(402, null), ['HTTP 402', 'failure'], 'falls through to http.status');
+  setDraft({ slots: { 'payment.result': { rules: [{ id: 'd', label: 'DRAFT', tone: 'neutral' }] } } });
+  eq(paymentBadge(200, { data: { status: 'CLO', paid: true } }), ['DRAFT', 'neutral']);
+  setDraft(null); setPublished(null);
+  eq(paymentBadge(200, { data: { status: 'CLO', paid: true } }), ['PAID · CLO', 'success']);
+});
+
+test('tags: hidden rules/entries render nothing', () => {
+  setPublished({ slots: { 'beat.header': { entries: { 'request.sent': { label: 'x', tone: 'success', hidden: true } } },
+    'http.status': { rules: [{ id: 'h', label: 'gone', tone: 'success', hidden: true }] } } });
+  eq(beatBadge('request.sent'), { badge: '', badgeKind: '' });
+  eq(pillHTML(resolveTag('http.status', httpCtx(200))), '');
+  setPublished(null);
+});
+
+test('tags: templates only fill allowlisted fields and the pill escapes', () => {
+  setPublished({ slots: { 'payment.result': { rules: [{ id: 'a', label: '{data.status} {secret} {constructor}', tone: 'success' }] } } });
+  const t = resolveTag('payment.result', paymentCtx(200, { data: { status: '<img src=x onerror=alert(1)>' } }));
+  eq(t.label, '<img src=x onerror=alert(1)> {secret} {constructor}');
+  const html = pillHTML(t);
+  ok(!html.includes('<img'), 'escaped');
+  ok(html.includes('&lt;img'), 'as text');
+  setPublished(null);
+});
+
+test('tags: unknown tones/ops/slots degrade safely', () => {
+  setPublished({ slots: {
+    'payment.result': { rules: [{ id: 'z', when: { all: [{ field: 'data.status', op: 'regex', value: '.*' }] }, label: 'never', tone: 'success' },
+      { id: 'y', label: 'odd', tone: 'rainbow' }] },
+    'not.a.slot': { rules: [] },
+  } });
+  eq(resolveTag('payment.result', paymentCtx(200, { data: { status: 'CLO' } })).label, 'odd');
+  eq(resolveTag('payment.result', paymentCtx(200, {})).tone, 'neutral');
+  eq(whClass('rainbow'), 'neutral'); eq(beatClass('rainbow'), '');
+  eq(sanitizeConfig({ slots: { 'not.a.slot': {} } }).slots, {});
+  eq(sanitizeConfig('junk'), null);
+  setPublished(null);
+});
+
+test('tags: every default label only uses its own placeholders', () => {
+  for (const [id, def] of Object.entries(SLOTS)) {
+    const items = def.kind === 'rules' ? [...def.rules, ...(def.fallback?.label ? [def.fallback] : [])] : Object.values(def.entries);
+    for (const it of items) {
+      const allowed = def.kind === 'rules' ? def.fields : it.vars || [];
+      for (const [, name] of String(it.label).matchAll(/\{([a-z0-9_.]+)\}/gi)) ok(allowed.includes(name), `${id}: {${name}}`);
+    }
+  }
 });
 
 test('no network calls were made', () => {

@@ -27,6 +27,7 @@
    bucket of the MID that minted it.
    ───────────────────────────────────────────────────────────── */
 
+import { beatBadge, badgePillHTML, httpPillHTML } from './tags/resolve.js';
 import { state } from './state.js';
 import { VERTICALS } from './verticals.js';
 import * as customers from './customers.js';
@@ -141,10 +142,10 @@ const REQ_HINT = {
   error: 'signed &amp; sent',
 };
 function reqBadge(st) {
-  if (st === 'created') return [customers.getCustomerId() || 'created', 'ok'];
-  if (st === 'sending') return ['sending…', 'live'];
-  if (st === 'error') return ['failed', 'err'];
-  return ['beat 1 · runs first', ''];
+  if (st === 'created') return beatBadge('customer.id', { id: customers.getCustomerId() || 'created' });
+  if (st === 'sending') return beatBadge('request.sending');
+  if (st === 'error') return beatBadge('request.failed');
+  return beatBadge('customer.first');
 }
 
 /* What the card last rendered — the signature has to be computed over exactly
@@ -161,9 +162,8 @@ export function customerRequestCardHTML() {
   const body = record().body || customers.enrichedCustomerBody();
   const salt = newSaltTimestamp();
   painted = { salt, body };
-  const [badge, badgeKind] = reqBadge(st);
   return beatCardHTML({
-    id: 'beat-cus', n: 1, method: 'POST', path: '/v1/customers', badge, badgeKind,
+    id: 'beat-cus', n: 1, method: 'POST', path: '/v1/customers', ...reqBadge(st),
     inner: `
       ${headersHTML(salt)}
       <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${REQ_HINT[st]} · enriched, so the same customer is AFT-ready</span></div>
@@ -204,7 +204,7 @@ export function customerResponseCardHTML() {
   const r = record();
   if (st === 'sending') {
     return beatCardHTML({
-      id: 'beat-cus-res', n: 1, method: 'POST', path: '/v1/customers', badge: 'sending…', badgeKind: 'live',
+      id: 'beat-cus-res', n: 1, method: 'POST', path: '/v1/customers', ...beatBadge('request.sending'),
       inner: `<div class="eng-sending"><span class="spin"></span>Awaiting Rapyd response…</div>`,
     });
   }
@@ -213,13 +213,14 @@ export function customerResponseCardHTML() {
   if (st === 'created' && !r.data) return '';
   const ok = st === 'created';
   const id = r.data?.data?.id;
+  const [key, vars] = ok ? ['customer.created'] : ['response.error', { error: String(r.data?.error || 'ERROR') }];
   return beatCardHTML({
     id: 'beat-cus-res', n: 1, method: 'POST', path: '/v1/customers',
-    badge: ok ? 'CUSTOMER CREATED' : String(r.data?.error || 'ERROR'), badgeKind: ok ? 'ok' : 'err',
+    ...beatBadge(key, vars),
     inner: `
       <div class="eng-pillrow">
-        <span class="wh-pill ${ok ? 'success' : 'failure'}">${r.httpStatus ? `HTTP ${esc(r.httpStatus)}` : 'NO RESPONSE'}</span>
-        <span class="wh-pill ${ok ? 'success' : 'failure'}">${ok ? 'CUSTOMER CREATED' : esc(r.data?.error || 'ERROR')}</span>
+        ${httpPillHTML(r.httpStatus, ok ? null : String(r.data?.error || 'ERROR'))}
+        ${badgePillHTML(key, vars)}
       </div>
       ${renderJSONView(r.data ?? { error: 'no response body' })}
       ${ok && id ? `<div class="beat-foot">Every payment on this session now references <code>${esc(id)}</code> — and a saved card_*** is held under it.</div>` : ''}`,

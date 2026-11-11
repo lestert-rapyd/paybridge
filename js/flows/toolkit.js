@@ -24,6 +24,7 @@
    (own-fields refuses to collect one in live).
    ───────────────────────────────────────────────────────────── */
 
+import { beatBadge, badgePillHTML, httpPillHTML } from '../tags/resolve.js';
 import { state } from '../state.js';
 import { VERTICALS, activeProduct, customerCharge, fxSnapshot, productCta, orderItems } from '../verticals.js';
 import { createCheckoutSession, createDirectPayment, newReference, BACKEND_URL } from '../api.js';
@@ -451,7 +452,7 @@ function renderRequest() {
     ${renderJSONView(toolkitConfig(lastSession?.data?.id))}`;
   el.innerHTML = cusCard + beatCardHTML({
     id: 'beat-checkout', n: cusCard ? 2 : null, method: 'POST', path: '/v1/checkout',
-    badge: lastSession?.data?.id ? 'signed &amp; sent' : '', badgeKind: lastSession?.data?.id ? 'ok' : '',
+    ...(lastSession?.data?.id ? beatBadge('request.sent') : {}),
     inner: `
       ${headersHTML(st)}
       <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">no card data — collected by the iframe</span></div>
@@ -470,12 +471,12 @@ function renderResponse() {
     // The real status, not a guessed 200/400 — a 401 live-gate refusal and a
     // 504 timeout read very differently.
     const ok = !lastSession.error && httpOk(lastSessionStatus);
-    const label = ok ? 'CHECKOUT CREATED' : String(lastSession.error || 'ERROR'); // text — escaped below / by beatCardHTML
+    const [key, vars] = ok ? ['checkout.created'] : ['response.error', { error: String(lastSession.error || 'ERROR') }];
     card = beatCardHTML({
       id: 'beat-checkout-res', n: cusCard ? 2 : null, method: 'POST', path: '/v1/checkout',
-      badge: label, badgeKind: ok ? 'ok' : 'err',
+      ...beatBadge(key, vars),
       inner: `
-        <div class="eng-pillrow"><span class="wh-pill ${ok ? 'success' : 'failure'}">${httpLabel(lastSessionStatus)}</span><span class="wh-pill ${ok ? 'success' : 'failure'}">${esc(label)}</span></div>
+        <div class="eng-pillrow">${httpPillHTML(lastSessionStatus, ok ? null : String(lastSession.error || 'ERROR'))}${badgePillHTML(key, vars)}</div>
         ${renderJSONView(lastSession)}`,
     });
   }
@@ -492,7 +493,7 @@ function paintExpressRequest(body) {
   const cusCard = customerRequestCardHTML();
   el.innerHTML = cusCard + beatCardHTML({
     id: 'beat-express', n: cusCard ? 2 : null, method: 'POST', path: '/v1/payments',
-    badge: 'express', badgeKind: '',
+    ...beatBadge('toolkit.express'),
     inner: `
       ${headersHTML(st)}
       <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">express · saved card_*** token — no card data</span></div>

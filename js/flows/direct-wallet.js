@@ -29,6 +29,7 @@
    developers.google.com/pay/api/web/guides/brand-guidelines).
    ───────────────────────────────────────────────────────────── */
 
+import { beatBadge } from '../tags/resolve.js';
 import { state } from '../state.js';
 import { VERTICALS, activeProduct, customerCharge, chargeText, fxSnapshot, orderItems } from '../verticals.js';
 import { createDirectPayment, newReference } from '../api.js';
@@ -329,7 +330,7 @@ export function paintPanels() {
       <div class="dw-steps">${boxes}</div>
       ${beatCardHTML({
         id: 'beat-dw-pay', n: String(rapydIndex + 1), method: 'POST', path: '/v1/payments',
-        badge: sent ? 'Sent · sandbox' : 'Sandbox', badgeKind: sent ? 'live' : '',
+        ...beatBadge(sent ? 'wallet.sent' : 'wallet.sandbox'),
         inner: `
           <div class="ext-who">Rapyd · the merchant’s server → Rapyd. A real, signed call to the sandbox; only the wallet data inside is mock.</div>
           <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${sent ? 'sent after the sheet returned' : 'sent once the shopper approves'} · mock wallet values</span><span class="hint"><span class="inject-key"></span>from the wallet</span></div>

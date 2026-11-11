@@ -841,6 +841,9 @@ details[open] > .beat-head > .beat-chev { transform: rotate(90deg); }
 .wh-pill.success { background: color-mix(in srgb, var(--eng-ok) 16%, transparent);   color: var(--eng-ok); }
 .wh-pill.failure { background: color-mix(in srgb, var(--eng-err) 16%, transparent);  color: var(--eng-err); }
 .wh-pill.pending { background: color-mix(in srgb, var(--eng-warn) 16%, transparent); color: var(--eng-warn); }
+.wh-pill.info    { background: color-mix(in srgb, var(--eng-info) 16%, transparent); color: var(--eng-info); }
+.wh-pill.sim     { background: color-mix(in srgb, var(--eng-warn) 16%, transparent); color: var(--eng-warn); }
+/* .wh-pill.neutral = the base pill (Tag Studio's "neutral" tone) */
 .wh-pill.field { font-weight: 500; }
 .wh-card { margin-bottom: 8px; overflow: hidden; border: 1px solid var(--eng-line); border-left: 3px solid var(--eng-faint); border-radius: var(--r-md); background: var(--eng-surface); }
 .wh-card.success { border-left-color: var(--eng-ok); }
@@ -971,6 +974,8 @@ details[open] .wh-chev { transform: rotate(90deg); }
 .backoffice .wh-pill.success { background: var(--ok-soft); color: var(--ok-deep); }
 .backoffice .wh-pill.failure { background: var(--err-soft); color: var(--err-deep); }
 .backoffice .wh-pill.pending { background: var(--warn-soft); color: var(--warn-deep); }
+.backoffice .wh-pill.info { background: var(--info-soft); color: var(--info); }
+.backoffice .wh-pill.sim { background: var(--warn-soft); color: var(--warn-deep); }
 .backoffice .wh-pill.field { background: var(--accent-soft); color: var(--accent); }
 .backoffice .wh-verify { background: var(--soft-2); color: var(--muted); }
 .backoffice .wh-verify.ok { background: var(--ok-soft); color: var(--ok-deep); }
