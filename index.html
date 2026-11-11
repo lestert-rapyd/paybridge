@@ -15,6 +15,14 @@
   <meta name="paybridge-public-url" content="" />
   <!-- Rapyd design language: Inter (assets/fonts, @font-face in tokens.css),
        the Rapyd icon font, cool greys + #7437F5. No web-font CDN. -->
+  <!-- Checkout Toolkit hosts (script + iframe), resolved early. The full
+       preconnect is added by js/flows/toolkit.js for the active env when the
+       checkout page mounts — a preconnect made at page load would idle out
+       before the shopper gets there. -->
+  <link rel="dns-prefetch" href="https://sandboxcheckouttoolkit.rapyd.net" />
+  <link rel="dns-prefetch" href="https://sandboxcheckout.rapyd.net" />
+  <link rel="dns-prefetch" href="https://checkouttoolkit.rapyd.net" />
+  <link rel="dns-prefetch" href="https://checkout.rapyd.net" />
   <link rel="stylesheet" href="css/tokens.css" />
   <link rel="stylesheet" href="css/main.css" />
   <link rel="stylesheet" href="css/cof.css" />

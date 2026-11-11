@@ -26,7 +26,7 @@
 
 import { state } from '../state.js';
 import { VERTICALS, activeProduct, customerCharge, fxSnapshot, productCta, orderItems } from '../verticals.js';
-import { createCheckoutSession, createDirectPayment, newReference } from '../api.js';
+import { createCheckoutSession, createDirectPayment, newReference, BACKEND_URL } from '../api.js';
 import { profileEwallet } from '../profiles.js';
 import { clientDetails } from '../client-details.js';
 import { renderJSONView } from '../json-view.js';
@@ -103,6 +103,11 @@ const accent = () => custom.btnColor || VERTICALS[state.vertical].dot;
    custom pay button's postMessage may reach — never '*'. */
 const TOOLKIT_SRC = { sandbox: 'https://sandboxcheckouttoolkit.rapyd.net', live: 'https://checkouttoolkit.rapyd.net' };
 const toolkitSrc = (env) => (env === 'live' ? TOOLKIT_SRC.live : TOOLKIT_SRC.sandbox);
+/* The host the toolkit points its iframe at (the script's own
+   active_script_mapping) — preconnected so the iframe's first request skips
+   DNS + TLS. */
+const CHECKOUT_FRAME = { sandbox: 'https://sandboxcheckout.rapyd.net', live: 'https://checkout.rapyd.net' };
+const checkoutFrameOrigin = (env) => (env === 'live' ? CHECKOUT_FRAME.live : CHECKOUT_FRAME.sandbox);
 let launchEnv = 'sandbox';   // env the rendered toolkit was created in
 /** The iframe's own origin when it's a Rapyd host, else the toolkit's. */
 function toolkitOrigin(iframe) {
@@ -407,7 +412,7 @@ export function setToolkitMode(m) {
   document.querySelectorAll('.tkc-seg[data-opt="mode"] button[data-val]')
     .forEach((b) => b.classList.toggle('active', b.dataset.val === mode));
   syncControlVisibility();
-  if ($('#tk-config')) renderRequest();
+  if ($('#tk-config')) { renderRequest(); warmToolkit(state.env); }
 }
 
 function syncControlVisibility() {
@@ -678,23 +683,76 @@ function toolkitEnded(phase) {
 }
 
 /* ── Toolkit script + render ─────────────────────────────── */
+/* One download per env, shared: mount() starts it while the shopper is still
+   on the page, launch() awaits the same promise after POST /v1/checkout — the
+   two overlap instead of running back to back.
+   Each env's script sets ONE global, RapydCheckoutToolkit, with its iframe
+   host baked in at evaluation (from document.currentScript). So the class is
+   captured per env as its script loads — after a sandbox → live → sandbox
+   switch the global is live's, and rendering with it would point the sandbox
+   session at the live checkout host. */
+const scriptLoads = new Map();   // env → Promise<boolean>
+const toolkitClasses = new Map(); // env → that env's RapydCheckoutToolkit
 function loadToolkitScript(env) {
-  return new Promise(resolve => {
-    const url = toolkitSrc(env);
-    if (document.querySelector(`script[src="${url}"]`)) return resolve();
-    const s = document.createElement('script');
-    s.src = url;
-    s.onload = () => resolve();
-    s.onerror = () => resolve();
-    document.body.appendChild(s);
-  });
+  if (!scriptLoads.has(env)) {
+    scriptLoads.set(env, new Promise(resolve => {
+      const s = document.createElement('script');
+      s.src = toolkitSrc(env);
+      s.async = true;
+      s.onload = () => {
+        if (typeof window.RapydCheckoutToolkit === 'function') toolkitClasses.set(env, window.RapydCheckoutToolkit);
+        resolve(toolkitClasses.has(env));
+      };
+      s.onerror = () => { scriptLoads.delete(env); s.remove(); resolve(false); }; // the next launch retries
+      document.body.appendChild(s);
+    }));
+  }
+  return scriptLoads.get(env);
 }
+
+const preconnected = new Set();
+function preconnect(href, crossOrigin = false) {
+  let origin;
+  try { origin = new URL(href).origin; } catch { return; }
+  if (preconnected.has(origin)) return;
+  preconnected.add(origin);
+  const l = document.createElement('link');
+  l.rel = 'preconnect';
+  l.href = origin;
+  if (crossOrigin) l.crossOrigin = 'anonymous'; // fetch() to the backend is a CORS request
+  document.head.appendChild(l);
+}
+
+/** Warm everything the launch will need, while the shopper is still on the
+    checkout page: the backend's connection, the iframe host's connection and
+    the toolkit script itself. The hosted page needs no script. */
+function warmToolkit(env) {
+  preconnect(BACKEND_URL, true);
+  if (mode === 'hosted') return;
+  preconnect(checkoutFrameOrigin(env));
+  loadToolkitScript(env);
+}
+
+/* Launch timings — each console line from the click to the iframe being
+   ready carries "+N ms" since the click, so a slow step is easy to spot. */
+let launchT0 = 0;
+const elapsed = () => (launchT0 ? `+${Math.round(performance.now() - launchT0)} ms` : '');
+const withElapsed = (detail) => [detail, elapsed()].filter(Boolean).join(' · ');
 
 function bindToolkitEvents() {
   if (listenersBound) return;
   listenersBound = true;
   // onLoading is shared with the card-token toolkit — site/add-card.js logs its own.
-  window.addEventListener('onLoading', e => { if (state.step === 'checkout') logEvent('onLoading', `loading: ${e.detail?.loading}`, 'tk'); });
+  window.addEventListener('onLoading', e => {
+    if (state.step !== 'checkout') return;
+    const loading = e.detail?.loading;
+    logEvent('onLoading', withElapsed(`loading: ${loading}`), 'tk');
+    // The iframe has finished loading: close the launch timing.
+    if (launchT0 && (loading === false || loading === 'false')) {
+      logEvent('toolkit ready', `${elapsed().slice(1)} from click`, 'app', 'ok');
+      launchT0 = 0;
+    }
+  });
   window.addEventListener('onCheckoutPaymentPending', e => {
     if (e.detail?.id) { setWatchPaymentId(e.detail.id); ledger.setPaymentId(state.reference, e.detail.id); }
     document.getElementById('tk-own-pay')?.remove(); // payment sent for authorisation
@@ -741,9 +799,11 @@ function bindToolkitEvents() {
 function renderToolkit(checkoutId) {
   bindToolkitEvents();
   try {
-    const checkout = new RapydCheckoutToolkit(toolkitConfig(checkoutId));
+    const Toolkit = toolkitClasses.get(launchEnv);
+    if (!Toolkit) throw new Error(`the ${launchEnv} toolkit script did not load`);
+    const checkout = new Toolkit(toolkitConfig(checkoutId));
     checkout.displayCheckout();
-    logEvent('displayCheckout()', 'iframe rendering', 'tk');
+    logEvent('displayCheckout()', withElapsed('iframe rendering'), 'tk');
   } catch (err) {
     logEvent('toolkit error', err.message, 'tk', 'err');
   }
@@ -798,6 +858,7 @@ async function launch() {
   btn.textContent = 'Creating session…';
   setStatus('Creating session…', 'processing');
   clearConsole();
+  launchT0 = performance.now();
   lastSession = null;
   lastSessionStatus = 0;
   lastExpress = null;
@@ -821,9 +882,10 @@ async function launch() {
       logEvent('POST /v1/customers', 'failed', 'api', 'err');
       renderError({ status: 'ERR', message: 'We couldn’t start your payment. Please try again.' });
       restoreBtn();
+      launchT0 = 0;
       return;
     }
-    logEvent('POST /v1/customers', `${customers.getCustomerId()} · created (enriched)`, 'api', 'ok');
+    logEvent('POST /v1/customers', withElapsed(`${customers.getCustomerId()} · created (enriched)`), 'api', 'ok');
   }
 
   state.reference = newReference(`pb_${state.vertical}_tk`); // unguessable — it's the webhook read key
@@ -888,10 +950,11 @@ async function launch() {
     renderError({ status: data?.error || 'ERR' });
     ledger.updateStatus(reference, { status: 'failed', phase: 'error' });
     cofSlot.clear(reference);
+    launchT0 = 0;
     return;
   }
 
-  logEvent('POST /v1/checkout', `${id} · ${httpStatus}`, 'api', 'ok');
+  logEvent('POST /v1/checkout', withElapsed(`${id} · ${httpStatus}`), 'api', 'ok');
   startWebhookWatch({ reference, onTerminal: onTerminalFor(reference), onPoll: consoleHeartbeat });
 
   // Only #tk-area is replaced below, so the summary column survives the
@@ -902,6 +965,7 @@ async function launch() {
   const area = $('#tk-area');
   if (!area) return; // the page was reset while the session was being created
   if (mode === 'hosted') {
+    launchT0 = 0; // no iframe to wait for — the timing ends at the session
     hosted = { reference, redirect, phase: 'merchant' };
     listenForReturn();
     setStatus('Redirect ready', 'action');
@@ -915,7 +979,8 @@ async function launch() {
     // the redirect (address bar → Rapyd's domain) — goToHosted().
     $('#tk-open').addEventListener('click', () => { if (!redirect) return; openHosted(); goToHosted(); });
   } else {
-    await loadToolkitScript(launchEnv);
+    const scriptOk = await loadToolkitScript(launchEnv);
+    logEvent('toolkit script', withElapsed(scriptOk ? 'ready' : 'failed to load'), 'app', scriptOk ? '' : 'err');
     if (state.reference !== reference || !$('#tk-area')) return; // reset while the script loaded
     // The page shape stays put — the config panel swaps for the iframe.
     const ownBtn = payBtn === 'custom' && mode !== 'wallets'
@@ -1055,12 +1120,13 @@ export function mount() {
   logEvent(`${state.env} session started`, '', 'sys');
   logEvent('toolkit.mount(inline) ok', '', 'app');
   syncControlVisibility();
+  warmToolkit(state.env); // the script + connections load while the shopper is on the page
 
   panel.querySelectorAll('.tkc-seg[data-opt]').forEach(row => {
     row.addEventListener('click', e => {
       const btn = e.target.closest('button[data-val]');
       if (!btn) return;
-      if (row.dataset.opt === 'mode') mode = btn.dataset.val;
+      if (row.dataset.opt === 'mode') { mode = btn.dataset.val; warmToolkit(state.env); }
       if (row.dataset.opt === 'tdsFlow') tdsFlow = btn.dataset.val;
       if (row.dataset.opt === 'payBtn') payBtn = btn.dataset.val;
       row.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
