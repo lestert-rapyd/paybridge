@@ -126,3 +126,157 @@ export const SLOTS = {
 };
 
 export const SLOT_ORDER = Object.keys(SLOTS);
+
+/* ── Journeys — the Tag Studio's map of WHERE each tag appears ────────────
+   A step is one card on the engine room, identified by its card id without
+   the `beat-` prefix (beatCardHTML derives it the same way), so a step's
+   override lives in the slot `<slot>:<step>` (e.g. `beat.header:pay`,
+   `payment.result:pay-res`). Anything a step doesn't override follows the
+   shared slot, then the code default.
+
+   CALLS lists each API call once (request card, response card, the states
+   its header badge goes through); JOURNEYS orders calls the way the demo
+   runs them. A call used by two journeys (the customer beat, the FX quote)
+   is the same step in both — editing it in one edits it in the other. */
+
+export const SCENARIOS = {
+  prepared: 'Before sending',
+  sending: 'In flight',
+  success: 'Success',
+  action: '3DS / action',
+  failure: 'Failure',
+};
+
+const S_SENDING = { key: 'request.sending', when: 'While the call is in flight', scenarios: ['sending'] };
+const S_SENT = { key: 'request.sent', when: 'After it was sent', scenarios: ['success', 'action'] };
+const S_FAILED = { key: 'request.failed', when: 'When the call failed', scenarios: ['failure'] };
+const S_PREPARED = { key: 'request.prepared', when: 'Drawn, not sent yet', scenarios: ['prepared'] };
+const S_ERROR = { key: 'response.error', when: 'Rapyd returned an error', scenarios: ['failure'] };
+const REQ_LIFECYCLE = [S_SENDING, S_SENT, S_FAILED];
+
+export const CALLS = {
+  'cus-lookup': {
+    method: 'GET', path: '/v1/customers/{id}', title: 'Look up the customer',
+    req: { step: 'cus-lookup', states: REQ_LIFECYCLE },
+    res: { step: 'cus-lookup-res', http: true, states: [S_SENDING, { key: 'customer.found', when: 'Customer found', scenarios: ['success', 'action'] }, S_ERROR] },
+  },
+  cus: {
+    method: 'POST', path: '/v1/customers', title: 'Create the customer (beat 1)',
+    req: { step: 'cus', states: [{ key: 'customer.first', when: 'Drafted — runs before the payment', scenarios: ['prepared'] }, S_SENDING, { key: 'customer.id', when: 'Created — shows the cus_ id', scenarios: ['success', 'action'] }, S_FAILED] },
+    res: { step: 'cus-res', http: true, states: [S_SENDING, { key: 'customer.created', when: 'Customer created', scenarios: ['success', 'action'] }, S_ERROR] },
+  },
+  'cus-get': {
+    method: 'GET', path: '/v1/customers/{id}', title: 'Retrieve the customer (returning shopper)',
+    req: { step: 'cus-get', states: [{ ...S_PREPARED, scenarios: ['prepared', 'sending', 'success', 'action', 'failure'] }] },
+  },
+  fx: {
+    method: 'GET', path: '/v1/fx_rates', title: 'FX quote (when the shopper pays in another currency)',
+    res: { step: 'fx', http: true, single: true, states: [{ key: 'fx.quoted', when: 'Quote returned', scenarios: ['success', 'action', 'prepared', 'sending'] }, { key: 'request.failed', when: 'Quote failed', scenarios: ['failure'] }] },
+  },
+  ext3ds: {
+    method: '3DS', sim: true, path: 'Merchant → its 3DS server', title: 'External 3DS (simulated, outside Rapyd)',
+    req: { step: 'ext3ds', states: [{ key: 'sim.pending', when: 'Always (simulated step)', scenarios: ['prepared', 'sending', 'success', 'action', 'failure'] }] },
+  },
+  pay: {
+    method: 'POST', path: '/v1/payments', title: 'Create the payment',
+    req: { step: 'pay', states: [{ ...S_SENT, scenarios: ['sending', 'success', 'action', 'failure'] }, { key: 'request.not_sent', when: 'Never sent — the merchant’s 3DS failed', scenarios: [] }] },
+    res: { step: 'pay-res', http: true, rules: 'payment.result', states: [S_SENDING, { key: 'request.not_sent', when: 'Never sent — the merchant’s 3DS failed', scenarios: [] }] },
+  },
+  checkout: {
+    method: 'POST', path: '/v1/checkout', title: 'Create the checkout page',
+    req: { step: 'checkout', states: [{ ...S_SENT, scenarios: ['sending', 'success', 'action', 'failure'] }] },
+    res: { step: 'checkout-res', http: true, states: [{ key: 'checkout.created', when: 'Checkout created', scenarios: ['success', 'action'] }, S_ERROR] },
+  },
+  express: {
+    method: 'POST', path: '/v1/payments', title: 'Charge the saved card (express)',
+    req: { step: 'express', states: [{ key: 'toolkit.express', when: 'Express charge', scenarios: ['prepared', 'sending', 'success', 'action', 'failure'] }] },
+    res: { step: 'express-res', http: true, rules: 'payment.result', states: [] },
+  },
+  'dw-pay': {
+    method: 'POST', path: '/v1/payments', title: 'Create the wallet payment (mock token, real sandbox call)',
+    req: { step: 'dw-pay', states: [{ key: 'wallet.sandbox', when: 'Waiting for the shopper in the wallet sheet', scenarios: ['prepared'] }, { key: 'wallet.sent', when: 'Sent after the sheet returned', scenarios: ['sending', 'success', 'action', 'failure'] }] },
+    res: { step: 'dw-res', http: true, rules: 'payment.result', states: [] },
+  },
+  'pm-list': {
+    method: 'GET', path: '/v1/customers/{id}/payment_methods', title: 'List the saved cards',
+    req: { step: 'pm-list', states: REQ_LIFECYCLE },
+    res: { step: 'pm-list-res', http: true, states: [{ key: 'customer.saved_cards', when: 'Cards listed', scenarios: ['success', 'action'] }, S_ERROR] },
+  },
+  'ac-ext': {
+    method: 'AUTH', sim: true, path: 'merchant’s 3DS provider', title: 'Merchant’s 3DS (simulated — external-3DS MIDs only)',
+    req: { step: 'ac-ext', states: [{ key: 'sim.pending', when: 'Before the provider answers', scenarios: ['prepared', 'sending'] }, { key: 'sim.passed', when: 'Provider passed (transStatus Y)', scenarios: ['success', 'action'] }, { key: 'sim.failed', when: 'Provider failed', scenarios: ['failure'] }] },
+  },
+  'ac-1': {
+    method: 'POST', path: 'hosted page · $0-auth · payment_methods', title: 'Add the card (route follows the drawer)',
+    req: { step: 'ac-1', states: [S_PREPARED, ...REQ_LIFECYCLE] },
+    res: { step: 'ac-1-res', http: true, states: [
+      { key: 'addcard.page', when: 'Hosted page created', scenarios: ['success'] },
+      { key: 'addcard.3ds', when: '$0-auth needs 3DS', scenarios: ['action'] },
+      { key: 'addcard.status', when: '$0-auth status', scenarios: [] },
+      { key: 'addcard.added', when: 'Card added (external 3DS)', scenarios: [] },
+      S_ERROR,
+    ] },
+  },
+  'ac-verify': {
+    method: 'GET', path: '/v1/payments/{id}', title: 'Confirm the card was saved',
+    req: { step: 'ac-verify', states: REQ_LIFECYCLE },
+    res: { step: 'ac-verify-res', http: true, states: [{ key: 'addcard.saved', when: 'Card saved', scenarios: ['success', 'action'] }, { key: 'addcard.status', when: 'Not saved — shows the status', scenarios: [] }, S_ERROR] },
+  },
+  'ac-list': {
+    method: 'GET', path: '/v1/customers/{id}/payment_methods', title: 'List the saved cards',
+    req: { step: 'ac-list', states: REQ_LIFECYCLE },
+    res: { step: 'ac-list-res', http: true, states: [{ key: 'addcard.saved_cards', when: 'Cards listed', scenarios: ['success', 'action'] }, S_ERROR] },
+  },
+  'po-elig': {
+    method: 'POST', path: '/v1/cards/eligibility', title: 'Check the card can receive a payout',
+    req: { step: 'po-elig', states: REQ_LIFECYCLE },
+    res: { step: 'po-elig-res', http: true, states: [
+      S_SENDING,
+      { key: 'payout.eligible', when: 'Eligible — issuer country · currency', scenarios: ['success', 'action'] },
+      { key: 'payout.eligibility', when: 'Answered, no routing decided', scenarios: [] },
+      { key: 'payout.not_eligible', when: 'Card can’t receive payouts', scenarios: [] },
+      { key: 'payout.no_country', when: 'No issuer country returned', scenarios: [] },
+      S_ERROR,
+    ] },
+  },
+  'po-types': {
+    method: 'GET', path: '/v1/payout_method_types', title: 'Pick the payout method type',
+    req: { step: 'po-types', states: REQ_LIFECYCLE },
+    res: { step: 'po-types-res', http: true, states: [S_SENDING, { key: 'payout.type_picked', when: 'Type picked', scenarios: ['success', 'action'] }, { key: 'payout.types', when: 'Listed, none picked', scenarios: [] }, S_ERROR] },
+  },
+  'po-fields': {
+    method: 'GET', path: '/v1/payout_methods/{type}/required_fields', title: 'Get the required fields',
+    req: { step: 'po-fields', states: REQ_LIFECYCLE },
+    res: { step: 'po-fields-res', http: true, states: [S_SENDING, { key: 'payout.fields', when: 'Fields returned', scenarios: ['success', 'action'] }, S_ERROR] },
+  },
+  'po-create': {
+    method: 'POST', path: '/v1/payouts', title: 'Create the payout',
+    req: { step: 'po-create', states: [S_PREPARED, ...REQ_LIFECYCLE] },
+    res: { step: 'po-create-res', http: true, states: [S_SENDING, { key: 'payout.created', when: 'Payout created — shows its status', scenarios: ['success', 'action'] }, S_ERROR] },
+  },
+};
+
+export const JOURNEYS = [
+  { id: 'signin', group: 'Before checkout', title: 'Sign in with a customer ID', calls: ['cus-lookup'] },
+  { id: 'customer', group: 'Before checkout', title: 'Create the customer', calls: ['cus', 'cus-get'] },
+  { id: 'ocf', group: 'Checkout', title: 'Own Card Fields', calls: ['cus', 'fx', 'ext3ds', 'pay'] },
+  { id: 'toolkit', group: 'Checkout', title: 'Checkout Toolkit', calls: ['cus', 'checkout', 'fx', 'express'] },
+  { id: 'wallet', group: 'Checkout', title: 'Direct Apple Pay / Google Pay', calls: ['dw-pay'] },
+  { id: 'saved', group: 'After checkout', title: 'Account · saved cards', calls: ['pm-list'] },
+  { id: 'addcard', group: 'After checkout', title: 'Add a card', calls: ['ac-ext', 'ac-1', 'ac-verify', 'ac-list'] },
+  { id: 'withdraw', group: 'After checkout', title: 'Withdraw (card payout)', calls: ['po-elig', 'po-types', 'po-fields', 'po-create'] },
+];
+
+/** Every step id → { call, side } (side: 'req' | 'res'). */
+export const STEPS = Object.fromEntries(Object.entries(CALLS).flatMap(([call, c]) =>
+  ['req', 'res'].filter((side) => c[side]).map((side) => [c[side].step, { call, side }])));
+
+/** The journeys a call appears in (for "also in …"). */
+export const journeysOf = (call) => JOURNEYS.filter((j) => j.calls.includes(call));
+
+/** `payment.result:pay-res` → ['payment.result', 'pay-res']; `beat.header` → ['beat.header', null]. */
+export function splitSlotId(id) {
+  const i = String(id).indexOf(':');
+  return i < 0 ? [id, null] : [id.slice(0, i), id.slice(i + 1)];
+}
+export const STEP_RE = /^[a-z0-9-]{1,40}$/;

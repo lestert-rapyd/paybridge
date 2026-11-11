@@ -47,7 +47,7 @@
    Markup, beats and orchestration; js/steps.js routes, wires and paints.
    ───────────────────────────────────────────────────────────── */
 
-import { beatBadge, badgePillHTML, httpPillHTML } from '../tags/resolve.js';
+import { beatBadge, badgePillHTML, httpPillHTML, stepOf } from '../tags/resolve.js';
 import { state } from '../state.js';
 import { VERTICALS } from '../verticals.js';
 import * as customers from '../customers.js';
@@ -990,7 +990,7 @@ function responseHTML(id, n, b, okBadge) {
   return beatCardHTML({
     id, n: String(n), method: b.method, path: b.path, ...beatBadge(key, vars),
     inner: `
-      <div class="eng-pillrow">${httpPillHTML(b.httpStatus, good ? null : b.data?.error || 'failed')}${badgePillHTML(key, vars)}</div>
+      <div class="eng-pillrow">${httpPillHTML(b.httpStatus, good ? null : b.data?.error || 'failed', stepOf(id))}${badgePillHTML(key, vars, stepOf(id))}</div>
       ${renderJSONView(b.data ?? { error: 'no response body' })}`,
   });
 }

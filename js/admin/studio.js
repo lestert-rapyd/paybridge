@@ -1,24 +1,35 @@
 /* ─────────────────────────────────────────────────────────────
-   Tag Studio — the admin-only editor for the engine-room pills.
+   Tag Studio — the admin-only editor for the engine-room tags.
 
-   Entry: the #admin hash, or the "Admin" link at the foot of the demo
-   drawer. Both ask for the admin token (PAYBRIDGE_ADMIN_TOKEN on the
-   backend — NOT the live token) and check it with GET /api/config?op=whoami;
-   only then does a "Tag Studio" button appear in the header for this tab.
-   Hiding is cosmetic: the backend refuses every write without the token.
+   Organised the way the demo runs: pick a JOURNEY (Own Card Fields, Add a
+   card, Withdraw…) and its cards are listed in the order the engine room
+   shows them — each call's request card, then its response card, with every
+   state its header badge goes through (in flight → sent → failed …). Every
+   card's tags are its OWN (slot `beat.header:<step>`, `payment.result:<step>`
+   …); a card nobody touched follows the shared defaults, and any edit can be
+   pushed to every card with "apply to all". The preview on the right renders
+   the whole journey, in order, for a scenario (success, 3DS, failure…).
 
-   The editor works on a DRAFT of every slot (registry.js defaults with the
-   published overrides on top). The preview renders the real card markup
-   through store.withConfig(draft) — the app itself only changes when the
-   admin ticks "Preview in app" (this tab) or publishes (everyone: staging
-   AND production share the one published config).
+   Entry: the #admin hash, or "Admin · Tag Studio" at the foot of the demo
+   drawer. Both ask for the admin token (PAYBRIDGE_ADMIN_TOKEN on the backend —
+   NOT the live token), checked with GET /api/config?op=whoami; only then does
+   the header button appear. Hiding is cosmetic: the backend refuses writes.
+
+   The working config (S.cfg) is a sparse override set on top of the code
+   defaults. The preview renders through store.withConfig — the app only
+   changes on "Preview in app" (this tab) or Publish (everyone: staging AND
+   production share the one published config).
    ───────────────────────────────────────────────────────────── */
 
-import { SLOTS, SLOT_ORDER, TONES, OPS, OP_LABELS, TONE_LABELS, FIELD_TYPES, SAMPLE_VARS } from '../tags/registry.js';
+import {
+  SLOTS, TONES, OPS, OP_LABELS, TONE_LABELS, FIELD_TYPES, SAMPLE_VARS,
+  CALLS, JOURNEYS, SCENARIOS, STEPS, journeysOf, splitSlotId,
+} from '../tags/registry.js';
 import { getPublished, getDraft, withConfig } from '../tags/store.js';
-import { resolveTag, resolveBadge, httpCtx, pillHTML, beatBadge } from '../tags/resolve.js';
+import {
+  resolveTag, httpCtx, paymentCtx, pillHTML, httpPillHTML, badgePillHTML, resolveBeatBadge, beatClass,
+} from '../tags/resolve.js';
 import { cachePublished, setPreviewDraft } from '../tags/loader.js';
-import { paymentResponseCardHTML } from '../flows/shared.js';
 import { beatCardHTML } from '../customer-beat.js';
 import { esc } from '../ui.js';
 import {
@@ -27,77 +38,103 @@ import {
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
-const canon = (v) => JSON.stringify(v, (k, val) => (val && typeof val === 'object' && !Array.isArray(val)
+const canon = (v) => JSON.stringify(v ?? null, (k, val) => (val && typeof val === 'object' && !Array.isArray(val)
   ? Object.fromEntries(Object.keys(val).sort().filter((x) => val[x] !== undefined && !(x === 'hidden' && val[x] === false)).map((x) => [x, val[x]]))
   : val));
 const NAME_KEY = 'pb_admin_name';
 const adminName = () => { try { return sessionStorage.getItem(NAME_KEY) || ''; } catch { return ''; } };
 const setAdminName = (n) => { try { sessionStorage.setItem(NAME_KEY, n); } catch { /* ignore */ } };
 const when = (iso) => { try { return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }); } catch { return iso || ''; } };
-
-/* ── Draft model ─────────────────────────────────────────── */
-
+const BH = 'beat.header';
 const look = (e) => ({ label: e.label, tone: e.tone, ...(e.hidden ? { hidden: true } : {}) });
+const sideName = (step) => (STEPS[step]?.side === 'req' ? 'request card' : CALLS[STEPS[step]?.call]?.res?.single ? 'card' : 'response card');
 
-function defaultSlot(id) {
-  const d = SLOTS[id];
-  if (d.kind === 'rules') return { rules: clone(d.rules), fallback: clone(d.fallback) };
-  return { entries: Object.fromEntries(Object.entries(d.entries).map(([k, e]) => [k, look(e)])) };
-}
+/* ── Working config ──────────────────────────────────────── */
 
-/** Every slot in full (defaults + `cfg`'s overrides) — what the editor edits. */
-function fullSlots(cfg) {
+const S = {
+  root: null, open: false, unlocked: false,
+  published: null,  // the version the draft was opened from
+  cfg: { slots: {} }, // sparse overrides being edited
+  nav: 'j:ocf',     // 'j:<journey>' | 's:<base slot>'
+  scenario: 'success',
+  openRules: null,  // the step-rules editor expanded inline (slot id)
+  preview: false, modal: null, history: null, conflict: null, msg: null, busy: false,
+};
+const slots = () => S.cfg.slots;
+
+/** Shared (no step) effective entry: the shared override, else the default. */
+const sharedEntry = (cfgSlots, key) => cfgSlots[BH]?.entries?.[key] || look(SLOTS[BH].entries[key]);
+/** Shared effective rules for a base slot. */
+const sharedRules = (cfgSlots, base) => {
+  const o = cfgSlots[base];
+  const d = SLOTS[base];
+  return o ? { rules: o.rules, fallback: o.fallback || d.fallback } : { rules: d.rules, fallback: d.fallback };
+};
+
+/** Drop overrides that change nothing — what gets published and diffed. */
+function compact(src) {
   const out = {};
-  for (const id of SLOT_ORDER) {
-    const d = SLOTS[id];
-    const o = cfg?.slots?.[id];
-    const base = defaultSlot(id);
-    if (o && d.kind === 'rules') out[id] = { rules: clone(o.rules), fallback: clone(o.fallback || d.fallback) };
-    else if (o) {
-      for (const [k, e] of Object.entries(o.entries || {})) if (base.entries[k]) base.entries[k] = look(e);
-      out[id] = base;
-    } else out[id] = base;
-  }
-  return out;
-}
-
-/** Only what differs from the code defaults — what gets published. */
-function compact(slots) {
-  const out = {};
-  for (const id of SLOT_ORDER) {
-    const def = defaultSlot(id);
-    const s = slots[id];
-    if (SLOTS[id].kind === 'rules') {
-      if (canon(s) !== canon(def)) out[id] = { rules: s.rules, ...(canon(s.fallback) !== canon(def.fallback) ? { fallback: s.fallback } : { fallback: def.fallback }) };
-    } else {
+  for (const [id, s] of Object.entries(src || {})) {
+    const [base, step] = splitSlotId(id);
+    const def = SLOTS[base];
+    if (!def) continue;
+    if (def.kind === 'dict') {
       const entries = {};
-      for (const [k, e] of Object.entries(s.entries)) if (canon(e) !== canon(def.entries[k])) entries[k] = e;
+      for (const [k, e] of Object.entries(s.entries || {})) {
+        if (!def.entries[k]) continue;
+        const parent = step ? sharedEntry(src, k) : look(def.entries[k]);
+        if (canon(look(e)) !== canon(parent)) entries[k] = look(e);
+      }
       if (Object.keys(entries).length) out[id] = { entries };
+    } else {
+      const parent = step ? sharedRules(src, base) : { rules: def.rules, fallback: def.fallback };
+      const mine = { rules: s.rules, fallback: s.fallback || def.fallback };
+      if (canon(mine) !== canon(parent)) out[id] = clone(mine);
     }
   }
   return out;
 }
+const draftCfg = () => ({ slots: compact(slots()) });
+const pubSlots = () => compact(S.published?.slots || {});
+const isDirty = () => canon(compact(slots())) !== canon(pubSlots());
 
-const S = {
-  root: null,
-  open: false,
-  unlocked: false,
-  published: null,  // the version the draft was opened from
-  slots: null,      // the draft (full)
-  slot: 'payment.result',
-  sample: null,
-  preview: false,   // "Preview in app"
-  modal: null,      // 'publish' | 'history' | 'conflict' | null
-  history: null,
-  conflict: null,
-  msg: null,        // { kind, text }
-  busy: false,
-};
+/* Dictionary entries at a step. */
+function entryAt(key, step) {
+  const own = slots()[`${BH}:${step}`]?.entries?.[key];
+  if (own) return { e: own, source: 'card' };
+  const shared = slots()[BH]?.entries?.[key];
+  if (shared) return { e: shared, source: 'shared' };
+  return { e: look(SLOTS[BH].entries[key]), source: 'default' };
+}
+function setEntry(step, key, e) {
+  const id = step ? `${BH}:${step}` : BH;
+  (slots()[id] ||= { entries: {} }).entries[key] = look(e);
+}
+function clearEntry(step, key) {
+  const id = `${BH}:${step}`;
+  const s = slots()[id];
+  if (!s) return;
+  delete s.entries[key];
+  if (!Object.keys(s.entries).length) delete slots()[id];
+}
+function stepIdsWith(base, key = null) {
+  return Object.keys(slots()).filter((id) => id.startsWith(`${base}:`) && (!key || slots()[id].entries?.[key])).map((id) => splitSlotId(id)[1]);
+}
+function applyEntryEverywhere(key, e) {
+  setEntry(null, key, e);
+  for (const step of stepIdsWith(BH, key)) clearEntry(step, key);
+}
 
-const publishedFull = () => fullSlots(S.published);
-const isDirty = () => canon(compact(S.slots)) !== canon(compact(publishedFull()));
-const slotDiffers = (id, a, b) => canon(a[id]) !== canon(b[id]);
-const draftCfg = () => ({ slots: compact(S.slots) });
+/* Rules at a step. `sid` = 'payment.result' (shared) or 'payment.result:pay-res'. */
+function rulesOf(sid) {
+  if (slots()[sid]) return slots()[sid];
+  const [base, step] = splitSlotId(sid);
+  return clone(step ? sharedRules(slots(), base) : sharedRules({}, base));
+}
+function ensureRules(sid) {
+  if (!slots()[sid]) slots()[sid] = rulesOf(sid);
+  return slots()[sid];
+}
 
 /* ── Shell ───────────────────────────────────────────────── */
 
@@ -124,24 +161,120 @@ function headerHTML() {
     ${S.msg ? `<div class="ts-msg ${esc(S.msg.kind)}" role="status">${esc(S.msg.text)}</div>` : ''}`;
 }
 
-function slotsHTML() {
-  const pub = publishedFull();
-  const def = fullSlots(null);
-  const groups = {};
-  for (const id of SLOT_ORDER) (groups[SLOTS[id].group] ||= []).push(id);
-  return Object.entries(groups).map(([g, ids]) => `
-    <div class="ts-group">${esc(g)}</div>
-    ${ids.map((id) => {
-      const changed = slotDiffers(id, S.slots, pub);
-      const custom = slotDiffers(id, S.slots, def);
-      return `<button type="button" class="ts-slot${id === S.slot ? ' on' : ''}" data-act="slot" data-slot="${esc(id)}">
-        <span>${esc(SLOTS[id].title)}</span>
-        ${changed ? '<span class="ts-dot draft" title="Changed in this draft"></span>' : custom ? '<span class="ts-dot custom" title="Differs from the code defaults"></span>' : ''}
-      </button>`;
-    }).join('')}`).join('');
+/** Slot ids a journey's cards own. */
+const journeySteps = (j) => j.calls.flatMap((c) => ['req', 'res'].filter((s) => CALLS[c][s]).map((s) => CALLS[c][s].step));
+function journeyMarks(j) {
+  const steps = new Set(journeySteps(j));
+  const mine = compact(slots());
+  const pub = pubSlots();
+  const ids = new Set([...Object.keys(mine), ...Object.keys(pub)].filter((id) => steps.has(splitSlotId(id)[1])));
+  const changed = [...ids].some((id) => canon(mine[id]) !== canon(pub[id]));
+  const custom = Object.keys(mine).some((id) => steps.has(splitSlotId(id)[1]));
+  return changed ? '<span class="ts-dot draft" title="Changed in this draft"></span>' : custom ? '<span class="ts-dot custom" title="Has its own tags"></span>' : '';
 }
 
-/* ── Rules editor ────────────────────────────────────────── */
+function navHTML() {
+  const groups = {};
+  for (const j of JOURNEYS) (groups[j.group] ||= []).push(j);
+  const jhtml = Object.entries(groups).map(([g, js]) => `
+    <div class="ts-group">${esc(g)}</div>
+    ${js.map((j) => `<button type="button" class="ts-slot${S.nav === `j:${j.id}` ? ' on' : ''}" data-act="nav" data-nav="j:${esc(j.id)}">
+      <span>${esc(j.title)}</span>${journeyMarks(j)}</button>`).join('')}`).join('');
+  const shared = [['beat.header', 'Header badges'], ['payment.result', 'Payment result rules'], ['http.status', 'HTTP status rules']];
+  return `${jhtml}
+    <div class="ts-group">Shared defaults</div>
+    <p class="ts-navnote">What every card shows unless it has its own.</p>
+    ${shared.map(([id, t]) => {
+      const changed = canon(compact(slots())[id]) !== canon(pubSlots()[id]);
+      return `<button type="button" class="ts-slot${S.nav === `s:${id}` ? ' on' : ''}" data-act="nav" data-nav="s:${id}"><span>${t}</span>${changed ? '<span class="ts-dot draft"></span>' : ''}</button>`;
+    }).join('')}`;
+}
+
+/* ── Journey editor ──────────────────────────────────────── */
+
+const methodPill = (c) => `<span class="method-pill ${c.sim ? 'sim' : esc(c.method.toLowerCase())}">${esc(c.method)}</span>`;
+const varsFor = (key) => Object.fromEntries((SLOTS[BH].entries[key]?.vars || []).map((n) => [n, SAMPLE_VARS[n] ?? n]));
+const headerChip = (key, step) => withConfig(draftCfg(), () => {
+  const b = resolveBeatBadge(key, varsFor(key), step);
+  return b.badge ? `<span class="beat-state ${esc(b.badgeKind)}">${esc(b.badge)}</span>` : '<span class="ts-hiddenmark">hidden</span>';
+});
+
+function srcCell(key, step, source) {
+  if (source === 'card') {
+    const others = stepIdsWith(BH, key).length - 1;
+    return `<span class="ts-src-chip own" title="Only this card">this card</span>
+      <button type="button" class="ts-mini" data-act="reset-entry" title="Go back to the shared default">↺ shared</button>
+      <button type="button" class="ts-mini" data-act="apply-all" title="Make this the shared default and clear other cards’ own versions">apply to all${others > 0 ? ` (+${others} custom)` : ''}</button>`;
+  }
+  return `<span class="ts-src-chip" title="${source === 'shared' ? 'The shared default (edited)' : 'The code default'}">${source === 'shared' ? 'shared' : 'default'}</span>`;
+}
+
+function stateRowHTML(st, step) {
+  const { e, source } = entryAt(st.key, step);
+  return `<tr data-k="${esc(st.key)}" class="${source === 'card' ? 'own' : ''}">
+    <td class="ts-when">${esc(st.when)}<div class="ts-note"><code>${esc(st.key)}</code></div></td>
+    <td><input class="ts-in label" data-f="label" maxlength="40" value="${esc(e.label)}" aria-label="Label" /></td>
+    <td><select class="ts-in" data-f="tone" aria-label="Tone">${TONES.map((t) => `<option value="${t}" ${t === e.tone ? 'selected' : ''}>${esc(TONE_LABELS[t])}</option>`).join('')}</select></td>
+    <td><input type="checkbox" data-f="hidden" ${e.hidden ? 'checked' : ''} aria-label="Hide this badge" title="Hide this badge" /></td>
+    <td class="ts-dark ts-rowprev">${headerChip(st.key, step)}</td>
+    <td class="ts-src">${srcCell(st.key, step, source)}</td>
+  </tr>`;
+}
+
+function sampleChips(base, step) {
+  const samples = SLOTS[base].samples.slice(0, 4);
+  return withConfig(draftCfg(), () => `<div class="ts-samplechips">${samples.map((x) => {
+    const t = resolveTag(base, base === 'http.status' ? httpCtx(x.ctx.http.status, x.ctx.error) : x.ctx, step);
+    return `<span class="ts-sc"><span class="ts-sc-l">${esc(x.label)}</span>${t.hidden ? '<span class="ts-hiddenmark">hidden</span>' : pillHTML(t)}</span>`;
+  }).join('')}</div>`);
+}
+
+function rulesRefHTML(base, step, label) {
+  const sid = `${base}:${step}`;
+  const own = !!slots()[sid];
+  const openNow = own && S.openRules === sid;
+  return `<div class="ts-rulesref${own ? ' own' : ''}" data-base="${esc(base)}">
+    <div class="ts-rulesref-head">
+      <b>${esc(label)}</b>
+      <span class="ts-src-chip${own ? ' own' : ''}">${own ? 'this card’s own rules' : `shared ${esc(SLOTS[base].title)} rules`}</span>
+      <span class="ts-tools">${own
+        ? `<button type="button" class="ts-mini" data-act="rules-toggle">${openNow ? 'Hide rules' : 'Edit rules'}</button>
+           <button type="button" class="ts-mini" data-act="rules-shared">↺ shared</button>
+           <button type="button" class="ts-mini" data-act="rules-all">apply to all</button>`
+        : '<button type="button" class="ts-mini" data-act="rules-customise">Customise for this card</button>'}</span>
+    </div>
+    <div class="ts-dark ts-samplewrap">${sampleChips(base, step)}</div>
+    ${openNow ? `<div class="ts-rules-inline">${rulesEditorHTML(sid)}</div>` : ''}
+  </div>`;
+}
+
+function sideHTML(side, label) {
+  const step = side.step;
+  return `<div class="ts-side" data-step="${esc(step)}" id="ts-step-${esc(step)}">
+    <div class="ts-side-label">${esc(label)}</div>
+    ${side.states.length ? `<table class="ts-states"><thead><tr><th>When</th><th>Header badge</th><th>Tone</th><th>Hide</th><th>Shows</th><th></th></tr></thead><tbody>${side.states.map((st) => stateRowHTML(st, step)).join('')}</tbody></table>` : ''}
+    ${side.rules ? rulesRefHTML(side.rules, step, 'Result pill + header badge') : ''}
+    ${side.http ? rulesRefHTML('http.status', step, 'HTTP pill') : ''}
+  </div>`;
+}
+
+function journeyHTML(j) {
+  return `
+    <div class="ts-ed-head"><h2>${esc(j.title)}</h2>
+      <p>The cards in the order the engine room shows them. Edits apply to that card only; untouched cards follow the shared defaults.</p></div>
+    <ol class="ts-timeline">${j.calls.map((id, i) => {
+      const c = CALLS[id];
+      const also = journeysOf(id).filter((x) => x.id !== j.id);
+      return `<li class="ts-call">
+        <div class="ts-call-head"><span class="ts-n">${i + 1}</span>${methodPill(c)}<code class="ts-path">${esc(c.path)}</code></div>
+        <div class="ts-call-title">${esc(c.title)}${also.length ? `<span class="ts-also">same card in ${also.map((x) => esc(x.title)).join(', ')}</span>` : ''}</div>
+        ${c.req ? sideHTML(c.req, 'Request card') : ''}
+        ${c.res ? sideHTML(c.res, c.res.single ? 'Card' : 'Response card') : ''}
+      </li>`;
+    }).join('')}</ol>`;
+}
+
+/* ── Rules editor (shared slot or one card's) ────────────── */
 
 function toneRadios(name, tone) {
   return `<div class="ts-tones" role="radiogroup">${TONES.map((t) => `
@@ -159,9 +292,7 @@ function valueHTML(c) {
     const [a, b] = Array.isArray(v) ? v : ['', ''];
     return `<input class="ts-in num" type="number" data-f="v0" value="${esc(a)}" /> <span class="ts-and">and</span> <input class="ts-in num" type="number" data-f="v1" value="${esc(b)}" />`;
   }
-  if (c.op === 'in') {
-    return `<input class="ts-in" data-f="value" value="${esc((Array.isArray(v) ? v : []).join(', '))}" placeholder="CLO, ACT" title="Comma-separated" />`;
-  }
+  if (c.op === 'in') return `<input class="ts-in" data-f="value" value="${esc((Array.isArray(v) ? v : []).join(', '))}" placeholder="CLO, ACT" title="Comma-separated" />`;
   if (type === 'boolean') {
     return `<select data-f="value" class="ts-in"><option value="true" ${v === true ? 'selected' : ''}>true</option><option value="false" ${v === false ? 'selected' : ''}>false</option></select>`;
   }
@@ -177,18 +308,20 @@ function condHTML(c, j, fields) {
   </div>`;
 }
 
-function lookHTML(r, i, fields) {
+function lookHTML(r, name, fields) {
   return `<div class="ts-look">
     <label class="ts-field"><span>Label</span><input class="ts-in label" data-f="label" maxlength="40" value="${esc(r.label)}" /></label>
     <div class="ts-chips"><span>Insert</span>${fields.map((f) => `<button type="button" class="ts-chip" data-act="insert" data-ph="${esc(f)}">{${esc(f)}}</button>`).join('')}</div>
-    ${toneRadios(`tone-${i}`, r.tone)}
+    ${toneRadios(name, r.tone)}
     <label class="ts-check"><input type="checkbox" data-f="hidden" ${r.hidden ? 'checked' : ''} /> Hide this tag</label>
   </div>`;
 }
 
-function rulesEditorHTML(id) {
-  const def = SLOTS[id];
-  const s = S.slots[id];
+function rulesEditorHTML(sid) {
+  const [base] = splitSlotId(sid);
+  const def = SLOTS[base];
+  const s = rulesOf(sid);
+  const tag = sid.replace(/[^a-z0-9]/gi, '_');
   const rules = s.rules.map((r, i) => {
     const mode = r.when?.any ? 'any' : 'all';
     const conds = r.when?.[mode] || [];
@@ -205,111 +338,179 @@ function rulesEditorHTML(id) {
       </div>
       <div class="ts-conds">${conds.map((c, j) => condHTML(c, j, def.fields)).join('')}
         <button type="button" class="ts-link" data-act="add-cond">+ condition</button></div>
-      ${lookHTML(r, i, def.fields)}
+      ${lookHTML(r, `tone-${tag}-${i}`, def.fields)}
     </li>`;
   }).join('');
   const fb = s.fallback || {};
-  const otherRules = SLOT_ORDER.filter((x) => x !== id && SLOTS[x].kind === 'rules');
-  const fbHTML = `<div class="ts-rule ts-fallback" data-r="fb">
-    <div class="ts-rule-head"><span class="ts-n">⋯</span><span>Otherwise</span>
-      <select class="ts-in" data-f="fb-mode">
-        <option value="custom" ${fb.slot ? '' : 'selected'}>show this label</option>
-        ${otherRules.map((x) => `<option value="${esc(x)}" ${fb.slot === x ? 'selected' : ''}>use the ${esc(SLOTS[x].title)} tag</option>`).join('')}
-      </select></div>
-    ${fb.slot ? '' : lookHTML({ label: fb.label || '', tone: fb.tone || 'neutral', hidden: fb.hidden }, 'fb', def.fields)}
-  </div>`;
-  return `
-    <div class="ts-ed-head"><h2>${esc(def.title)}</h2><p>${esc(def.help)}</p><p class="ts-hint">Rules run top to bottom; the first match wins.</p></div>
+  const others = Object.keys(SLOTS).filter((x) => x !== base && SLOTS[x].kind === 'rules');
+  return `<div class="ts-rules-ed" data-sid="${esc(sid)}">
+    <p class="ts-hint">Rules run top to bottom; the first match wins.</p>
     <ol class="ts-rules">${rules}</ol>
     <button type="button" class="ts-btn" data-act="add-rule">+ Add rule</button>
-    ${fbHTML}
-    <button type="button" class="ts-link danger" data-act="reset-slot">↺ Reset “${esc(def.title)}” to the code defaults</button>`;
+    <div class="ts-rule ts-fallback" data-r="fb">
+      <div class="ts-rule-head"><span class="ts-n">⋯</span><span>Otherwise</span>
+        <select class="ts-in" data-f="fb-mode">
+          <option value="custom" ${fb.slot ? '' : 'selected'}>show this label</option>
+          ${others.map((x) => `<option value="${esc(x)}" ${fb.slot === x ? 'selected' : ''}>use the ${esc(SLOTS[x].title)} tag</option>`).join('')}
+        </select></div>
+      ${fb.slot ? '' : lookHTML({ label: fb.label || '', tone: fb.tone || 'neutral', hidden: fb.hidden }, `tone-${tag}-fb`, def.fields)}
+    </div>
+  </div>`;
 }
 
-/* ── Dictionary editor ───────────────────────────────────── */
+/* ── Shared-defaults editors ─────────────────────────────── */
 
-function dictRowPreview(id, key) {
-  const def = SLOTS[id].entries[key];
-  const vars = Object.fromEntries((def.vars || []).map((n) => [n, SAMPLE_VARS[n] ?? n]));
-  const t = withConfig(draftCfg(), () => resolveBadge(id, key, vars));
-  return t.hidden ? '<span class="ts-hiddenmark">hidden</span>' : pillHTML(t);
+function sharedRulesHTML(base) {
+  const def = SLOTS[base];
+  const own = stepIdsWith(base);
+  return `
+    <div class="ts-ed-head"><h2>${esc(def.title)} · shared rules</h2><p>${esc(def.help)}</p>
+      <p class="ts-hint">Every card follows these unless it has its own${own.length ? ` — ${own.length} card${own.length === 1 ? '' : 's'} do: ${own.map((s) => `<code>${esc(s)}</code>`).join(' ')}` : ''}.</p></div>
+    ${rulesEditorHTML(base)}
+    <button type="button" class="ts-link danger" data-act="reset-shared-rules">↺ Reset the shared ${esc(def.title)} rules to the code defaults</button>`;
 }
 
-function dictEditorHTML(id) {
-  const def = SLOTS[id];
-  const dflt = defaultSlot(id).entries;
-  const rows = Object.entries(S.slots[id].entries).map(([k, e]) => {
+function sharedDictHTML() {
+  const def = SLOTS[BH];
+  const rows = Object.keys(def.entries).map((k) => {
     const d = def.entries[k];
-    const changed = canon(e) !== canon(dflt[k]);
+    const e = sharedEntry(slots(), k);
+    const changed = canon(e) !== canon(look(d));
+    const n = stepIdsWith(BH, k).length;
     return `<tr data-k="${esc(k)}" class="${changed ? 'changed' : ''}">
       <td><code>${esc(k)}</code>${d.note ? `<div class="ts-note">${esc(d.note)}</div>` : ''}${d.vars?.length ? `<div class="ts-note">vars: ${d.vars.map((v) => `{${esc(v)}}`).join(' ')}</div>` : ''}</td>
       <td><input class="ts-in label" data-f="label" maxlength="40" value="${esc(e.label)}" /></td>
       <td><select class="ts-in" data-f="tone">${TONES.map((t) => `<option value="${t}" ${t === e.tone ? 'selected' : ''}>${esc(TONE_LABELS[t])}</option>`).join('')}</select></td>
       <td><input type="checkbox" data-f="hidden" aria-label="Hide" ${e.hidden ? 'checked' : ''} /></td>
-      <td class="ts-dark ts-rowprev">${dictRowPreview(id, k)}</td>
-      <td>${changed ? `<button type="button" class="ts-icon" data-act="reset-entry" title="Back to “${esc(dflt[k].label)}”">↺</button>` : ''}</td>
+      <td class="ts-dark ts-rowprev">${headerChip(k, null)}</td>
+      <td class="ts-note">${n ? `${n} card${n === 1 ? '' : 's'} override` : ''}${changed ? ` <button type="button" class="ts-icon" data-act="reset-shared-entry" title="Back to “${esc(d.label)}”">↺</button>` : ''}</td>
     </tr>`;
   }).join('');
   return `
-    <div class="ts-ed-head"><h2>${esc(def.title)}</h2><p>${esc(def.help)}</p></div>
-    <table class="ts-dict"><thead><tr><th>Key</th><th>Label</th><th>Tone</th><th>Hide</th><th>Preview</th><th></th></tr></thead><tbody>${rows}</tbody></table>
-    <button type="button" class="ts-link danger" data-act="reset-slot">↺ Reset every badge to the code defaults</button>`;
+    <div class="ts-ed-head"><h2>Header badges · shared defaults</h2>
+      <p>The badge every card shows for each state, unless the card has its own (set in its journey).</p></div>
+    <table class="ts-dict" data-shared><thead><tr><th>Key</th><th>Label</th><th>Tone</th><th>Hide</th><th>Shows</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 /* ── Preview ─────────────────────────────────────────────── */
 
-const sampleBody = (ctx) => (ctx.data || ctx.error ? { ...(ctx.data ? { data: ctx.data } : {}), ...(ctx.error ? { error: ctx.error } : {}) } : null);
+const SCEN_CTX = {
+  success: { http: { status: 200 }, data: { status: 'CLO', paid: true } },
+  action: { http: { status: 200 }, data: { status: 'ACT', paid: false, next_action: '3d_verification' } },
+  failure: { http: { status: 400 }, data: {}, error: 'ERROR_PROCESSING_CARD' },
+};
+const pick = (states, sc) => states.find((s) => s.scenarios.includes(sc)) || null;
 
-function rulesPreviewHTML(id) {
-  const def = SLOTS[id];
-  const samples = def.samples;
-  const cur = samples.find((x) => x.id === S.sample) || samples[0];
-  const draft = draftCfg();
-  const pub = { slots: S.published?.slots || {} };
-  const tagOf = (cfg, ctx) => withConfig(cfg, () => resolveTag(id, id === 'http.status' ? httpCtx(ctx.http.status, ctx.error) : ctx));
-  const card = withConfig(draft, () => (id === 'payment.result'
-    ? paymentResponseCardHTML({ id: 'ts-prev-card', n: '5', httpStatus: cur.ctx.http.status, data: sampleBody(cur.ctx) })
-    : beatCardHTML({ id: 'ts-prev-card', method: 'GET', path: '/v1/payments/{id}', ...beatBadge('request.sent'),
-      inner: `<div class="eng-pillrow">${pillHTML(resolveTag(id, httpCtx(cur.ctx.http.status, cur.ctx.error)))}</div>` })));
-  const grid = samples.map((x) => {
-    const d = tagOf(draft, x.ctx);
-    const p = tagOf(pub, x.ctx);
-    const show = (t) => (t.hidden ? '<span class="ts-hiddenmark">hidden</span>' : pillHTML(t));
-    return `<tr class="${x.id === cur.id ? 'on' : ''}" data-act="sample" data-sample="${esc(x.id)}">
-      <td>${esc(x.label)}</td><td>${show(p)}</td><td>${show(d)}${canon(d) !== canon(p) ? ' <span class="ts-chg">changed</span>' : ''}</td>
-      <td class="ts-hit">${esc(d.ruleId === 'fallback' ? 'otherwise' : `rule ${d.ruleId ?? '—'}`)}</td></tr>`;
-  }).join('');
-  return `
-    <div class="ts-prev-head">Preview · <span>${esc(cur.label)}</span></div>
-    <div class="ts-prev-card">${card}</div>
-    <table class="ts-grid"><thead><tr><th>Sample</th><th>Published</th><th>Draft</th><th>Hit</th></tr></thead><tbody>${grid}</tbody></table>
-    <p class="ts-prev-foot">Click a sample to preview its card.</p>`;
+function previewCard(c, side, n, sc) {
+  const step = side.step;
+  const id = `beat-${step}`;
+  const isRes = STEPS[step].side === 'res';
+  const base = { id, n: String(n), method: c.method, path: c.path, sim: !!c.sim };
+  if (!isRes) {
+    const st = pick(side.states, sc);
+    return beatCardHTML({ ...base, ...(st ? { badgeKey: st.key, badgeVars: varsFor(st.key) } : {}), inner: '' });
+  }
+  if (sc === 'prepared' && !side.single) return '';
+  if (sc === 'sending' && !side.single) {
+    const st = pick(side.states, 'sending');
+    return beatCardHTML({ ...base, ...(st ? { badgeKey: st.key } : {}), inner: '<div class="eng-sending"><span class="spin"></span>Awaiting Rapyd response…</div>' });
+  }
+  const scen = sc === 'prepared' || sc === 'sending' ? 'success' : sc;
+  const ctx = SCEN_CTX[scen];
+  if (side.rules) {
+    const t = resolveTag(side.rules, paymentCtx(ctx.http.status, { data: ctx.data, ...(ctx.error ? { error: ctx.error } : {}) }), step);
+    return beatCardHTML({ ...base, badge: t.hidden ? '' : t.label, badgeKind: beatClass(t.tone),
+      inner: `<div class="eng-pillrow">${httpPillHTML(ctx.http.status, null, step)}${pillHTML(t)}</div>` });
+  }
+  const st = pick(side.states, scen);
+  const fail = scen === 'failure';
+  return beatCardHTML({ ...base, ...(st ? { badgeKey: st.key, badgeVars: varsFor(st.key) } : {}),
+    inner: `<div class="eng-pillrow">${httpPillHTML(fail ? 400 : 200, fail ? ctx.error : null, step)}${!side.single && st ? badgePillHTML(st.key, varsFor(st.key), step) : ''}</div>` });
 }
 
-function dictPreviewHTML(id) {
+function journeyScenarios(j) {
+  const set = new Set();
+  for (const id of j.calls) for (const side of ['req', 'res']) {
+    const sd = CALLS[id][side];
+    if (!sd) continue;
+    sd.states.forEach((s) => s.scenarios.forEach((x) => set.add(x)));
+    if (sd.rules) ['success', 'action', 'failure'].forEach((x) => set.add(x));
+  }
+  return Object.keys(SCENARIOS).filter((x) => set.has(x));
+}
+
+function journeyPreviewHTML(j) {
+  const scens = journeyScenarios(j);
+  if (!scens.includes(S.scenario)) S.scenario = scens.includes('success') ? 'success' : scens[0];
+  const cards = withConfig(draftCfg(), () => j.calls.map((id, i) => {
+    const c = CALLS[id];
+    return ['req', 'res'].filter((s) => c[s]).map((s) => `<div class="ts-pv" data-act="goto" data-step="${esc(c[s].step)}">${previewCard(c, c[s], i + 1, S.scenario)}</div>`).join('');
+  }).join(''));
+  return `
+    <div class="ts-prev-head">Preview · <span>${esc(j.title)}</span></div>
+    <div class="ts-scen">${scens.map((x) => `<button type="button" class="ts-chip${x === S.scenario ? ' on' : ''}" data-act="scenario" data-sc="${x}">${esc(SCENARIOS[x])}</button>`).join('')}</div>
+    <div class="ts-prev-stack">${cards}</div>
+    <p class="ts-prev-foot">Request cards, then responses, in engine-room order. Click a card to jump to its tags.</p>`;
+}
+
+function sharedRulesPreviewHTML(base) {
+  const def = SLOTS[base];
   const draft = draftCfg();
-  const cards = Object.keys(SLOTS[id].entries).map((k) => {
-    const d = SLOTS[id].entries[k];
-    const vars = Object.fromEntries((d.vars || []).map((n) => [n, SAMPLE_VARS[n] ?? n]));
-    return withConfig(draft, () => beatCardHTML({ id: `ts-prev-${k}`, method: k.startsWith('sim.') ? 'AUTH' : 'POST', sim: k.startsWith('sim.'), path: k, ...beatBadge(k, vars), inner: '' }));
+  const pub = { slots: pubSlots() };
+  const tagOf = (cfg, ctx) => withConfig(cfg, () => resolveTag(base, base === 'http.status' ? httpCtx(ctx.http.status, ctx.error) : ctx));
+  const show = (t) => (t.hidden ? '<span class="ts-hiddenmark">hidden</span>' : pillHTML(t));
+  const rows = def.samples.map((x) => {
+    const d = tagOf(draft, x.ctx); const p = tagOf(pub, x.ctx);
+    return `<tr><td>${esc(x.label)}</td><td>${show(p)}</td><td>${show(d)}${canon(d) !== canon(p) ? ' <span class="ts-chg">changed</span>' : ''}</td>
+      <td class="ts-hit">${esc(d.ruleId === 'fallback' ? 'otherwise' : `rule ${d.ruleId ?? '—'}`)}</td></tr>`;
   }).join('');
-  return `<div class="ts-prev-head">Preview · every header badge</div><div class="ts-prev-stack">${cards}</div>`;
+  return `<div class="ts-prev-head">Preview · <span>shared ${esc(def.title)} rules</span></div>
+    <table class="ts-grid"><thead><tr><th>Sample</th><th>Published</th><th>Draft</th><th>Hit</th></tr></thead><tbody>${rows}</tbody></table>
+    <p class="ts-prev-foot">Cards with their own rules aren’t affected.</p>`;
+}
+
+function sharedDictPreviewHTML() {
+  const cards = withConfig(draftCfg(), () => Object.keys(SLOTS[BH].entries).map((k) => beatCardHTML({
+    id: `ts-shared-${k}`, method: k.startsWith('sim.') ? 'AUTH' : 'POST', sim: k.startsWith('sim.'), path: k, badgeKey: k, badgeVars: varsFor(k), inner: '',
+  })).join(''));
+  return `<div class="ts-prev-head">Preview · <span>shared header badges</span></div><div class="ts-prev-stack">${cards}</div>`;
+}
+
+const navJourney = () => (S.nav.startsWith('j:') ? JOURNEYS.find((j) => j.id === S.nav.slice(2)) : null);
+function editorHTML() {
+  const j = navJourney();
+  if (j) return journeyHTML(j);
+  const base = S.nav.slice(2);
+  return base === BH ? sharedDictHTML() : sharedRulesHTML(base);
+}
+function previewHTML() {
+  const j = navJourney();
+  if (j) return journeyPreviewHTML(j);
+  const base = S.nav.slice(2);
+  return base === BH ? sharedDictPreviewHTML() : sharedRulesPreviewHTML(base);
 }
 
 /* ── Modals ──────────────────────────────────────────────── */
 
+function slotLabel(id) {
+  const [base, step] = splitSlotId(id);
+  if (!step) return `Shared ${SLOTS[base].kind === 'dict' ? 'header badges' : `${SLOTS[base].title} rules`}`;
+  const call = CALLS[STEPS[step]?.call];
+  const js = call ? journeysOf(STEPS[step].call).map((j) => j.title).join(' / ') : '';
+  return `${call ? esc(call.title) : esc(step)} · ${sideName(step)}${js ? ` <span class="ts-note">(${esc(js)})</span>` : ''}`;
+}
 function changesList() {
-  const pub = publishedFull();
-  const out = [];
-  for (const id of SLOT_ORDER) {
-    if (!slotDiffers(id, S.slots, pub)) continue;
-    if (SLOTS[id].kind === 'rules') out.push(`<li><b>${esc(SLOTS[id].title)}</b> — rules changed (${S.slots[id].rules.length} rule${S.slots[id].rules.length === 1 ? '' : 's'})</li>`);
-    else {
-      const keys = Object.keys(S.slots[id].entries).filter((k) => canon(S.slots[id].entries[k]) !== canon(pub[id].entries[k]));
-      out.push(`<li><b>${esc(SLOTS[id].title)}</b> — ${keys.map((k) => `<code>${esc(k)}</code> → “${esc(S.slots[id].entries[k].label)}”`).join(', ')}</li>`);
-    }
-  }
-  return out.join('');
+  const mine = compact(slots());
+  const pub = pubSlots();
+  const ids = [...new Set([...Object.keys(mine), ...Object.keys(pub)])].filter((id) => canon(mine[id]) !== canon(pub[id]));
+  return ids.map((id) => {
+    const [base] = splitSlotId(id);
+    let what;
+    if (!mine[id]) what = 'back to the default';
+    else if (SLOTS[base].kind === 'rules') what = `${base === 'http.status' ? 'HTTP' : 'result'} rules changed`;
+    else what = Object.entries(mine[id].entries).filter(([k, e]) => canon(e) !== canon(pub[id]?.entries?.[k])).map(([k, e]) => `<code>${esc(k)}</code> → “${esc(e.label)}”${e.hidden ? ' (hidden)' : ''}`).join(', ') || 'entries reset';
+    return `<li><b>${slotLabel(id)}</b> — ${what}</li>`;
+  }).join('');
 }
 
 function modalHTML() {
@@ -352,56 +553,63 @@ function modalHTML() {
 
 function render() {
   if (!S.root || !S.open) return;
-  const ed = $('.ts-editor', S.root);
-  const top = ed?.scrollTop || 0;
+  const top = $('.ts-editor', S.root)?.scrollTop || 0;
   S.root.innerHTML = `
     ${headerHTML()}
     <div class="ts-body">
-      <nav class="ts-slots" aria-label="Tag slots">${slotsHTML()}</nav>
-      <section class="ts-editor">${SLOTS[S.slot].kind === 'rules' ? rulesEditorHTML(S.slot) : dictEditorHTML(S.slot)}</section>
-      <aside class="ts-preview">${renderPreviewHTML()}</aside>
+      <nav class="ts-slots" aria-label="Journeys">${navHTML()}</nav>
+      <section class="ts-editor">${editorHTML()}</section>
+      <aside class="ts-preview">${previewHTML()}</aside>
     </div>
     ${S.modal ? `<div class="ts-modal-back">${modalHTML()}</div>` : ''}`;
-  const ned = $('.ts-editor', S.root);
-  if (ned) ned.scrollTop = top;
+  const ed = $('.ts-editor', S.root);
+  if (ed) ed.scrollTop = top;
   openPreviewCards();
   if (S.modal === 'publish') $('#ts-note', S.root)?.focus();
 }
-const renderPreviewHTML = () => (SLOTS[S.slot].kind === 'rules' ? rulesPreviewHTML(S.slot) : dictPreviewHTML(S.slot));
-function openPreviewCards() { S.root.querySelectorAll('.ts-prev-card details').forEach((d) => { d.open = true; }); }
+function openPreviewCards() { S.root.querySelectorAll('.ts-preview details').forEach((d) => { d.open = !!d.querySelector('.beat-body *'); }); }
 
-/** After a keystroke: repaint everything EXCEPT the editor (keeps focus/caret). */
-function renderLight() {
+/** After a keystroke: repaint everything EXCEPT the editor's inputs (keeps focus/caret). */
+function renderLight(row) {
   const head = $('.ts-head', S.root);
   if (head) {
     const tmp = document.createElement('div');
     tmp.innerHTML = headerHTML();
-    const oldMsg = $('.ts-msg', S.root);
-    if (oldMsg) oldMsg.remove();
+    $('.ts-msg', S.root)?.remove();
     head.replaceWith(...tmp.childNodes);
   }
-  const nav = $('.ts-slots', S.root); if (nav) nav.innerHTML = slotsHTML();
-  const pv = $('.ts-preview', S.root); if (pv) pv.innerHTML = renderPreviewHTML();
+  const nav = $('.ts-slots', S.root); if (nav) nav.innerHTML = navHTML();
+  const pv = $('.ts-preview', S.root); if (pv) pv.innerHTML = previewHTML();
   openPreviewCards();
-  S.root.querySelectorAll('.ts-dict tr[data-k]').forEach((tr) => {
-    const cell = $('.ts-rowprev', tr);
-    if (cell) cell.innerHTML = dictRowPreview(S.slot, tr.dataset.k);
+  // the touched row's preview chip + source cell; rule editors' sample chips
+  if (row) {
+    const step = row.closest('[data-step]')?.dataset.step || null;
+    const k = row.dataset.k;
+    const prev = $('.ts-rowprev', row); if (prev) prev.innerHTML = headerChip(k, step);
+    if (step) {
+      const src = entryAt(k, step);
+      row.classList.toggle('own', src.source === 'card');
+      const cell = $('.ts-src', row); if (cell) cell.innerHTML = srcCell(k, step, src.source);
+    }
+  }
+  S.root.querySelectorAll('.ts-rulesref').forEach((ref) => {
+    const step = ref.closest('[data-step]')?.dataset.step;
+    const wrap = $('.ts-samplewrap', ref);
+    if (wrap && step) wrap.innerHTML = sampleChips(ref.dataset.base, step);
   });
   syncPreviewInApp();
 }
-
-function syncPreviewInApp() {
-  if (S.preview) setPreviewDraft(draftCfg());
-}
+function syncPreviewInApp() { if (S.preview) setPreviewDraft(draftCfg()); }
 
 /* ── Editing ─────────────────────────────────────────────── */
 
 const ruleAt = (el) => {
+  const ed = el.closest('[data-sid]');
   const li = el.closest('[data-r]');
-  if (!li) return null;
-  const s = S.slots[S.slot];
-  if (li.dataset.r === 'fb') return { fb: true, rule: s.fallback || (s.fallback = { label: '', tone: 'neutral' }) };
-  return { i: Number(li.dataset.r), rule: s.rules[Number(li.dataset.r)] };
+  if (!ed || !li) return null;
+  const s = ensureRules(ed.dataset.sid);
+  if (li.dataset.r === 'fb') return { sid: ed.dataset.sid, s, rule: s.fallback || (s.fallback = { label: '', tone: 'neutral' }) };
+  return { sid: ed.dataset.sid, s, i: Number(li.dataset.r), rule: s.rules[Number(li.dataset.r)] };
 };
 const condsOf = (r) => (r.when ? r.when.all || r.when.any : null);
 function coerce(field, raw) {
@@ -416,24 +624,36 @@ function defaultCond(field, op = 'eq') {
   const value = op === 'exists' ? undefined : op === 'between' ? [200, 399] : op === 'in' ? [] : t === 'number' ? 200 : t === 'boolean' ? true : '';
   return { field, op, ...(value !== undefined ? { value } : {}) };
 }
+const editedLook = (e, f, el) => {
+  const n = look(e);
+  if (f === 'label') n.label = el.value;
+  if (f === 'tone') n.tone = el.value;
+  if (f === 'hidden') { if (el.checked) n.hidden = true; else delete n.hidden; }
+  return n;
+};
 
 function onInput(e) {
   const el = e.target;
   const f = el.dataset?.f;
   if (!f) return;
-  if (SLOTS[S.slot].kind === 'dict') {
-    const tr = el.closest('tr[data-k]');
-    const entry = S.slots[S.slot].entries[tr.dataset.k];
-    if (f === 'label') entry.label = el.value;
-    if (f === 'tone') entry.tone = el.value;
-    if (f === 'hidden') { if (el.checked) entry.hidden = true; else delete entry.hidden; }
-    tr.classList.toggle('changed', canon(entry) !== canon(defaultSlot(S.slot).entries[tr.dataset.k]));
-    renderLight();
+  // A card's header-badge state row (journey view)
+  const row = el.closest('tr[data-k]');
+  if (row && !el.closest('[data-sid]')) {
+    const k = row.dataset.k;
+    if (el.closest('[data-shared]')) {
+      setEntry(null, k, editedLook(sharedEntry(slots(), k), f, el));
+      row.classList.toggle('changed', canon(sharedEntry(slots(), k)) !== canon(look(SLOTS[BH].entries[k])));
+    } else {
+      const step = el.closest('[data-step]').dataset.step;
+      setEntry(step, k, editedLook(entryAt(k, step).e, f, el));
+    }
+    renderLight(row);
     return;
   }
+  // A rules editor (shared or one card's)
   const at = ruleAt(el);
   if (!at) return;
-  const { rule } = at;
+  const { rule, s } = at;
   const condEl = el.closest('[data-c]');
   let structural = false;
   if (condEl) {
@@ -450,18 +670,23 @@ function onInput(e) {
       pair[f === 'v0' ? 0 : 1] = Number(el.value || 0);
       c.value = pair;
     }
-  } else if (f === 'mode') {
-    const list = condsOf(rule) || [];
-    rule.when = { [el.value]: list };
-  } else if (f === 'label') rule.label = el.value;
+  } else if (f === 'mode') rule.when = { [el.value]: condsOf(rule) || [] };
+  else if (f === 'label') rule.label = el.value;
   else if (f === 'tone') rule.tone = el.value;
   else if (f === 'hidden') { if (el.checked) rule.hidden = true; else delete rule.hidden; }
   else if (f === 'fb-mode') {
-    const s = S.slots[S.slot];
     s.fallback = el.value === 'custom' ? { label: 'HTTP {http.status}', tone: 'neutral' } : { slot: el.value };
     structural = true;
   }
   if (structural) { render(); syncPreviewInApp(); } else renderLight();
+}
+
+function gotoStep(step) {
+  const target = $(`#ts-step-${CSS.escape(step)}`, S.root);
+  if (!target) return;
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  target.classList.add('flash');
+  setTimeout(() => target.classList.remove('flash'), 1000);
 }
 
 async function onClick(e) {
@@ -469,33 +694,51 @@ async function onClick(e) {
   if (!btn || !S.root.contains(btn)) return;
   const act = btn.dataset.act;
   if (act === 'preview') return; // the checkbox's change event handles it
-  const s = S.slots?.[S.slot];
+  const stepEl = btn.closest('[data-step]');
+  const step = stepEl?.dataset.step;
+  const k = btn.closest('tr[data-k]')?.dataset.k;
+  const ref = btn.closest('.ts-rulesref');
   switch (act) {
     case 'close': return closeStudio();
-    case 'slot': S.slot = btn.dataset.slot; S.sample = null; return render();
-    case 'sample': S.sample = btn.dataset.sample; return renderLight();
-    case 'add-rule': s.rules.push({ id: newRuleId(s.rules), when: { all: [defaultCond(SLOTS[S.slot].fields[0])] }, label: 'NEW TAG', tone: 'neutral' }); break;
-    case 'del-rule': { const { i } = ruleAt(btn); s.rules.splice(i, 1); break; }
-    case 'up': case 'down': {
-      const { i } = ruleAt(btn); const j = act === 'up' ? i - 1 : i + 1;
-      if (j < 0 || j >= s.rules.length) return;
-      [s.rules[i], s.rules[j]] = [s.rules[j], s.rules[i]]; break;
-    }
-    case 'add-cond': {
-      const { rule } = ruleAt(btn);
-      const list = condsOf(rule);
-      if (list) list.push(defaultCond(SLOTS[S.slot].fields[0])); else rule.when = { all: [defaultCond(SLOTS[S.slot].fields[0])] };
+    case 'nav': S.nav = btn.dataset.nav; S.openRules = null; $('.ts-editor', S.root) && ($('.ts-editor', S.root).scrollTop = 0); return render();
+    case 'scenario': S.scenario = btn.dataset.sc; return renderLight();
+    case 'goto': e.preventDefault(); return gotoStep(btn.dataset.step);
+    // a card's own badge
+    case 'reset-entry': clearEntry(step, k); break;
+    case 'apply-all': applyEntryEverywhere(k, entryAt(k, step).e); S.msg = { kind: 'info', text: `“${entryAt(k, step).e.label}” is now the shared ${k} badge for every card.` }; break;
+    case 'reset-shared-entry': { const s = slots()[BH]; if (s) { delete s.entries[k]; if (!Object.keys(s.entries).length) delete slots()[BH]; } break; }
+    // a card's own rules
+    case 'rules-customise': { const sid = `${ref.dataset.base}:${step}`; ensureRules(sid); S.openRules = sid; break; }
+    case 'rules-toggle': { const sid = `${ref.dataset.base}:${step}`; S.openRules = S.openRules === sid ? null : sid; break; }
+    case 'rules-shared': delete slots()[`${ref.dataset.base}:${step}`]; S.openRules = null; break;
+    case 'rules-all': {
+      const base = ref.dataset.base;
+      slots()[base] = clone(slots()[`${base}:${step}`]);
+      for (const s of stepIdsWith(base)) delete slots()[`${base}:${s}`];
+      S.openRules = null;
+      S.msg = { kind: 'info', text: `These ${SLOTS[base].title} rules are now the shared rules for every card.` };
       break;
     }
-    case 'del-cond': {
-      const { rule } = ruleAt(btn); const list = condsOf(rule);
-      list.splice(Number(btn.closest('[data-c]').dataset.c), 1);
-      if (!list.length) delete rule.when;
+    case 'reset-shared-rules': delete slots()[S.nav.slice(2)]; break;
+    // rule editing
+    case 'add-rule': case 'del-rule': case 'up': case 'down': case 'add-cond': case 'del-cond': {
+      const sid = btn.closest('[data-sid]').dataset.sid;
+      const s = ensureRules(sid);
+      const base = splitSlotId(sid)[0];
+      const fields = SLOTS[base].fields;
+      if (act === 'add-rule') s.rules.push({ id: newRuleId(s.rules), when: { all: [defaultCond(fields[0])] }, label: 'NEW TAG', tone: 'neutral' });
+      else {
+        const { i, rule } = ruleAt(btn);
+        if (act === 'del-rule') s.rules.splice(i, 1);
+        if (act === 'up' || act === 'down') { const j = act === 'up' ? i - 1 : i + 1; if (j >= 0 && j < s.rules.length) [s.rules[i], s.rules[j]] = [s.rules[j], s.rules[i]]; }
+        if (act === 'add-cond') { const list = condsOf(rule); if (list) list.push(defaultCond(fields[0])); else rule.when = { all: [defaultCond(fields[0])] }; }
+        if (act === 'del-cond') { const list = condsOf(rule); list.splice(Number(btn.closest('[data-c]').dataset.c), 1); if (!list.length) delete rule.when; }
+      }
       break;
     }
     case 'insert': {
-      const look = btn.closest('.ts-look');
-      const input = $('input[data-f="label"]', look);
+      const lk = btn.closest('.ts-look');
+      const input = $('input[data-f="label"]', lk);
       const ph = `{${btn.dataset.ph}}`;
       const at = input.selectionStart ?? input.value.length;
       input.value = input.value.slice(0, at) + ph + input.value.slice(input.selectionEnd ?? at);
@@ -503,15 +746,14 @@ async function onClick(e) {
       input.focus();
       return;
     }
-    case 'reset-slot': S.slots[S.slot] = defaultSlot(S.slot); break;
-    case 'reset-entry': { const k = btn.closest('tr[data-k]').dataset.k; s.entries[k] = defaultSlot(S.slot).entries[k]; break; }
-    case 'discard': S.slots = publishedFull(); S.msg = null; break;
+    // shell
+    case 'discard': S.cfg = { slots: clone(S.published?.slots || {}) }; S.msg = null; break;
     case 'publish': S.modal = 'publish'; break;
     case 'modal-close': S.modal = null; break;
     case 'publish-confirm': return doPublish();
     case 'history': S.modal = 'history'; S.history = null; render(); return loadHistory();
     case 'rollback': return doRollback(Number(btn.dataset.version));
-    case 'conflict-load': await refreshPublished(); S.slots = publishedFull(); S.modal = null; S.msg = { kind: 'ok', text: `Loaded v${S.published?.version || 0}.` }; break;
+    case 'conflict-load': await refreshPublished(); S.cfg = { slots: clone(S.published?.slots || {}) }; S.modal = null; S.msg = { kind: 'ok', text: `Loaded v${S.published?.version || 0}.` }; break;
     case 'conflict-rebase': await refreshPublished(); S.modal = 'publish'; break;
     default: return;
   }
@@ -542,11 +784,12 @@ async function doPublish() {
   if (S.busy) return;
   const note = $('#ts-note', S.root)?.value || '';
   S.busy = true; render();
-  const r = await publishTagConfig({ baseVersion: S.published?.version || 0, slots: compact(S.slots), updatedBy: adminName(), note });
+  const r = await publishTagConfig({ baseVersion: S.published?.version || 0, slots: compact(slots()), updatedBy: adminName(), note });
   S.busy = false;
   if (r.ok) {
     S.published = r.data;
     cachePublished(r.data);
+    S.cfg = { slots: clone(r.data.slots || {}) };
     if (S.preview) { S.preview = false; setPreviewDraft(null); }
     S.modal = null;
     S.msg = { kind: 'ok', text: `Published v${r.data.version}. Every viewer picks it up on their next load.` };
@@ -570,7 +813,7 @@ async function doRollback(version) {
   const r = await rollbackTagConfig({ version, baseVersion: S.published?.version || 0, updatedBy: adminName() });
   S.busy = false;
   if (r.ok) {
-    S.published = r.data; cachePublished(r.data); S.slots = publishedFull();
+    S.published = r.data; cachePublished(r.data); S.cfg = { slots: clone(r.data.slots || {}) };
     S.modal = null; S.msg = { kind: 'ok', text: `Rolled back: v${version} is live again as v${r.data.version}.` };
   } else if (r.httpStatus === 409 && r.data?.error === 'VERSION_CONFLICT') {
     await refreshPublished(); S.history = null; loadHistory();
@@ -599,17 +842,16 @@ export async function openStudio() {
     document.body.appendChild(S.root);
   }
   S.published = getPublished();
-  S.slots = getDraft() ? fullSlots(getDraft()) : publishedFull();
+  S.cfg = { slots: clone(getDraft()?.slots || S.published?.slots || {}) };
   S.preview = !!getDraft();
   S.open = true; S.modal = null; S.msg = null;
   S.root.hidden = false;
   document.body.classList.add('ts-open');
   render();
-  // The freshest published version — the draft is re-based on it if untouched.
-  const before = canon(compact(S.slots));
-  const wasPub = canon(compact(publishedFull()));
+  // Re-base an untouched draft on the freshest published version.
+  const untouched = canon(compact(slots())) === canon(pubSlots());
   await refreshPublished();
-  if (before === wasPub) S.slots = publishedFull();
+  if (untouched) S.cfg = { slots: clone(S.published?.slots || {}) };
   render();
 }
 

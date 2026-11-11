@@ -476,7 +476,7 @@ function renderResponse() {
       id: 'beat-checkout-res', n: cusCard ? 2 : null, method: 'POST', path: '/v1/checkout',
       ...beatBadge(key, vars),
       inner: `
-        <div class="eng-pillrow">${httpPillHTML(lastSessionStatus, ok ? null : String(lastSession.error || 'ERROR'))}${badgePillHTML(key, vars)}</div>
+        <div class="eng-pillrow">${httpPillHTML(lastSessionStatus, ok ? null : String(lastSession.error || 'ERROR'), 'checkout-res')}${badgePillHTML(key, vars, 'checkout-res')}</div>
         ${renderJSONView(lastSession)}`,
     });
   }

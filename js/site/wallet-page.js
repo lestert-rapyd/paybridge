@@ -30,7 +30,7 @@
    right. js/steps.js routes, wires and paints.
    ───────────────────────────────────────────────────────────── */
 
-import { beatBadge, httpPillHTML } from '../tags/resolve.js';
+import { beatBadge, httpPillHTML, stepOf } from '../tags/resolve.js';
 import { state } from '../state.js';
 import { VERTICALS, activeWallet } from '../verticals.js';
 import * as customers from '../customers.js';
@@ -572,7 +572,7 @@ function responseCardHTML(id, n, method, path, b, [okKey, okVars], verdict = nul
   return beatCardHTML({
     id, n, method, path, ...badge,
     inner: `
-      <div class="eng-pillrow">${httpPillHTML(b.httpStatus, good ? null : b.data?.error || 'failed')}${(verdict?.pills || [])
+      <div class="eng-pillrow">${httpPillHTML(b.httpStatus, good ? null : b.data?.error || 'failed', stepOf(id))}${(verdict?.pills || [])
         .map(([t, cls]) => `<span class="wh-pill ${esc(cls)}">${esc(t)}</span>`).join('')}</div>
       ${verdict?.note || ''}
       ${renderJSONView(b.data ?? { error: 'no response body' })}`,
