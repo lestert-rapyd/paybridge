@@ -62,9 +62,9 @@ import { beatCardHTML } from '../customer-beat.js';
 import { renderJSONView } from '../json-view.js';
 import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
 import { setActiveTab, setStatus, esc } from '../ui.js';
+import { ingestWebhooks, setWatch } from '../engine/sequence.js';
 import { detectBrand, brandLabel, formatNumber, formatExpiry, parseExpiry, luhn, expiryValid } from '../sync.js';
 import { render3DS, renderExternal3DS } from '../screens.js';
-import { eventCardHTML } from '../webhooks.js';
 import { seamWrapHTML, SEAM_LABELS, hostedAddress, setAddress, pagePath } from '../seam.js';
 import { logConsole, returnUrl, sharedToolkitMode } from '../flows/toolkit-common.js';
 import { siteHeaderHTML, backLinkHTML } from './chrome.js';
@@ -838,6 +838,7 @@ function watchWebhooks(r) {
     // Keep what an earlier tick found if a read fails this time.
     const next = stitchEvents(byScope, r.startAt - SKEW_MS);
     if (next.length >= whEvents.length) whEvents = next;
+    ingestWebhooks(whEvents); // the sequence files each under its call / async step
     for (const e of whEvents) {
       const k = e.event_id || `${e.type}|${e.received_at}`;
       if (!announced.has(k)) { announced.add(k); logConsole('webhook', `${e.type} · via ${e.via.map((v) => LINK_LABEL[v] || v).join(' + ')}`, 'poll', 'ok'); }
@@ -847,55 +848,30 @@ function watchWebhooks(r) {
     const now = Date.now();
     const over = now > r.startAt + WATCH_MS || (r.finishedAt && now > r.finishedAt + AFTER_DONE_MS);
     whLive = !(complete || over);
+    setWatch('addcard', watchInfo(r));
     repaintPanels();
     if (whLive) whTimer = setTimeout(tick, 3000);
   };
   whTimer = setTimeout(tick, 1500);
 }
+function watchInfo(r) {
+  const ids = [r.auth?.body?.merchant_reference_id, r.cardId].filter(Boolean).join(' · ');
+  const got = new Set(whEvents.map((e) => e.type));
+  return {
+    live: whLive, configured: whConfigured,
+    text: whLive ? 'Listening — stitching by reference, customer and card'
+      : expectedAddCardEvents(r.method).every((t) => got.has(t)) ? 'All expected card events delivered' : 'Stopped listening for card events',
+    id: ids || r.cus,
+    note: !whLive && expectedAddCardEvents(r.method).includes('CARD_ADDED_SUCCESSFULLY') && !got.has('CARD_ADDED_SUCCESSFULLY')
+      ? 'Card events carry only their card_*** — and Rapyd sends them only when they’re registered for the MID (Client Portal → Developers → Webhooks).' : '',
+  };
+}
 function stopWatches() {
   if (whTimer) clearTimeout(whTimer);
   whTimer = null;
   whLive = false;
+  setWatch('addcard', null);
   stopPolls();
-}
-
-const shortId = (id) => (id && id.length > 18 ? `${id.slice(0, 14)}…` : id || '');
-function linkPillsHTML(e) {
-  const d = e.raw?.data || {};
-  const ids = { ref: d.merchant_reference_id || e.merchant_reference_id, customer: d.customer_token || d.customer, card: /^card_/.test(d.id || '') ? d.id : null };
-  return e.via.map((v) => `<span class="wh-link">${esc(LINK_LABEL[v] || v)}${ids[v] ? ` <code>${esc(shortId(ids[v]))}</code>` : ''}</span>`).join('');
-}
-
-export function addCardWebhooksHTML() {
-  if (!run) return '';
-  const expected = expectedAddCardEvents(run.method);
-  const got = new Set(whEvents.map((e) => e.type));
-  const label = `<div class="wh-beat-label">Add a card · <code>${esc(run.cus)}</code></div>`;
-  if (whConfigured === false) return `${label}<div class="wh-note">Webhook receiver not configured — add Vercel KV + register <code>/api/webhook</code>.</div>`;
-  const status = whLive ? 'Listening — stitching by reference, customer and card'
-    : expected.every((t) => got.has(t)) ? 'All expected events delivered' : 'Stopped listening';
-  const ids = [run.auth?.body?.merchant_reference_id, run.cardId].filter(Boolean).map(shortId).join(' · ');
-  let html = `${label}
-    <div class="wh-status ${whLive ? 'live' : ''}"><span class="wh-status-dot"></span>${esc(status)}<span class="wh-ref">${esc(ids)}</span></div>
-    <div class="wh-expect-row">${expected.map((t) => `<span class="wh-expect${got.has(t) ? ' got' : ''}">${got.has(t) ? '✓ ' : ''}${esc(t)}</span>`).join('')}</div>
-    <div class="wh-expect-note">${run.method === 's2s-external'
-    ? 'The card events carry only their <code>card_***</code> — the add-card response names it.'
-    : `No single id links these: the payment carries ${run.method === 's2s-rapyd' ? 'the reference and ' : ''}the <code>cus_***</code> (<code>customer_token</code>), the card events only their <code>card_***</code> — which <code>PAYMENT_UPDATED</code>${isHtp(run.method) ? ' or Rapyd’s page' : ''} reveals.`}</div>`;
-  if (!whEvents.length) {
-    return html + (whLive ? '<div class="wh-waiting">Waiting for Rapyd to POST the first event to <code>/api/webhook</code>…</div>'
-      : `<div class="wh-note">Nothing delivered for this run. Rapyd sends these only for events registered for the MID (Client Portal → Developers → Webhooks).</div>`);
-  }
-  const missingCard = !whLive && ['CUSTOMER_PAYMENT_METHOD_CREATED', 'CARD_ADDED_SUCCESSFULLY'].some((t) => expected.includes(t) && !got.has(t));
-  if (missingCard) {
-    html += `<div class="wh-note">No card event arrived for <code>${esc(run.cardId || 'the card')}</code>. They carry only their <code>card_***</code>, and Rapyd sends them only when they’re registered for the MID (Client Portal → Developers → Webhooks).</div>`;
-  }
-  const last = whEvents.length - 1;
-  return html + whEvents.map((e, i) => `
-    <div class="wh-stitch">
-      <div class="wh-stitch-head"><span class="wh-beat-n">${i + 1}</span>${ADD_CARD_EVENTS[e.type] ? `<span class="wh-stitch-note">${esc(ADD_CARD_EVENTS[e.type])}</span>` : ''}</div>
-      <div class="wh-stitch-links"><span class="wh-stitch-by">linked by</span>${linkPillsHTML(e)}</div>
-      ${eventCardHTML(e, i === last)}
-    </div>`).join('');
 }
 
 /* ── Engine room ─────────────────────────────────────────── */

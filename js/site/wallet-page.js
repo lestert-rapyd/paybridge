@@ -44,8 +44,8 @@ import { beatCardHTML } from '../customer-beat.js';
 import { renderJSONView } from '../json-view.js';
 import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
 import { setActiveTab, setStatus, esc } from '../ui.js';
+import { ingestWebhooks } from '../engine/sequence.js';
 import { currencyDecimals } from '../sync.js';
-import { eventCardHTML } from '../webhooks.js';
 import { siteHeaderHTML, moneyText } from './chrome.js';
 import {
   DEPOSIT_ID, SANDBOX_PAYOUT_CARD, walletEntries, walletBalance, isDepositEntry,
@@ -609,16 +609,11 @@ export function walletResponseCardsHTML() {
 /** The Webhooks tab: the payout's events as the ledger poller reads them
     (verified ones settle it; the rest earn a Retrieve Payout), or what to
     expect. '' before a payout exists. */
-export function walletWebhooksHTML() {
-  if (!mine() || !wd.reference) return '';
-  const events = eventsFor(wd.reference);
-  const label = `<div class="wh-beat-label"><span class="wh-beat-n">4</span>Withdrawal · <code>POST /v1/payouts</code></div>`;
-  if (!events.length) {
-    return `${label}
-      <div class="wh-expect-row"><span class="wh-expect">PAYOUT_COMPLETED</span><span class="wh-expect">PAYOUT_FAILED</span></div>
-      <div class="wh-expect-note">Filed under <code>${esc(wd.reference)}</code>. Until one arrives verified, the ledger confirms the payout with <code>GET /v1/payouts/{id}</code>.</div>`;
-  }
-  return `${label}${events.map((e, i) => eventCardHTML(e, i === 0)).join('')}`;
+/** The payout's PAYOUT_* events (the ledger polls them) go to the engine
+    room's sequence, which files them under the payout's async event. */
+export function syncWalletWebhooks() {
+  if (!mine() || !wd.reference) return;
+  ingestWebhooks(eventsFor(wd.reference));
 }
 
 /** The header status pill follows the payout settling (ledger notify) — once

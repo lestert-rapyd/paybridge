@@ -33,6 +33,7 @@ import { clientDetails } from '../client-details.js';
 import { renderJSONView } from '../json-view.js';
 import { setActiveTab, setStatus, esc } from '../ui.js';
 import { startWebhookWatch, setWatchPaymentId } from '../webhooks.js';
+import { setPanel } from '../engine/sequence.js';
 import { renderProcessing, render3DS, renderError, renderCancelled } from '../screens.js';
 import { seamWrapHTML, SEAM_LABELS, hostedAddress, setAddress, pagePath } from '../seam.js';
 import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
@@ -442,29 +443,27 @@ function syncControlVisibility() {
    visible. The client-side toolkit.config JSON stays OUTSIDE the cards: it
    isn't an API call. */
 function renderRequest() {
-  const el = $('#panel-request');
-  if (!el) return;
   const st = newSaltTimestamp();
   const body = displayBody();
   const cusCard = customerRequestCardHTML();
   const tkSection = mode === 'hosted' ? '' : `
     <div class="req-bodylabel" style="margin-top:18px"><p class="eng-label">Toolkit config · client-side JS</p><span class="hint">updates with toolkit.config on the left</span></div>
     ${renderJSONView(toolkitConfig(lastSession?.data?.id))}`;
-  el.innerHTML = cusCard + beatCardHTML({
+  // The toolkit config follows the checkout card, so the sequence files it
+  // under that call's request (it is the client-side half of the same step).
+  setPanel('request', cusCard + beatCardHTML({
     id: 'beat-checkout', n: cusCard ? 2 : null, method: 'POST', path: '/v1/checkout',
     ...(lastSession?.data?.id ? beatBadge('request.sent') : {}),
     inner: `
       ${headersHTML(st)}
       <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">no card data — collected by the iframe</span></div>
       ${renderJSONView(body)}`,
-  }) + fxCardHTML() + tkSection;
+  }) + tkSection + fxCardHTML());
   fillCustomerSignature();
   fillSignature($('#beat-checkout'), 'post', '/v1/checkout', st, body); // live — recomputes with the body
 }
 
 function renderResponse() {
-  const el = $('#panel-response');
-  if (!el) return;
   const cusCard = customerResponseCardHTML();
   let card = '';
   if (lastSession) {
@@ -480,33 +479,28 @@ function renderResponse() {
         ${renderJSONView(lastSession)}`,
     });
   }
-  if (!cusCard && !card) return; // nothing sent yet — leave app.js's empty state
-  el.innerHTML = cusCard + card;
+  setPanel('response', cusCard + card);
 }
 
 /* Express S2S request/response paints — the right panel flips from
    POST /v1/checkout to POST /v1/payments when the saved token is charged. */
 function paintExpressRequest(body) {
-  const el = $('#panel-request');
-  if (!el) return;
   const st = newSaltTimestamp();
   const cusCard = customerRequestCardHTML();
-  el.innerHTML = cusCard + beatCardHTML({
+  setPanel('request', cusCard + beatCardHTML({
     id: 'beat-express', n: cusCard ? 2 : null, method: 'POST', path: '/v1/payments',
     ...beatBadge('toolkit.express'),
     inner: `
       ${headersHTML(st)}
       <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">express · saved card_*** token — no card data</span></div>
       ${renderJSONView(body)}`,
-  });
+  }));
   fillCustomerSignature();
   fillSignature($('#beat-express'), 'post', '/v1/payments', st, body);
 }
 function paintExpressResponse(httpStatus, data) {
-  const el = $('#panel-response');
-  if (!el) return;
   const cusCard = customerResponseCardHTML();
-  el.innerHTML = cusCard + paymentResponseCardHTML({ id: 'beat-express-res', n: cusCard ? 2 : null, httpStatus, data });
+  setPanel('response', cusCard + paymentResponseCardHTML({ id: 'beat-express-res', n: cusCard ? 2 : null, httpStatus, data }));
 }
 
 /** See own-fields.js's refreshRightPanel — same reasoning. renderResponse()

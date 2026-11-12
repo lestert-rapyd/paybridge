@@ -16,6 +16,7 @@ import { fireMethodsSync } from './site/account.js';
 import { state, setState, subscribe } from './state.js';
 import { setActiveTab, setStatus, esc } from './ui.js';
 import { clearPaymentWatch, repaintWebhooks } from './webhooks.js';
+import { clearPanels, repaintSequence } from './engine/sequence.js';
 import { formatAmount, validAmount, currencyDecimals } from './sync.js';
 import { getFxRate, getLiveToken, setLiveToken } from './api.js';
 import { redactKey } from './signing.js';
@@ -450,10 +451,10 @@ function renderCheckout() {
   syncFx();
 }
 
-/* ── Right: response + webhooks empties (flows fill Request) ── */
+/* ── Right: a flow reset clears the previous payment's response (the
+   sequence view shows its own empty state); the console starts over. ── */
 function renderBackend() {
-  $('#panel-response').innerHTML = emptyState('⇄', `Rapyd's response appears here once a call is made.`);
-  $('#panel-webhooks').innerHTML = emptyState('📡', `Incoming webhooks land here as Rapyd fires them. Polling fills in if a webhook is delayed.`);
+  clearPanels('client', ['response']);
   $('#panel-console').innerHTML = emptyState('▸', `Toolkit lifecycle events stream here once the toolkit renders.`);
   $('#rtab-console').style.display = state.model === 'toolkit' ? '' : 'none';
 }
@@ -471,10 +472,10 @@ function toggleLeftView() {
   $('.browser').hidden = isBackoffice;
   $('#offstage').hidden = isBackoffice || !$('#offstage').innerHTML;
   $('#backoffice').hidden = !isBackoffice;
+  repaintSequence(); // the engine room follows the left tab (each keeps its own calls)
   if (isBackoffice) backOffice.render();
-  // Back office may have repainted the right panel's Request/Response while
-  // the SE was away — repaint them from the client page's own persisted
-  // state on the way back (webhooks.js already guards its own panel).
+  // Repaint the client page's calls from its own persisted state on the way
+  // back — a page may have moved on while the back office was showing.
   else if (isCheckout()) FLOWS[state.model].refreshRightPanel?.();
   // Any other page is cheap and stateless to redraw — and must be, if the
   // SE switched credentials or forgot the customer from the back office.
@@ -1043,12 +1044,11 @@ function renderAll(_state, patch) {
   clearPaymentWatch(); // the customer's webhook section survives; this payment's doesn't
   resetSteps();        // back to sign-in (or a requested landing) — signed-in view if the customer survived
   syncControlStates();
-  setActiveTab('request');
+  setActiveTab('sequence');
   setStatus('Awaiting input', 'idle');
   renderBackend();
   renderCheckout();
-  // renderBackend() wipes #panel-webhooks back to its empty state, but the
-  // customer (and its beat) survives a flow reset — put its section back.
+  // The customer (and its watch) survives a flow reset — refresh its status.
   repaintWebhooks();
   resyncRememberedCustomer(); // a customer restored from storage re-reads its cards once
 }

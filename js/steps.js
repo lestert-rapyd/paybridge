@@ -35,12 +35,12 @@
 
    Two invariants this module must not break:
 
-   · A page change writes #panel-request ONLY — except the pages whose
-     subject IS a response (the register page's POST /v1/customers, the
-     payment-methods page's list call, the wallet page's payout once one
-     was sent — whose PAYOUT_* events webhooks.js paints as a section of
-     its own while the wallet is on screen). #panel-response and #panel-webhooks
-     otherwise keep the last real call and its events.
+   · A page change hands the engine room (engine/sequence.js) its REQUEST
+     side only — except the pages whose subject IS a response (the register
+     page's POST /v1/customers, the payment-methods page's list call, the
+     wallet page's payout once one was sent). The response side otherwise
+     keeps the last real call, so its event — and the webhooks filed under
+     it — stays in the sequence.
    · A page change never calls setActiveTab(). Only the SE firing a call
      moves the tab (design system §5: never steal the tab mid-narration).
    ───────────────────────────────────────────────────────────── */
@@ -72,15 +72,15 @@ import {
 } from './site/lookup.js';
 import { clearPendingDeposit } from './site/wallet.js';
 import {
-  addCardPageHTML, addCardRequestCardsHTML, fillAddCardSignatures, addCardResponseCardsHTML, addCardWebhooksHTML,
+  addCardPageHTML, addCardRequestCardsHTML, fillAddCardSignatures, addCardResponseCardsHTML,
   setAddCardHooks, enterAddCard, resetAddCard, startAddCard, setAddCardUse, setAddCardField, fillAddCardTestCard,
   retryAddCard, returnFromRapyd, reopenAddCardPage,
 } from './site/add-card.js';
-import { repaintWebhooks, setExtraWebhookSection } from './webhooks.js';
+import { setPanel } from './engine/sequence.js';
 import {
   walletPageHTML, refreshWalletRegions, setWalletTab, setWalletAmount, pickWalletChip, pickWalletDest,
   startDeposit, fireWithdraw, walletRequestCardsHTML, fillWalletSignatures, walletResponseCardsHTML,
-  walletWebhooksHTML, resetWalletPage, syncWalletStatus,
+  syncWalletWebhooks, resetWalletPage, syncWalletStatus,
 } from './site/wallet-page.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -305,21 +305,19 @@ function customerGetCardHTML(cus) {
 
     No prose. A page that calls nothing shows the empty state the panel already
     ships with, plus whatever earlier beats are still inspectable — the SE says
-    what the page is about. Writes #panel-request always; touches
-    #panel-response ONLY where a response is the page's subject (register,
+    what the page is about. Sets the request side always; the response side
+    ONLY where a response is the page's subject (register,
     payment methods) — anywhere else a write could clobber a payment response
     the SE stepped back from. */
 export function renderStepPanels() {
-  const req = $('#panel-request');
-  if (!req) return;
   const cus = customers.getCustomerId();
-  const res = $('#panel-response');
+  const req = (html) => setPanel('request', html);
+  const res = (html) => { if (html) setPanel('response', html); };
 
   if (state.step === 'account') {
-    req.innerHTML = customerRequestCardHTML();
+    req(customerRequestCardHTML());
     fillCustomerSignature();
-    const resCard = customerResponseCardHTML();
-    if (res && resCard) res.innerHTML = resCard;
+    res(customerResponseCardHTML());
     return;
   }
 
@@ -328,25 +326,22 @@ export function renderStepPanels() {
     // while it's in flight and after it answered (its response IS the subject).
     const lookupCard = lookupRequestCardHTML();
     if (lookupCard) {
-      req.innerHTML = lookupCard;
+      req(lookupCard);
       fillLookupSignature();
-      const resCard = lookupResponseCardHTML();
-      if (res && resCard) res.innerHTML = resCard;
+      res(lookupResponseCardHTML());
       return;
     }
     const signedIn = isSignedIn();
-    req.innerHTML = signedIn ? customerGetCardHTML(cus) : emptyRequestHTML();
+    req(signedIn ? customerGetCardHTML(cus) : '');
     if (signedIn) fillSignature($('#beat-cus-get'), 'get', getPainted.path, getPainted.salt, null, 'beat-cus-get');
     return;
   }
 
   if (state.step === 'methods') {
-    const listCard = methodsRequestCardHTML();
-    req.innerHTML = (listCard + customerRequestCardHTML()) || emptyRequestHTML();
+    req(methodsRequestCardHTML() + customerRequestCardHTML());
     fillMethodsSignature();
     fillCustomerSignature();
-    const resCard = methodsResponseCardHTML();
-    if (res && resCard) res.innerHTML = resCard;
+    res(methodsResponseCardHTML());
     return;
   }
 
@@ -354,42 +349,32 @@ export function renderStepPanels() {
   if (state.step === 'add-card') { paintAddCardPanels(); return; }
 
   // shop / product / bag / orders — browsing calls nothing; earlier beats stay inspectable.
-  req.innerHTML = customerRequestCardHTML() || emptyRequestHTML();
+  req(customerRequestCardHTML());
   fillCustomerSignature();
 }
 
 /* The wallet page: the withdrawal's beats (or the prepared POST /v1/payouts on
-   the Withdraw tab) own Request; Response and Webhooks only once a withdrawal
-   has answered — before that they keep the last real call's. */
+   the Withdraw tab) own the request side; responses only once a withdrawal
+   has answered — before that the last real call's stay. */
 function paintWalletPanels() {
-  const req = $('#panel-request');
-  const res = $('#panel-response');
-  req.innerHTML = walletRequestCardsHTML() || customerRequestCardHTML() || emptyRequestHTML();
+  setPanel('request', walletRequestCardsHTML() || customerRequestCardHTML());
   fillWalletSignatures();
   fillCustomerSignature();
   const resCards = walletResponseCardsHTML();
-  if (res && resCards) res.innerHTML = resCards;
-  repaintWebhooks(); // webhooks.js stays the one writer — the payout section is registered below
+  if (resCards) setPanel('response', resCards);
+  syncWalletWebhooks();
 }
 
-/* The add-card page: its beats own Request; Response and Webhooks once the
-   first call has answered (before that they keep the last real call's). */
+/* The add-card page: its beats own the request side; responses once the
+   first call has answered (before that the last real call's stay). */
 function paintAddCardPanels() {
-  const req = $('#panel-request');
-  const res = $('#panel-response');
-  req.innerHTML = addCardRequestCardsHTML() || emptyRequestHTML();
+  setPanel('request', addCardRequestCardsHTML());
   fillAddCardSignatures();
   const resCards = addCardResponseCardsHTML();
-  if (res && resCards) res.innerHTML = resCards;
-  repaintWebhooks();
+  if (resCards) setPanel('response', resCards);
 }
 setAddCardHooks({ page: () => repaintClient(), panels: () => paintAddCardPanels() });
-setExtraWebhookSection(() => (state.step === 'wallet' ? walletWebhooksHTML() : state.step === 'add-card' ? addCardWebhooksHTML() : ''));
 
-/* The Request tab's own resting state, matching app.js's other empty panels. */
-function emptyRequestHTML() {
-  return `<div class="eng-empty"><div class="ee-ico">◇</div><div class="ee-text">The request body appears here as it's drafted.</div></div>`;
-}
 
 /* Pages that follow the customer store. The register page's footer changes
    with the beat (Skip → Continue), and fireCreateCustomer() only repaints

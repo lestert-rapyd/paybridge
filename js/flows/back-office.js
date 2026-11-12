@@ -47,6 +47,7 @@ import { headersHTML, fillSignature, newSaltTimestamp } from '../signing.js';
 import { classify, isTrusted } from '../classify.js';
 import { brandLabel, currencyDecimals, validAmount } from '../sync.js';
 import { eventCardHTML } from '../webhooks.js';
+import { setPanel } from '../engine/sequence.js';
 import {
   getLedger, getEntry, subscribeLedger, recordPayment, recordRefund, updateRefund,
   setPaymentId, updateStatus, applyPaymentObject, applyPayoutObject, walletBalances, refundedTotals,
@@ -635,8 +636,17 @@ function mitBody(c, amountInput, ref) {
 }
 
 /* ── Right panel: prepared / fired requests ───────────────── */
+/* The engine room's back-office source (engine/sequence.js): these painters
+   still write markup per side, and the sequence view groups it into one
+   event (headers → request → response → webhooks). A side is a tiny shim
+   so the painters keep their shape: assigning innerHTML hands the side over,
+   and querySelector (fillSignature) reads the painted panel. */
+const boPanel = (side) => ({
+  set innerHTML(html) { setPanel(side, html, { source: 'backoffice' }); },
+  querySelector: (sel) => document.querySelector(`#panel-sequence ${sel}`),
+});
 function paintGetRequest(entry, prepared) {
-  const el = $('#panel-request');
+  const el = boPanel('request');
   if (!el || state.leftView !== 'backoffice') return;
   const path = `/v1/payments/${entry.payment_id}`;
   const st = newSaltTimestamp();
@@ -647,7 +657,7 @@ function paintGetRequest(entry, prepared) {
     <div class="jsonv"><div class="jsonv-body"><span class="jv-empty">— GET has no request body —</span></div></div>`;
   fillSignature(el, 'get', path, st, null);
 }
-/* #panel-response has one owner at a time: the actionSeq of whoever painted
+/* The response side has one owner at a time: the actionSeq of whoever painted
    it last. An async result repaints only while it still owns the panel — so
    a slow GET can't clobber a newer action's response, yet one superseded by
    an action that never touched this panel (opening the charge form) still
@@ -656,7 +666,7 @@ let responseOwner = 0;
 
 /** `httpStatus` null = still in flight; 0 = no response (network/CORS). */
 function paintResponse(data, ok, label, httpStatus = null, owner = actionSeq) {
-  const el = $('#panel-response');
+  const el = boPanel('response');
   if (!el || state.leftView !== 'backoffice') return;
   responseOwner = owner;
   const kind = httpStatus == null ? 'pending' : ok ? 'success' : 'failure';
@@ -684,7 +694,7 @@ const isGateError = (data) => /^(LIVE_|UNKNOWN_PROFILE$|MISSING_)/.test(String(d
 /* A gate error (MISSING_KEYS 500, LIVE_*) is a definite refusal — never parked. */
 const unknownOutcome = (httpStatus, data) => !isGateError(data) && (!httpStatus || httpStatus >= 500);
 function paintRefundRequest(body) {
-  const el = $('#panel-request');
+  const el = boPanel('request');
   if (!el || state.leftView !== 'backoffice') return;
   const st = newSaltTimestamp();
   el.innerHTML = `
@@ -695,7 +705,7 @@ function paintRefundRequest(body) {
   fillSignature(el, 'post', '/v1/refunds', st, body);
 }
 function paintChargeRequest(body, sentNow) {
-  const el = $('#panel-request');
+  const el = boPanel('request');
   if (!el || state.leftView !== 'backoffice') return;
   const st = newSaltTimestamp();
   el.innerHTML = `
@@ -706,7 +716,7 @@ function paintChargeRequest(body, sentNow) {
   fillSignature(el, 'post', '/v1/payments', st, body);
 }
 function paintListRequest(prepared) {
-  const el = $('#panel-request');
+  const el = boPanel('request');
   if (!el || state.leftView !== 'backoffice') return;
   const cus = customers.getCustomerId();
   if (!cus) return;
@@ -721,7 +731,7 @@ function paintListRequest(prepared) {
 }
 /* GET /v1/customers/{id} — prepared on hover, fired from the customer view. */
 function paintCustomerGetRequest(prepared) {
-  const el = $('#panel-request');
+  const el = boPanel('request');
   const cus = customers.getCustomerId();
   if (!el || !cus || state.leftView !== 'backoffice') return;
   const path = `/v1/customers/${cus}`;
@@ -738,8 +748,8 @@ function paintCustomerGetRequest(prepared) {
    its own card is that it stays readable long after the payment moved on. */
 function paintCreateBeat() {
   if (state.leftView !== 'backoffice') return;
-  const req = $('#panel-request');
-  const res = $('#panel-response');
+  const req = boPanel('request');
+  const res = boPanel('response');
   const mySeq = ++actionSeq; // supersede an in-flight GET so it can't overwrite this
   if (req) { req.innerHTML = customerRequestCardHTML(); fillCustomerSignature(); }
   const card = customerResponseCardHTML();
@@ -775,7 +785,7 @@ async function fireRetrieveCustomer() {
    client watcher (webhooks.js eventCardHTML) — escaped, and carrying the
    "unverified — not trusted" chip, so a forged event reads as one here too. */
 function paintWebhookCard(events, label = 'back office · refund') {
-  const el = $('#panel-webhooks');
+  const el = boPanel('webhooks');
   if (!el || state.leftView !== 'backoffice') return;
   el.innerHTML = `
     <div class="wh-status live"><span class="wh-status-dot"></span>Delivered<span class="wh-ref">${esc(label)}</span></div>
@@ -847,7 +857,7 @@ async function retrievePayoutTile(reference) {
   if (!entry?.payout_id || state.leftView !== 'backoffice') return;
   const mySeq = ++actionSeq;
   const path = `/v1/payouts/${entry.payout_id}`;
-  const el = $('#panel-request');
+  const el = boPanel('request');
   if (el) {
     const st = newSaltTimestamp();
     el.innerHTML = `

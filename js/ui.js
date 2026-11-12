@@ -16,11 +16,19 @@ export function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, (c) => ESC_MAP[c]);
 }
 
+/* The engine room has two tabs: Sequence (every call as one event —
+   headers, request, response, webhooks) and Console. The flows still name
+   the part they want in view ('request' | 'response' | 'webhooks'): that
+   switches to Sequence and asks it to bring the part into view. */
 export function setActiveTab(name) {
+  const tab = name === 'console' ? 'console' : 'sequence';
   document.querySelectorAll('.rtab').forEach(b =>
-    b.classList.toggle('active', b.dataset.tab === name));
+    b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.rpanel').forEach(p =>
-    p.classList.toggle('active', p.dataset.panel === name));
+    p.classList.toggle('active', p.dataset.panel === tab));
+  if (tab === 'sequence' && name !== 'sequence') {
+    window.dispatchEvent(new CustomEvent('paybridge:reveal', { detail: name }));
+  }
 }
 
 /** kind: idle | drafting | processing | ok | action | error.

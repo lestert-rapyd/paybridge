@@ -84,9 +84,7 @@
           <span class="eyebrow-desc">what the API does</span>
         </div>
         <div class="rtabs">
-          <button class="rtab active" data-tab="request">Request</button>
-          <button class="rtab" data-tab="response">Response</button>
-          <button class="rtab" data-tab="webhooks">Webhooks</button>
+          <button class="rtab active" data-tab="sequence">Sequence</button>
           <button class="rtab" data-tab="console" id="rtab-console">Console</button>
           <div class="status-ind idle" id="status-ind">
             <span class="si-dot"></span><span class="si-text">Awaiting input</span>
@@ -96,9 +94,9 @@
              renderSeamStrip): who hosts the card form, PCI scope, redirects. -->
         <div class="seam-strip-host" id="seam-strip-host"></div>
         <div class="rpanels">
-          <div class="rpanel active" data-panel="request" id="panel-request"></div>
-          <div class="rpanel" data-panel="response" id="panel-response"></div>
-          <div class="rpanel" data-panel="webhooks" id="panel-webhooks"></div>
+          <!-- One card per event: headers → request → response → webhooks
+               (js/engine/sequence.js). -->
+          <div class="rpanel active" data-panel="sequence" id="panel-sequence"></div>
           <div class="rpanel" data-panel="console" id="panel-console"></div>
         </div>
       </section>

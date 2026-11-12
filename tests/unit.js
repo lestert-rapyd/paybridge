@@ -76,7 +76,9 @@ import {
 
 // Tag registry (js/tags/) — the Tag Studio's data model and resolver.
 import { resolveTag, resolveBadge, httpCtx, paymentCtx, resolveBeatBadge, pillHTML, beatClass, whClass, httpPillHTML } from '../js/tags/resolve.js';
-import { SLOTS as TAG_SLOTS, CALLS, JOURNEYS, STEPS } from '../js/tags/registry.js';
+import { SLOTS as TAG_SLOTS, CALLS, JOURNEYS, STEPS, EXPECT, ASYNC, WEBHOOK_NOTES, expectFor } from '../js/tags/registry.js';
+// The sequence view's pure half — attribution, criteria, id extraction.
+import { attribute, checkCriterion, scenarioOf, idsFrom, linksMatch, getPath } from '../js/engine/sequence.js';
 import { beatCardHTML } from '../js/customer-beat.js';
 import { setPublished, setDraft, sanitizeConfig, withConfig } from '../js/tags/store.js';
 import { paymentBadge, httpLabel, paymentResponseCardHTML } from '../js/flows/shared.js';
@@ -1438,6 +1440,129 @@ test('tags: the journey map only names real steps and keys', () => {
 test('tags: unknown step slots are dropped by sanitizeConfig', () => {
   const c = sanitizeConfig({ slots: { 'beat.header:BAD STEP': { entries: {} }, 'nope:pay': { rules: [] }, 'beat.header:pay': { entries: {} } } });
   eq(Object.keys(c.slots), ['beat.header:pay']);
+});
+
+
+/* ── Sequence view (engine/sequence.js) ──────────────────────
+   Fixtures follow the user's add-card evidence (2026-11-05): the $0-auth's
+   PAYMENT_SUCCEEDED carries the cus_ but no card_; the card events carry
+   only their card_ id; PAYMENT_UPDATED carries both. */
+const CUS = 'cus_d4cbd6438aaea079ddda64b5b692d8e1';
+const PAY = 'payment_d68f6484bf0548fd590855daa9bc7e36';
+const CARD = 'card_ae29670ee71eae4a848b3bf15a90ccfe';
+const T0 = 1_800_000_000_000;
+const wh = (type, data, at, id = `wh_${type}_${at}`) => ({ event_id: id, type, received_at: at, raw: { type, data } });
+
+test('sequence: idsFrom reads shallow ids by prefix, ignores deep ones', () => {
+  const ids = idsFrom(new Map([
+    ['data.id', PAY], ['data.customer_token', CUS], ['data.payment_method', CARD],
+    ['data.payment_method_data.id', 'card_deep'], ['merchant_reference_id', 'pb_ref_1'], ['customer', CUS],
+  ]));
+  eq(ids, { payment: PAY, customer: CUS, card: CARD, ref: 'pb_ref_1' });
+});
+
+test('sequence: criteria ops and scenarios', () => {
+  const v = { 'data.status': 'ACT', 'data.next_action': '3d_verification', 'data.paid': false, 'data.redirect_url': 'https://x' };
+  const look = (p) => v[p];
+  ok(checkCriterion({ path: 'data.status', op: 'eq', value: 'ACT' }, look));
+  ok(!checkCriterion({ path: 'data.status', op: 'eq', value: 'CLO' }, look));
+  ok(checkCriterion({ path: 'data.status', op: 'in', value: ['CLO', 'ACT'] }, look));
+  ok(checkCriterion({ path: 'data.redirect_url', op: 'exists' }, look));
+  ok(!checkCriterion({ path: 'data.missing', op: 'exists' }, look));
+  eq(scenarioOf(look), 'action');
+  eq(scenarioOf((p) => ({ 'data.status': 'CLO' })[p]), 'success');
+  eq(scenarioOf((p) => ({ 'status.status': 'ERROR' })[p]), 'failure');
+  eq(scenarioOf((p) => ({ error: 'ERROR_X' })[p]), 'failure');
+});
+
+test('sequence: linksMatch needs one comparable id and no disagreement', () => {
+  const w = wh('PAYMENT_UPDATED', { id: PAY, customer_token: CUS, payment_method: CARD }, T0);
+  ok(linksMatch({ 'data.id': 'payment' }, w, { payment: PAY }));
+  ok(!linksMatch({ 'data.id': 'payment' }, w, { payment: 'payment_other' }), 'a different payment never matches');
+  ok(!linksMatch({ 'data.id': 'payment' }, w, {}), 'nothing comparable — no match');
+  ok(linksMatch({ 'data.id': 'payment', 'data.customer_token': 'customer' }, w, { customer: CUS }), 'customer alone is enough while the payment is unknown');
+  eq(getPath(w.raw, 'data.payment_method'), CARD);
+});
+
+test('sequence: $0-auth — sync and async slots, card id learned from PAYMENT_UPDATED', () => {
+  const v = expectFor('ac-1', '/v1/payments');
+  const ids = { payment: PAY, customer: CUS, ref: 'pb_ref_1' };
+  const groups = [
+    { id: 'beat-ac-1', ids, since: T0, slots: v.action.sync },
+    { id: 'seq-async-beat-ac-1', ids, since: T0, slots: ASYNC[v.action.async].sync },
+  ];
+  const hooks = [
+    wh('PAYMENT_SUCCEEDED', { id: PAY, customer_token: CUS, payment_method: null }, T0 + 1000),
+    wh('CUSTOMER_PAYMENT_METHOD_CREATED', { id: CARD }, T0 + 2000),
+    wh('CARD_ADDED_SUCCESSFULLY', { id: CARD, payment_account_reference: 'PAR1' }, T0 + 30000),
+    wh('PAYMENT_UPDATED', { id: PAY, customer_token: CUS, payment_method: CARD }, T0 + 31000),
+    wh('CUSTOMER_UPDATED', { id: CUS }, T0 + 32000),
+    wh('PAYMENT_SUCCEEDED', { id: 'payment_someone_else', customer_token: 'cus_x' }, T0 + 1500),
+  ];
+  const { claimed, other } = attribute(groups, hooks);
+  eq(claimed.get('beat-ac-1#0')?.type, 'PAYMENT_SUCCEEDED');
+  eq(claimed.get('beat-ac-1#0')?.raw.data.id, PAY, 'the run’s own payment, not the other one');
+  eq(claimed.get('beat-ac-1#1')?.type, 'CUSTOMER_PAYMENT_METHOD_CREATED', 'claimed once PAYMENT_UPDATED revealed the card');
+  eq(claimed.get('seq-async-beat-ac-1#0')?.type, 'CARD_ADDED_SUCCESSFULLY');
+  eq(claimed.get('seq-async-beat-ac-1#1')?.type, 'PAYMENT_UPDATED');
+  eq(ids.card, CARD, 'learned');
+  eq(other.map((w) => w.type), ['CUSTOMER_UPDATED'], 'about this run but unexpected; the stranger’s payment is not listed');
+});
+
+test('sequence: hosted page — everything async, linked by customer then card', () => {
+  const v = expectFor('ac-1', '/v1/hosted/collect/card');
+  eq(v.success.sync.length, 0);
+  const ids = { customer: CUS, hosted: 'hp_card_1' };
+  const groups = [{ id: 'beat-ac-1', ids, since: T0, slots: [] }, { id: 'a', ids, since: T0, slots: ASYNC[v.success.async].sync }];
+  const { claimed, other } = attribute(groups, [
+    wh('CARD_ADDED_SUCCESSFULLY', { id: CARD }, T0 + 40000),
+    wh('PAYMENT_UPDATED', { id: PAY, customer_token: CUS, payment_method: CARD }, T0 + 41000),
+    wh('CUSTOMER_PAYMENT_METHOD_CREATED', { id: CARD }, T0 + 20000),
+    wh('PAYMENT_SUCCEEDED', { id: PAY, customer_token: CUS }, T0 + 19000),
+  ]);
+  eq([0, 1, 2, 3].map((i) => claimed.get(`a#${i}`)?.type), ['PAYMENT_SUCCEEDED', 'CUSTOMER_PAYMENT_METHOD_CREATED', 'CARD_ADDED_SUCCESSFULLY', 'PAYMENT_UPDATED']);
+  eq(other.length, 0);
+});
+
+test('sequence: nothing sent → nothing claimed; events before the call are ignored', () => {
+  const slots = EXPECT.pay[0].success.sync;
+  eq(attribute([{ id: 'p', ids: { payment: PAY }, since: null, slots }], [wh('PAYMENT_COMPLETED', { id: PAY }, T0)]).claimed.size, 0);
+  const late = attribute([{ id: 'p', ids: { payment: PAY }, since: T0 + 600000, slots }], [wh('PAYMENT_COMPLETED', { id: PAY }, T0)]);
+  eq(late.claimed.size, 0, 'received 10 minutes before the call answered');
+});
+
+test('sequence: a payout settles through anyOf', () => {
+  const v = expectFor('po-create', '/v1/payouts');
+  const ids = { payout: 'payout_1' };
+  const groups = [{ id: 'po', ids, since: T0, slots: v.success.sync }, { id: 'po-a', ids, since: T0, slots: ASYNC[v.success.async].sync }];
+  eq(attribute(groups, [wh('PAYOUT_FAILED', { id: 'payout_1' }, T0 + 5000)]).claimed.get('po-a#0')?.type, 'PAYOUT_FAILED');
+});
+
+test('sequence: expectations only name real calls, async ids, scenarios and link kinds', () => {
+  const KINDS = new Set(['payment', 'customer', 'card', 'payout', 'ref', 'checkout', 'hosted']);
+  const OPS_OK = new Set(['eq', 'neq', 'in', 'exists']);
+  const slotOk = (s, where) => {
+    ok(s.type || Array.isArray(s.anyOf), `${where}: type or anyOf`);
+    for (const t of s.anyOf || [s.type]) ok(/^[A-Z_]+$/.test(t), `${where}: ${t}`);
+    for (const k of Object.values(s.links || {})) ok(KINDS.has(k), `${where}: link kind ${k}`);
+  };
+  for (const [call, variants] of Object.entries(EXPECT)) {
+    ok(CALLS[call], `EXPECT names unknown call ${call}`);
+    for (const v of variants) {
+      for (const scn of Object.keys(v).filter((k) => !['path', 'label'].includes(k))) {
+        ok(['success', 'action', 'failure'].includes(scn), `${call}: scenario ${scn}`);
+        for (const c of v[scn].criteria || []) ok(OPS_OK.has(c.op) && c.path, `${call}.${scn}: criterion`);
+        for (const s of v[scn].sync || []) slotOk(s, `${call}.${scn}`);
+        if (v[scn].async) ok(ASYNC[v[scn].async], `${call}.${scn}: unknown async ${v[scn].async}`);
+      }
+    }
+  }
+  for (const [id, a] of Object.entries(ASYNC)) { ok(a.title && a.trigger, id); a.sync.forEach((s) => slotOk(s, id)); }
+  // add-card's three routes each find their variant by path
+  eq(expectFor('ac-1', '/v1/hosted/collect/card').label, 'Hosted page (redirect or card toolkit)');
+  eq(expectFor('ac-1', '/v1/payments').label, '$0-auth with Rapyd 3DS');
+  eq(expectFor('ac-1', '/v1/customers/cus_1/payment_methods').label, 'External 3DS — save the card directly');
+  ok(WEBHOOK_NOTES.CARD_ADDED_SUCCESSFULLY.includes('payment_account_reference'));
 });
 
 test('no network calls were made', () => {

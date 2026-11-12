@@ -32,6 +32,7 @@ import {
 import { cachePublished, setPreviewDraft } from '../tags/loader.js';
 import { beatCardHTML } from '../customer-beat.js';
 import { esc } from '../ui.js';
+import { callSpec, journeyMarkdown } from '../engine/spec.js';
 import {
   getAdminToken, setAdminToken, adminWhoami, fetchTagConfig, publishTagConfig, fetchTagHistory, rollbackTagConfig,
 } from '../api.js';
@@ -261,7 +262,8 @@ function sideHTML(side, label) {
 function journeyHTML(j) {
   return `
     <div class="ts-ed-head"><h2>${esc(j.title)}</h2>
-      <p>The cards in the order the engine room shows them. Edits apply to that card only; untouched cards follow the shared defaults.</p></div>
+      <p>The cards in the order the engine room shows them. Edits apply to that card only; untouched cards follow the shared defaults.</p>
+      <p>Each call also lists its <b>Sequence</b> expectations — response criteria, the webhooks it fires, and the async step after it. <button type="button" class="ts-mini" data-act="copy-seq" data-j="${esc(j.id)}">Copy as proposal</button></p></div>
     <ol class="ts-timeline">${j.calls.map((id, i) => {
       const c = CALLS[id];
       const also = journeysOf(id).filter((x) => x.id !== j.id);
@@ -270,8 +272,25 @@ function journeyHTML(j) {
         <div class="ts-call-title">${esc(c.title)}${also.length ? `<span class="ts-also">same card in ${also.map((x) => esc(x.title)).join(', ')}</span>` : ''}</div>
         ${c.req ? sideHTML(c.req, 'Request card') : ''}
         ${c.res ? sideHTML(c.res, c.res.single ? 'Card' : 'Response card') : ''}
+        ${seqSpecHTML(id)}
       </li>`;
     }).join('')}</ol>`;
+}
+
+/* The engine room's Sequence expectations for one call — read-only here
+   (they live in tags/registry.js EXPECT / ASYNC); "Copy as proposal" hands
+   the journey's whole spec over as Markdown to mark up. */
+function seqSpecHTML(call) {
+  const spec = callSpec(call);
+  if (!spec.length) return '';
+  const list = (xs) => (xs.length ? `<ul>${xs.map((x) => `<li><code>${esc(x)}</code></li>`).join('')}</ul>` : '<span class="ts-note">none</span>');
+  return `<div class="ts-side ts-seq"><div class="ts-side-label">Sequence · what this call should produce <span class="ts-note">read-only</span></div>
+    ${spec.map((v) => `${v.label ? `<div class="ts-seq-variant">${esc(v.label)}</div>` : ''}
+      <table class="ts-seq-table"><thead><tr><th>Outcome</th><th>Response criteria</th><th>Sync webhooks</th><th>Then, async</th></tr></thead><tbody>
+      ${v.scenarios.map((s) => `<tr><td>${esc(s.title)}</td><td>${list(s.criteria)}</td><td>${list(s.sync)}</td>
+        <td>${s.async ? `<b>${esc(s.async.title)}</b><div class="ts-note">${esc(s.async.trigger)}</div>${list(s.async.sync)}` : '<span class="ts-note">—</span>'}</td></tr>`).join('')}
+      </tbody></table>`).join('')}
+  </div>`;
 }
 
 /* ── Rules editor (shared slot or one card's) ────────────── */
@@ -703,6 +722,14 @@ async function onClick(e) {
     case 'nav': S.nav = btn.dataset.nav; S.openRules = null; $('.ts-editor', S.root) && ($('.ts-editor', S.root).scrollTop = 0); return render();
     case 'scenario': S.scenario = btn.dataset.sc; return renderLight();
     case 'goto': e.preventDefault(); return gotoStep(btn.dataset.step);
+    case 'copy-seq': {
+      const j = JOURNEYS.find((x) => x.id === btn.dataset.j);
+      if (!j) return;
+      const md = journeyMarkdown(j);
+      try { await navigator.clipboard.writeText(md); S.msg = { kind: 'info', text: `${j.title}: the expected sequence is on your clipboard as Markdown — mark it up and hand it back.` }; }
+      catch { S.msg = { kind: 'error', text: 'Couldn’t reach the clipboard — the spec is in the browser console instead.' }; console.info(md); }
+      return render();
+    }
     // a card's own badge
     case 'reset-entry': clearEntry(step, k); break;
     case 'apply-all': applyEntryEverywhere(k, entryAt(k, step).e); S.msg = { kind: 'info', text: `“${entryAt(k, step).e.label}” is now the shared ${k} badge for every card.` }; break;
