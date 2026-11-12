@@ -103,7 +103,7 @@ export function lookupResponseCardHTML() {
     id: 'beat-cus-lookup-res', method: 'GET', path: path(rec.cus),
     ...(ok ? beatBadge('customer.found') : beatBadge('response.error', { error: String(rec.data?.error || 'failed') })),
     inner: `
-      <div class="eng-pillrow">${httpPillHTML(rec.httpStatus, rec.data?.error)}</div>
+      <div class="eng-pillrow">${httpPillHTML(rec.httpStatus, rec.data?.error, 'cus-lookup-res')}</div>
       ${renderJSONView(rec.data ?? { error: 'no response body' })}`,
   });
 }

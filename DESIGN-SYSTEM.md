@@ -124,6 +124,13 @@ a `--soft-2` track, 6px buttons, the active one a white thumb with `--shadow-sm`
 **Badges & pills.** Site: `.ord-badge.ok/.info/.bad/.mute`, `.shop-badge`. Drawer: `.dc-pill`,
 `.cred-flag.on/.off`. Engine room: `.method-pill.post/.get/.put/.delete`, `.beat-state`, `.wh-pill`,
 `.wh-verify` (unverified events: solid warning chip + dashed `.wh-card.untrusted`).
+The request/response pills and every `.beat-state` badge are DATA, not literals: they resolve through
+`js/tags/` (registry → published overrides → tab draft) into one tone vocabulary —
+success / failure / pending / info / neutral / sim — mapped onto `.wh-pill.success/.failure/.pending/.info/.sim`
+(neutral = the base pill) and `.beat-state.ok/.err/.live/.sim` (neutral = no modifier). Admins edit them
+in the **Tag Studio** (`js/admin/studio.js`, `.ts-*`): light editor, dark preview column on `--eng-bg`
+so the real card markup renders as in the engine room. New pills go into `js/tags/registry.js`, never
+as a literal at the call site.
 
 **Engine room.** `.beat-card` — one collapsible `<details>` per API call (open state owned by
 `customer-beat.js`), method pill + path + state badge; `.req-headers` grid; `.jsonv` line-numbered

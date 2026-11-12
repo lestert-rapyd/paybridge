@@ -75,9 +75,10 @@ import {
 } from '../js/site/wallet.js';
 
 // Tag registry (js/tags/) — the Tag Studio's data model and resolver.
-import { SLOTS } from '../js/tags/registry.js';
-import { resolveTag, resolveBadge, httpCtx, paymentCtx, beatBadge, pillHTML, beatClass, whClass } from '../js/tags/resolve.js';
-import { setPublished, setDraft, sanitizeConfig } from '../js/tags/store.js';
+import { resolveTag, resolveBadge, httpCtx, paymentCtx, resolveBeatBadge, pillHTML, beatClass, whClass, httpPillHTML } from '../js/tags/resolve.js';
+import { SLOTS as TAG_SLOTS, CALLS, JOURNEYS, STEPS } from '../js/tags/registry.js';
+import { beatCardHTML } from '../js/customer-beat.js';
+import { setPublished, setDraft, sanitizeConfig, withConfig } from '../js/tags/store.js';
 import { paymentBadge, httpLabel, paymentResponseCardHTML } from '../js/flows/shared.js';
 
 /* ── Tiny harness ── */
@@ -1329,13 +1330,13 @@ test('tags: the response card still paints HTTP 200 + PAID · CLO', () => {
 });
 
 test('tags: beat.header defaults keep the old badge/kind pairs', () => {
-  eq(beatBadge('request.sent'), { badge: 'signed & sent', badgeKind: 'ok' });
-  eq(beatBadge('request.sending'), { badge: 'sending…', badgeKind: 'live' });
-  eq(beatBadge('request.prepared'), { badge: 'prepared', badgeKind: '' });
-  eq(beatBadge('sim.passed'), { badge: 'Simulated · passed', badgeKind: 'sim' });
-  eq(beatBadge('response.error', { error: 'ERROR_X' }), { badge: 'ERROR_X', badgeKind: 'err' });
-  eq(beatBadge('payout.eligible', { country: 'GB', currency: 'GBP' }), { badge: '→ GB · GBP', badgeKind: 'ok' });
-  eq(beatBadge('no.such.key'), { badge: '', badgeKind: '' });
+  eq(resolveBeatBadge('request.sent'), { badge: 'signed & sent', badgeKind: 'ok' });
+  eq(resolveBeatBadge('request.sending'), { badge: 'sending…', badgeKind: 'live' });
+  eq(resolveBeatBadge('request.prepared'), { badge: 'prepared', badgeKind: '' });
+  eq(resolveBeatBadge('sim.passed'), { badge: 'Simulated · passed', badgeKind: 'sim' });
+  eq(resolveBeatBadge('response.error', { error: 'ERROR_X' }), { badge: 'ERROR_X', badgeKind: 'err' });
+  eq(resolveBeatBadge('payout.eligible', { country: 'GB', currency: 'GBP' }), { badge: '→ GB · GBP', badgeKind: 'ok' });
+  eq(resolveBeatBadge('no.such.key'), { badge: '', badgeKind: '' });
 });
 
 test('tags: a published override changes the label + tone; draft wins; reset restores', () => {
@@ -1353,7 +1354,7 @@ test('tags: a published override changes the label + tone; draft wins; reset res
 test('tags: hidden rules/entries render nothing', () => {
   setPublished({ slots: { 'beat.header': { entries: { 'request.sent': { label: 'x', tone: 'success', hidden: true } } },
     'http.status': { rules: [{ id: 'h', label: 'gone', tone: 'success', hidden: true }] } } });
-  eq(beatBadge('request.sent'), { badge: '', badgeKind: '' });
+  eq(resolveBeatBadge('request.sent'), { badge: '', badgeKind: '' });
   eq(pillHTML(resolveTag('http.status', httpCtx(200))), '');
   setPublished(null);
 });
@@ -1382,14 +1383,61 @@ test('tags: unknown tones/ops/slots degrade safely', () => {
   setPublished(null);
 });
 
+test('tags: withConfig scopes an override without touching the app layers', () => {
+  setPublished({ slots: { 'beat.header': { entries: { 'request.sent': { label: 'PUB', tone: 'success' } } } } });
+  const scoped = withConfig({ slots: { 'beat.header': { entries: { 'request.sent': { label: 'DRAFT', tone: 'info' } } } } }, () => resolveBeatBadge('request.sent'));
+  eq(scoped, { badge: 'DRAFT', badgeKind: 'live' });
+  eq(withConfig({ slots: {} }, () => resolveBeatBadge('request.sent')), { badge: 'signed & sent', badgeKind: 'ok' }, 'scoped = defaults beneath');
+  eq(resolveBeatBadge('request.sent'), { badge: 'PUB', badgeKind: 'ok' }, 'published again outside');
+  setPublished(null);
+});
+
 test('tags: every default label only uses its own placeholders', () => {
-  for (const [id, def] of Object.entries(SLOTS)) {
+  for (const [id, def] of Object.entries(TAG_SLOTS)) {
     const items = def.kind === 'rules' ? [...def.rules, ...(def.fallback?.label ? [def.fallback] : [])] : Object.values(def.entries);
     for (const it of items) {
       const allowed = def.kind === 'rules' ? def.fields : it.vars || [];
       for (const [, name] of String(it.label).matchAll(/\{([a-z0-9_.]+)\}/gi)) ok(allowed.includes(name), `${id}: {${name}}`);
     }
   }
+});
+
+test('tags: a step override wins for that step only; others follow the shared one', () => {
+  setPublished({ slots: {
+    'beat.header': { entries: { 'request.sent': { label: 'SHARED', tone: 'success' } } },
+    'beat.header:pay': { entries: { 'request.sent': { label: 'ONLY PAY', tone: 'info' } } },
+    'payment.result:pay-res': { rules: [{ id: 'x', label: 'OCF {data.status}', tone: 'success' }] },
+    'http.status:fx': { rules: [{ id: 'h', label: 'FX {http.status}', tone: 'info' }] },
+  } });
+  eq(resolveBeatBadge('request.sent', {}, 'pay'), { badge: 'ONLY PAY', badgeKind: 'live' });
+  eq(resolveBeatBadge('request.sent', {}, 'checkout'), { badge: 'SHARED', badgeKind: 'ok' });
+  eq(resolveBeatBadge('request.failed', {}, 'pay'), { badge: 'failed', badgeKind: 'err' }, 'unlisted key → default');
+  eq(paymentBadge(200, { data: { status: 'CLO', paid: true } }, 'pay-res'), ['OCF CLO', 'success']);
+  eq(paymentBadge(200, { data: { status: 'CLO', paid: true } }, 'dw-res'), ['PAID · CLO', 'success']);
+  ok(paymentResponseCardHTML({ id: 'beat-pay-res', httpStatus: 200, data: { data: { status: 'CLO', paid: true } } }).includes('OCF CLO'), 'card id → step');
+  ok(!paymentResponseCardHTML({ id: 'beat-express-res', httpStatus: 200, data: { data: { status: 'CLO', paid: true } } }).includes('OCF'), 'other step untouched');
+  ok(httpPillHTML(200, null, 'fx').includes('FX 200'), 'http per step');
+  ok(httpPillHTML(200, null, 'pay-res').includes('HTTP 200'));
+  ok(beatCardHTML({ id: 'beat-pay', method: 'POST', path: '/v1/payments', badgeKey: 'request.sent', inner: '' }).includes('ONLY PAY'), 'beatCardHTML resolves for its id');
+  setPublished(null);
+});
+
+test('tags: the journey map only names real steps and keys', () => {
+  for (const j of JOURNEYS) for (const c of j.calls) ok(CALLS[c], `${j.id}: unknown call ${c}`);
+  for (const [id, c] of Object.entries(CALLS)) {
+    for (const side of ['req', 'res']) {
+      if (!c[side]) continue;
+      for (const st of c[side].states) ok(TAG_SLOTS['beat.header'].entries[st.key], `${id}.${side}: unknown key ${st.key}`);
+      ok(/^[a-z0-9-]{1,40}$/.test(c[side].step), `${id}.${side}: bad step id`);
+    }
+  }
+  eq(Object.keys(STEPS).length, new Set(Object.keys(STEPS)).size);
+  ok(STEPS['pay-res'] && STEPS['pay-res'].side === 'res', 'pay-res mapped');
+});
+
+test('tags: unknown step slots are dropped by sanitizeConfig', () => {
+  const c = sanitizeConfig({ slots: { 'beat.header:BAD STEP': { entries: {} }, 'nope:pay': { rules: [] }, 'beat.header:pay': { entries: {} } } });
+  eq(Object.keys(c.slots), ['beat.header:pay']);
 });
 
 test('no network calls were made', () => {

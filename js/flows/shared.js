@@ -28,7 +28,7 @@ import * as ledger from '../ledger.js';
 import * as customers from '../customers.js';
 import { promoteToReturning } from '../identity.js';
 import { beatCardHTML } from '../customer-beat.js';
-import { resolveTag, httpCtx, paymentCtx, beatClass, whClass, pillHTML, httpPillHTML, beatBadge } from '../tags/resolve.js';
+import { resolveTag, httpCtx, paymentCtx, beatClass, whClass, pillHTML, httpPillHTML, beatBadge, stepOf } from '../tags/resolve.js';
 
 /* ── Markup ──────────────────────────────────────────────── */
 
@@ -63,7 +63,7 @@ export function fxCardHTML() {
     id: 'beat-fx', method: 'GET', path: fxBeatPath(), // text — beatCardHTML escapes path/badge
     ...beatBadge(ok ? 'fx.quoted' : 'request.failed'),
     inner: `
-      <div class="eng-pillrow">${httpPillHTML(b.httpStatus, b.data?.error)}</div>
+      <div class="eng-pillrow">${httpPillHTML(b.httpStatus, b.data?.error, 'fx')}</div>
       ${renderJSONView(b.data ?? { error: 'no response body' })}`,
   });
 }
@@ -75,8 +75,8 @@ export const httpOk = (s) => s >= 200 && s < 400;
 
 /** [label, tone] for a POST /v1/payments response — the payment.result tag.
     label is TEXT ('' when an admin hid it); tone feeds .wh-pill. */
-export function paymentBadge(httpStatus, data) {
-  const t = resolveTag('payment.result', paymentCtx(httpStatus, data));
+export function paymentBadge(httpStatus, data, step = null) {
+  const t = resolveTag('payment.result', paymentCtx(httpStatus, data), step);
   return [t.hidden ? '' : t.label, whClass(t.tone)];
 }
 
@@ -84,13 +84,14 @@ export function paymentBadge(httpStatus, data) {
     toolkit's express token charge render the same call the same way.
     beatCardHTML escapes its badge (text); `inner` is ours to escape. */
 export function paymentResponseCardHTML({ id, n, httpStatus, data }) {
-  const t = resolveTag('payment.result', paymentCtx(httpStatus, data));
+  const step = stepOf(id); // pay-res / express-res / dw-res — each can carry its own rules
+  const t = resolveTag('payment.result', paymentCtx(httpStatus, data), step);
   return beatCardHTML({
     id, n, method: 'POST', path: '/v1/payments',
     badge: t.hidden ? '' : t.label, badgeKind: beatClass(t.tone),
     inner: `
       <div class="eng-pillrow">
-        ${httpPillHTML(httpStatus)}
+        ${httpPillHTML(httpStatus, null, step)}
         ${pillHTML(t)}
       </div>
       ${renderJSONView(data ?? { error: 'no response body' })}`,

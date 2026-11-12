@@ -214,7 +214,7 @@ export function methodsResponseCardHTML() {
     id: 'beat-pm-list-res', method: 'GET', path: methodsPath(sync.cus),
     ...(ok ? beatBadge('customer.saved_cards') : beatBadge('response.error', { error: String(sync.data?.error || 'failed') })),
     inner: `
-      <div class="eng-pillrow">${httpPillHTML(sync.httpStatus, sync.data?.error)}</div>
+      <div class="eng-pillrow">${httpPillHTML(sync.httpStatus, sync.data?.error, 'pm-list-res')}</div>
       ${renderJSONView(sync.data ?? { error: 'no response body' })}`,
   });
 }

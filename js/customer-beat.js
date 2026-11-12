@@ -27,7 +27,7 @@
    bucket of the MID that minted it.
    ───────────────────────────────────────────────────────────── */
 
-import { beatBadge, badgePillHTML, httpPillHTML } from './tags/resolve.js';
+import { beatBadge, badgePillHTML, httpPillHTML, resolveBeatBadge, stepOf } from './tags/resolve.js';
 import { state } from './state.js';
 import { VERTICALS } from './verticals.js';
 import * as customers from './customers.js';
@@ -107,7 +107,10 @@ const asText = (v) => esc(String(v ?? '').replace(/&amp;/g, '&'));
 
 /** The card shell every beat uses — the flows pass their own inner block
     (`inner` is HTML and the caller's to escape; everything else is text). */
-export function beatCardHTML({ id, n, method, path, badge, badgeKind = '', inner, sim = false }) {
+export function beatCardHTML({ id, n, method, path, badge, badgeKind = '', badgeKey, badgeVars, inner, sim = false }) {
+  // A tag key (beatBadge) resolves for THIS card's step — the Tag Studio can
+  // give each card its own label; a literal badge still works as before.
+  if (badgeKey) ({ badge, badgeKind } = resolveBeatBadge(badgeKey, badgeVars, stepOf(id)));
   // `sim`: a SIMULATED step outside Rapyd (external 3DS) — dashed card, its
   // own pill colour; the caller also passes the "Simulated" badge.
   return `
@@ -219,8 +222,8 @@ export function customerResponseCardHTML() {
     ...beatBadge(key, vars),
     inner: `
       <div class="eng-pillrow">
-        ${httpPillHTML(r.httpStatus, ok ? null : String(r.data?.error || 'ERROR'))}
-        ${badgePillHTML(key, vars)}
+        ${httpPillHTML(r.httpStatus, ok ? null : String(r.data?.error || 'ERROR'), 'cus-res')}
+        ${badgePillHTML(key, vars, 'cus-res')}
       </div>
       ${renderJSONView(r.data ?? { error: 'no response body' })}
       ${ok && id ? `<div class="beat-foot">Every payment on this session now references <code>${esc(id)}</code> — and a saved card_*** is held under it.</div>` : ''}`,

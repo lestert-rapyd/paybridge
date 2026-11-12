@@ -100,6 +100,28 @@ export function setLiveToken(token) {
 
 const LIVE_AUTH_ERRORS = new Set(['LIVE_AUTH_REQUIRED', 'LIVE_DISABLED']);
 
+/* ── Admin token (per tab) — the Tag Studio. Same handling as the live
+   token, a DIFFERENT secret: it only unlocks publishing the engine-room tag
+   config, never a live call. Only admin requests carry it. */
+const ADMIN_TOKEN_KEY = 'pb_admin_token';
+let memAdminToken = null;
+
+export function getAdminToken() {
+  try {
+    const v = sessionStorage.getItem(ADMIN_TOKEN_KEY);
+    if (v) return v;
+  } catch { /* storage unavailable */ }
+  return memAdminToken;
+}
+export function setAdminToken(token) {
+  memAdminToken = token || null;
+  try {
+    if (memAdminToken) sessionStorage.setItem(ADMIN_TOKEN_KEY, memAdminToken);
+    else sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+  } catch { /* memory copy still holds it */ }
+}
+const ADMIN_AUTH_ERRORS = new Set(['ADMIN_AUTH_REQUIRED', 'ADMIN_DISABLED']);
+
 function liveAuthFailed(error, message) {
   setLiveToken(null);
   try {
@@ -109,8 +131,12 @@ function liveAuthFailed(error, message) {
 
 /** The one request helper. `env` is the request's env (body.env or the
     query's env) — only 'live' attaches the gate token. */
-async function request(path, { method = 'GET', query = null, body, env, idempotencyKey } = {}) {
+async function request(path, { method = 'GET', query = null, body, env, idempotencyKey, admin = false, timeoutMs = 0 } = {}) {
   const headers = {};
+  if (admin) {
+    const t = getAdminToken();
+    if (t) headers['X-PayBridge-Admin-Token'] = t;
+  }
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (idempotencyKey) headers['Idempotency-Key'] = String(idempotencyKey);
   if (env === 'live') {
@@ -126,19 +152,41 @@ async function request(path, { method = 'GET', query = null, body, env, idempote
   }
 
   let res;
+  const ctl = timeoutMs && typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = ctl ? setTimeout(() => ctl.abort(), timeoutMs) : null;
   try {
-    res = await fetch(url, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined });
+    res = await fetch(url, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined, signal: ctl?.signal });
   } catch (err) {
     // CORS-less 404s from an undeployed route also land here ("Failed to fetch").
     return { ok: false, httpStatus: 0, data: { error: 'NETWORK_ERROR', message: err?.message || 'Network request failed' } };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
   let data = null;
   try { data = await res.json(); } catch { /* non-JSON */ }
   if ((res.status === 401 || res.status === 403) && LIVE_AUTH_ERRORS.has(data?.error)) {
     liveAuthFailed(data.error, data.message || '');
   }
+  if (admin && (res.status === 401 || res.status === 403) && ADMIN_AUTH_ERRORS.has(data?.error)) {
+    setAdminToken(null);
+    try {
+      window.dispatchEvent(new CustomEvent('paybridge:admin-auth-failed', { detail: { error: data.error, message: data.message || '' } }));
+    } catch { /* no window */ }
+  }
   return { ok: res.ok, httpStatus: res.status, data };
 }
+
+/* ── Tag Studio config (/api/config) ── */
+
+/** GET the published tag config — public; short timeout, the app never waits on it. */
+export const fetchTagConfig = () => request('/api/config', { query: { op: 'tags' }, timeoutMs: 2500 });
+/** PUT a new version (admin). body: { baseVersion, slots, updatedBy, note } */
+export const publishTagConfig = (body) => request('/api/config', { method: 'PUT', query: { op: 'tags' }, body, admin: true });
+export const fetchTagHistory = () => request('/api/config', { query: { op: 'tags-history' }, admin: true });
+/** POST { version, baseVersion, updatedBy } — republish an old version (admin). */
+export const rollbackTagConfig = (body) => request('/api/config', { method: 'POST', query: { op: 'tags-rollback' }, body, admin: true });
+/** 204 when this tab's admin token is good. */
+export const adminWhoami = () => request('/api/config', { query: { op: 'whoami' }, admin: true });
 
 const post = (path, body, { idempotencyKey } = {}) =>
   request(path, { method: 'POST', body: body ?? {}, env: body?.env, idempotencyKey });
