@@ -4,8 +4,10 @@ A sales-engineering demo of Rapyd card payments. The left pane is a merchant's
 storefront — one of five Rapyd demo merchants: **rapyd.shop** (e-commerce),
 **rapyd.coin** (crypto), **rapyd.spin** (gambling), **rapyd.fx** (forex
 trading) and **rapyd.stream** (digital content) — plus its back office;
-the right pane is the "engine room" — the real request, signed headers, Rapyd's
-response and the webhooks it fires, updating as the SE clicks through. Every SE
+the right pane is the "engine room" — one **Sequence** of events, each call
+broken into its signed headers, the real request, Rapyd's response (checked
+against what it should say) and the webhooks it fires, updating as the SE
+clicks through. Every SE
 control lives in one **demo-controls drawer** (header button, or the `` ` `` key).
 
 The whole UI follows the Rapyd design language (Inter, cool greys, `#7437F5`) —
@@ -16,7 +18,7 @@ name, as do the backend contract's `X-PayBridge-Live-Token` header and the
 Every call is real: the page talks to [`rapyd-backend`](../rapyd-backend), a
 small signing proxy that holds the Rapyd keys and forwards to Rapyd's sandbox
 (or, when unlocked, live) API. No secret ever reaches the browser — the
-signature shown in the Request tab is a display-only recomputation
+signature shown in an event's Headers is a display-only recomputation
 (`js/signing.js`).
 
 Two integration models are demoed side by side:
@@ -205,7 +207,7 @@ demo, and the live token, to someone else's server. If the backend sets
 `ALLOWED_ORIGINS`, the frontend's origin must be in that list.
 
 Webhooks need the backend's KV store and `/api/webhook` registered with Rapyd
-for the MID in use; without them the Webhooks tab says so and the demo falls
+for the MID in use; without them the engine room says so and the demo falls
 back to polling `GET /v1/payments/{id}`. The receiver files each event under
 every id it carries — `merchant_reference_id`, the `cus_***` (`customer`, or
 `customer_token` on payments) and, for the card's own events, the `card_***` —
@@ -214,6 +216,38 @@ so the **Add a card** page can stitch one run's events together: the $0-auth's
 `CARD_ADDED_SUCCESSFULLY` by the card id the payment (or the add-card response)
 reveals. Only the receiver Rapyd actually posts to does this filing — register
 the deployment that runs the current `rapyd-backend` for the MID.
+
+### The engine room: one sequence of events
+
+The right pane (`js/engine/sequence.js`) shows every call as one expandable
+**event**, in order, broken into its backend parts:
+
+- **Headers**: the signed headers (folded by default).
+- **API request**: the body. Once Rapyd has answered, this part folds.
+- **API response**: the HTTP and result pills, the **criteria rows** (e.g.
+  `data.status → CLO`, `data.next_action → 3d_verification`) and the JSON.
+- **Webhooks**: one slot per webhook the call itself fires (sync). A slot is
+  either the received event, with **link rows** such as
+  `data.id → payment_…` and `data.customer_token → cus_…`, or "Pending
+  webhook…".
+
+**Async** events get a card of their own after the call they follow, e.g.
+"After the shopper's 3DS" holding `PAYMENT_UPDATED` / `PAYMENT_COMPLETED`, or
+"After Rapyd's card page". Webhooks about the run that no expectation claims
+land under **Other events** last.
+
+What each call should produce is data in `js/tags/registry.js`: `EXPECT`
+(criteria and sync webhooks per outcome), `ASYNC` and `WEBHOOK_NOTES`. The
+Tag Studio shows that data read-only under each journey call. **Copy as
+proposal** puts a journey's whole expected sequence on the clipboard as
+Markdown. A webhook is claimed by the first slot whose type matches and whose
+linked ids agree (`attribute()`, unit-tested). Ids a claimed event reveals,
+such as the `card_***` on `PAYMENT_UPDATED`, are learned for the next slot.
+
+The flows still describe each call side as a beat card (`beatCardHTML`:
+`beat-<step>` / `beat-<step>-res`) and hand the markup over with
+`setPanel('request' | 'response', html)`. Every webhook poller feeds
+`ingestWebhooks()`.
 
 ### Hosted checkout return pages
 
@@ -351,6 +385,9 @@ shown as declined. Everything rendered into HTML goes through `ui.js esc()`.
 | `js/flows/direct-wallet.js` | The merchant's own wallet buttons, the simulated wallet sheet, the real sandbox `POST /v1/payments` (ledger, webhook watch, 3DS) and the engine-room sequence. |
 | `js/ext3ds.js` | External 3DS (simulated): when it applies, the dummy provider result, the `payment_method_options` block and the call/no-call decision. |
 | `js/api.js` | The only network layer: backend wrappers, idempotency keys, live token. Never throws. |
+| `js/engine/sequence.js` | The engine room's Sequence view: groups each call's request/response cards into one event (headers → request → response + criteria → webhooks), async and "Other" events, webhook attribution. |
+| `js/engine/spec.js` | The registry's sequence expectations written out for people — the Tag Studio's Sequence block and "Copy as proposal" Markdown. |
+| `js/engine/wh-card.js` | One webhook event card (pills + JSON), shared by the sequence view and the back office. |
 | `js/signing.js` | Display-only request signing + key redaction for the engine room. |
 | `js/json-view.js` | Line-numbered, escaped JSON viewer with field↔path highlighting. |
 | `js/sync.js` | Field→request-path map, card brand, amount validation, input formatting. |

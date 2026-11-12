@@ -280,3 +280,124 @@ export function splitSlotId(id) {
   return i < 0 ? [id, null] : [id.slice(0, i), id.slice(i + 1)];
 }
 export const STEP_RE = /^[a-z0-9-]{1,40}$/;
+
+/* ── Sequence — what each call is expected to produce ─────────────────────
+   The engine room groups every call into one event: headers → request →
+   response → the webhooks it fires. This block is the "expected" half of
+   that view, kept as data so the Tag Studio can show it whole and the user
+   can propose changes against it. Display only — nothing here gates a flow.
+
+   EXPECT[call] is a list of variants; the first whose `path` (a substring of
+   the call's path, optional) matches is used. Per scenario (SCENARIOS keys —
+   `action` = 3DS / redirect pending, `success`, `failure`):
+     criteria — response checks, { path, op, value } over the response JSON
+                (paths as the JSON viewer prints them: data.status …)
+     sync     — webhooks the call itself fires
+     async    — an ASYNC id: webhooks that follow a later shopper/Rapyd step
+   A webhook slot is { type | anyOf, links }, `links` mapping a path in the
+   webhook to the id it must equal (payment, customer, card, payout, ref,
+   checkout). A webhook is claimed by the first slot whose type matches and
+   whose linked ids all agree (at least one must be comparable); anything
+   about this run that no slot claims is listed under "Other events".
+
+   Drafted 2026-11-12 from the webhook-studio evidence (add-card runs,
+   wh:recent); rows marked `confirm: true` are not yet seen end to end. */
+
+const PAY_LINKS = { 'data.id': 'payment', 'data.customer_token': 'customer' };
+const CARD_LINKS = { 'data.id': 'card' };
+const CARD_PAY_LINKS = { 'data.id': 'payment', 'data.customer_token': 'customer', 'data.payment_method': 'card' };
+
+const PAY_EXPECT = {
+  success: {
+    criteria: [{ path: 'data.status', op: 'eq', value: 'CLO' }, { path: 'data.paid', op: 'eq', value: true }],
+    sync: [{ type: 'PAYMENT_SUCCEEDED', links: PAY_LINKS }, { type: 'PAYMENT_COMPLETED', links: PAY_LINKS }],
+  },
+  action: {
+    criteria: [{ path: 'data.status', op: 'eq', value: 'ACT' }, { path: 'data.next_action', op: 'eq', value: '3d_verification' }, { path: 'data.redirect_url', op: 'exists' }],
+    sync: [{ type: 'PAYMENT_SUCCEEDED', links: PAY_LINKS }],
+    async: 'pay-3ds',
+  },
+  failure: { criteria: [], sync: [{ type: 'PAYMENT_FAILED', links: PAY_LINKS, confirm: true }] },
+};
+
+export const EXPECT = {
+  cus: [{ success: { criteria: [{ path: 'data.id', op: 'exists' }], sync: [{ type: 'CUSTOMER_CREATED', links: { 'data.id': 'customer' } }] } }],
+  pay: [PAY_EXPECT],
+  express: [PAY_EXPECT],
+  'dw-pay': [PAY_EXPECT],
+  checkout: [{
+    success: { criteria: [{ path: 'data.id', op: 'exists' }, { path: 'data.redirect_url', op: 'exists' }], sync: [], async: 'checkout-pay' },
+  }],
+  'ac-1': [
+    { path: '/hosted/', label: 'Hosted page (redirect or card toolkit)',
+      success: { criteria: [{ path: 'data.id', op: 'exists' }, { path: 'data.redirect_url', op: 'exists' }], sync: [], async: 'ac-hosted' } },
+    { path: '/v1/payments', label: '$0-auth with Rapyd 3DS',
+      action: {
+        criteria: [{ path: 'data.status', op: 'eq', value: 'ACT' }, { path: 'data.next_action', op: 'eq', value: '3d_verification' }, { path: 'data.redirect_url', op: 'exists' }],
+        sync: [{ type: 'PAYMENT_SUCCEEDED', links: PAY_LINKS }, { type: 'CUSTOMER_PAYMENT_METHOD_CREATED', links: CARD_LINKS }],
+        async: 'ac-3ds',
+      },
+      success: {
+        criteria: [{ path: 'data.status', op: 'in', value: ['CLO', 'ACT'] }],
+        sync: [{ type: 'PAYMENT_SUCCEEDED', links: PAY_LINKS }, { type: 'CUSTOMER_PAYMENT_METHOD_CREATED', links: CARD_LINKS },
+          { type: 'CARD_ADDED_SUCCESSFULLY', links: CARD_LINKS }, { type: 'PAYMENT_UPDATED', links: CARD_PAY_LINKS }],
+        confirm: true,
+      } },
+    { path: '/payment_methods', label: 'External 3DS — save the card directly',
+      success: { criteria: [{ path: 'data.id', op: 'exists' }],
+        sync: [{ type: 'CUSTOMER_PAYMENT_METHOD_CREATED', links: CARD_LINKS }, { type: 'CARD_ADDED_SUCCESSFULLY', links: CARD_LINKS }] } },
+  ],
+  'ac-verify': [{ success: { criteria: [{ path: 'data.payment_method', op: 'exists' }], sync: [] } }],
+  'po-elig': [{ success: { criteria: [{ path: 'data.issuer_country', op: 'exists' }], sync: [] } }],
+  'po-create': [{
+    success: { criteria: [{ path: 'data.id', op: 'exists' }, { path: 'data.status', op: 'exists' }], sync: [], async: 'po-settle' },
+  }],
+};
+
+/** Async events — their own card in the sequence, placed after the call they
+    follow, holding the webhooks a later step (the shopper's 3DS, Rapyd's
+    hosted page, settlement) produces. */
+export const ASYNC = {
+  'pay-3ds': {
+    title: 'After the shopper’s 3DS', trigger: 'The shopper completes the challenge at redirect_url',
+    sync: [{ type: 'PAYMENT_UPDATED', links: CARD_PAY_LINKS }, { type: 'PAYMENT_COMPLETED', links: PAY_LINKS }],
+  },
+  'checkout-pay': {
+    title: 'After the shopper pays on the checkout', trigger: 'The shopper submits Rapyd’s checkout page / toolkit',
+    sync: [{ type: 'PAYMENT_SUCCEEDED', links: { 'data.merchant_reference_id': 'ref', 'data.customer_token': 'customer' }, confirm: true },
+      { type: 'PAYMENT_COMPLETED', links: { 'data.merchant_reference_id': 'ref', 'data.customer_token': 'customer' }, confirm: true }],
+  },
+  'ac-3ds': {
+    title: 'After the card’s 3DS', trigger: 'The shopper completes the $0-auth challenge',
+    sync: [{ type: 'CARD_ADDED_SUCCESSFULLY', links: CARD_LINKS }, { type: 'PAYMENT_UPDATED', links: CARD_PAY_LINKS }],
+  },
+  'ac-hosted': {
+    title: 'After Rapyd’s card page', trigger: 'The shopper enters the card and passes 3DS on Rapyd’s page',
+    sync: [{ type: 'PAYMENT_SUCCEEDED', links: { 'data.customer_token': 'customer' } }, { type: 'CUSTOMER_PAYMENT_METHOD_CREATED', links: CARD_LINKS },
+      { type: 'CARD_ADDED_SUCCESSFULLY', links: CARD_LINKS }, { type: 'PAYMENT_UPDATED', links: { 'data.customer_token': 'customer', 'data.payment_method': 'card' } }],
+  },
+  'po-settle': {
+    title: 'Payout settles', trigger: 'Rapyd completes (or fails) the payout',
+    sync: [{ anyOf: ['PAYOUT_COMPLETED', 'PAYOUT_FAILED'], links: { 'data.id': 'payout' } }],
+  },
+};
+
+/** What each webhook means — shown under it in the engine room. */
+export const WEBHOOK_NOTES = {
+  CUSTOMER_CREATED: 'The cus_*** now exists — data.id is the customer.',
+  PAYMENT_SUCCEEDED: 'The payment was accepted. On a 3DS payment it is still pending 3d_verification — nothing authenticated yet; it carries the cus_*** (customer_token) but no card_*** yet.',
+  PAYMENT_COMPLETED: 'The payment is final — captured and paid.',
+  PAYMENT_UPDATED: 'The 3DS result landed on the payment — authentication data, with the cus_*** and the card_*** both recorded.',
+  PAYMENT_FAILED: 'The payment failed — see data.failure_code / failure_message.',
+  CUSTOMER_PAYMENT_METHOD_CREATED: 'Rapyd stored the card — the card_*** and its BIN details. Nothing on it points to a cus_*** or a payment_***; only the card id links it.',
+  CARD_ADDED_SUCCESSFULLY: 'The same card object as CUSTOMER_PAYMENT_METHOD_CREATED, now carrying data.payment_account_reference.',
+  PAYOUT_COMPLETED: 'The payout reached the beneficiary.',
+  PAYOUT_FAILED: 'The payout failed.',
+};
+
+/** The variant of EXPECT that applies to a call made on `path`. */
+export function expectFor(call, path = '') {
+  const list = EXPECT[call];
+  if (!list) return null;
+  return list.find((v) => !v.path || String(path).includes(v.path)) || null;
+}

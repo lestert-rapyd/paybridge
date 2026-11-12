@@ -48,6 +48,7 @@ import { clientDetails } from '../client-details.js';
 import { renderJSONView, highlightPaths } from '../json-view.js';
 import { setActiveTab, setStatus, esc } from '../ui.js';
 import { startWebhookWatch } from '../webhooks.js';
+import { setPanel } from '../engine/sequence.js';
 import { renderProcessing, render3DS, renderError, renderExternal3DS } from '../screens.js';
 import {
   usesExternal3DS, ext3dsPreset, simulateExternal3DS, ext3dsDecision, externalTdsOptions,
@@ -568,8 +569,6 @@ function syncNameInheritance() {
 function renderRequest() {
   // A simulated direct-wallet run owns the engine room until it ends.
   if (directOwnsPanel()) { paintDirectPanels(); return; }
-  const el = $('#panel-request');
-  if (!el) return;
   const st = newSaltTimestamp();
   const body = displayBody();
   const cusCard = customerRequestCardHTML();
@@ -579,14 +578,14 @@ function renderRequest() {
   const hint = sent ? 'signed &amp; sent'
     : stopped ? 'never sent — the merchant’s 3DS failed'
     : isLive() ? 'own card fields are off in live' : 'updates as you type';
-  el.innerHTML = cusCard + extCard + beatCardHTML({
+  setPanel('request', cusCard + extCard + beatCardHTML({
     id: 'beat-pay', n: n > 1 ? n : null, method: 'POST', path: '/v1/payments',
     ...(sent ? beatBadge('request.sent') : stopped ? beatBadge('request.not_sent') : {}),
     inner: `
       ${headersHTML(st)}
       <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${hint}</span>${extApplies() ? '<span class="hint"><span class="inject-key"></span>from the merchant’s 3DS provider</span>' : ''}</div>
       <div id="req-json">${renderJSONView(body)}</div>`,
-  }) + fxCardHTML();
+  }) + fxCardHTML());
   fillCustomerSignature();
   fillSignature($('#beat-pay'), 'post', '/v1/payments', st, body); // live — recomputes with the body
   applyHighlight();
@@ -652,8 +651,6 @@ let responseSending = false;
 
 function paintResponsePanel() {
   if (directOwnsPanel()) { paintDirectPanels(); return; }
-  const el = $('#panel-response');
-  if (!el) return;
   const cusCard = customerResponseCardHTML();
   let payCard = '';
   if (!responseSending && !lastResponse && extStopped()) {
@@ -674,8 +671,7 @@ function paintResponsePanel() {
     const { httpStatus, data } = lastResponse;
     payCard = paymentResponseCardHTML({ id: 'beat-pay-res', n: cusCard ? 2 : null, httpStatus, data });
   }
-  if (!cusCard && !payCard) return; // nothing sent yet — leave app.js's empty state
-  el.innerHTML = cusCard + payCard;
+  setPanel('response', cusCard + payCard);
 }
 function renderResponseSending() { responseSending = true; paintResponsePanel(); }
 function renderResponse(httpStatus, data) {
@@ -684,11 +680,8 @@ function renderResponse(httpStatus, data) {
   paintResponsePanel();
 }
 
-/** Back office may have repainted #panel-request/#panel-response while this
-    flow's own state kept changing in the background (a client watcher tick
-    can't touch these — see webhooks.js's leftView guard — but this flow's own
-    request/response are plain innerHTML writes with no such guard, so they
-    need to be explicitly restored when the SE switches back to Client Site). */
+/** Repaint this flow's calls from its own persisted state (the SE switched
+    back from the back office, or published tags changed a label). */
 export function refreshRightPanel() {
   renderRequest();
   paintResponsePanel();

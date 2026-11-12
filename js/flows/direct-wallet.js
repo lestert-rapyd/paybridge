@@ -38,6 +38,7 @@ import { clientDetails } from '../client-details.js';
 import * as customers from '../customers.js';
 import { usesCustomer } from '../identity.js';
 import { setActiveTab, setStatus, esc } from '../ui.js';
+import { setPanel } from '../engine/sequence.js';
 import { currencyDecimals } from '../sync.js';
 import { renderJSONView, highlightPaths } from '../json-view.js';
 import { beatCardHTML } from '../customer-beat.js';
@@ -320,12 +321,11 @@ export function paintPanels() {
   const steps = walletSteps(r.wallet, r.variant);
   const rapydIndex = steps.findIndex((s) => s.party === 'rapyd');
   const sheetIndex = steps.findIndex((s) => s.sheet);
-  const req = $('#panel-request');
-  if (req) {
+  {
     const boxes = steps.slice(0, rapydIndex).map((s, i) => stepBoxHTML(s, stepState(i, sheetIndex, rapydIndex, r.phase))).join('');
     const sent = r.phase !== 'sheet';
     const pmt = r.wallet === 'google' && r.variant === 'decrypted' ? ` · ${esc(r.body.payment_method.digital_wallet.details.decrypted_data.paymentMethodDetails.authMethod)}` : '';
-    req.innerHTML = `
+    setPanel('request', `
       <div class="ext-who dw-intro"><span class="sim-badge">Mock token</span>Direct ${esc(w.label)} · ${r.variant === 'encrypted' ? 'encrypted token — Rapyd decrypts' : 'decrypted by the merchant — DPAN + cryptogram'}${pmt}. The ${esc(w.party)} side is simulated; the payment is created for real in the Rapyd sandbox.</div>
       <div class="dw-steps">${boxes}</div>
       ${beatCardHTML({
@@ -336,16 +336,15 @@ export function paintPanels() {
           <div class="req-bodylabel"><p class="eng-label">Request body</p><span class="hint">${sent ? 'sent after the sheet returned' : 'sent once the shopper approves'} · mock wallet values</span><span class="hint"><span class="inject-key"></span>from the wallet</span></div>
           <div id="req-json-dw">${renderJSONView(r.body)}</div>
           <div class="beat-foot">Signed like any <code>POST /v1/payments</code> (access_key, salt, timestamp, signature). Prerequisite: ${esc(w.label)} activated for the account in the Client Portal${r.variant === 'encrypted' && r.wallet === 'apple' ? ', and Apple’s payment processing certificate registered with Rapyd so it can decrypt' : ''}. The sandbox accepts mock wallet payloads and charges its own test card. Reference: <a href="${esc(RAPYD_DOCS[key])}" target="_blank" rel="noopener noreferrer">Rapyd docs ↗</a></div>`,
-      })}`;
+      })}`);
     highlightPaths($('#req-json-dw'), leafPathsUnder(r.body, walletDataPaths(r.wallet, r.variant)), 'inject-hit');
   }
-  const res = $('#panel-response');
-  if (res) {
-    res.innerHTML = r.response
+  {
+    setPanel('response', r.response
       ? paymentResponseCardHTML({ id: 'beat-dw-res', n: String(rapydIndex + 1), httpStatus: r.httpStatus, data: r.response })
       : beatCardHTML({
         id: 'beat-dw-res', n: String(rapydIndex + 1), method: 'POST', path: '/v1/payments',
         inner: `<div class="ext-wait">${r.phase === 'sheet' ? 'Waiting for the shopper to approve in the sheet…' : 'Waiting for Rapyd…'}</div>`,
-      });
+      }));
   }
 }

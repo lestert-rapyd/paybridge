@@ -10,11 +10,10 @@
      left  · the account step preceding the cart (accountPanelHTML) — the SE
              edits name/email, fires the call on its own clock, and the panel
              collapses into the created account row afterwards.
-     right · a stacked, collapsible beat card (beatCardHTML) that survives the
-             payment call, so its body/response stay inspectable. The flows
-             render their own card below it with the same shell.
-     webhooks · the expected CUSTOMER_* events, then whatever actually lands
-             (pushed into webhooks.js, which owns #panel-webhooks).
+     right · its own event in the engine room's sequence (beatCardHTML →
+             engine/sequence.js) that survives the payment call, so its
+             body/response stay inspectable — and its CUSTOMER_CREATED lands
+             under it (webhooks.js polls, the sequence attributes).
 
    Creation stays LAZY as a fallback: an SE who skips the step and hits Pay
    still gets beat 1 out of the flow's own submit — through this same
@@ -38,6 +37,7 @@ import { FIELD_MAP } from './sync.js';
 import { headersHTML, fillSignature, newSaltTimestamp } from './signing.js';
 import { setActiveTab, setStatus, esc } from './ui.js';
 import { setCustomerBeat } from './webhooks.js';
+import { setEventOpen } from './engine/sequence.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -52,7 +52,7 @@ function record() {
     // but the record is per env:profile, so a switch to a MID that has no
     // customer yet would inherit the fold and hide the draft the SE is about to
     // author. Anything back at 'draft' gets its card back open.
-    openState.set('beat-cus', true);
+    setEventOpen('beat-cus', true);
   }
   const r = records.get(key());
   // Keep the record and the store in agreement in BOTH directions, so the card
@@ -63,7 +63,7 @@ function record() {
   //   session restored some other way) still has to read as created.
   if (r.state === 'created' && !customers.getCustomerId()) {
     Object.assign(r, { state: 'draft', body: null, httpStatus: null, data: null, at: null });
-    openState.set('beat-cus', true); // back to a draft — same reasoning as above
+    setEventOpen('beat-cus', true); // back to a draft — same reasoning as above
   } else if (r.state === 'draft' && customers.getCustomerId()) {
     r.state = 'created';
   } else if (r.state === 'created' && r.data?.data?.id && r.data.data.id !== customers.getCustomerId()) {
@@ -83,22 +83,18 @@ export const beatCreatedAt = () => record().at;
 /** The stored request/response of the create call, for "View create call". */
 export const beatRecord = () => ({ ...record() });
 
-/* Push the state into webhooks.js (which owns #panel-webhooks and starts the
+/* Push the state into webhooks.js (which starts the
    CUSTOMER_* watch). One-way — that module never imports this one back. */
 function syncWebhooks() {
   const st = beatState();
   setCustomerBeat({ id: st === 'created' ? customers.getCustomerId() : null, state: st });
 }
 
-/* ── Stacked beat cards (shared shell) ───────────────────────
-   <details> open state has to be OWNED here: the flows rebuild the request
-   panel's innerHTML on every keystroke, which would reset a native `open`.
-   The toggle is delegated on document and preventDefault()s the native one so
-   there's a single source of truth (the `toggle` event doesn't bubble, so
-   delegating on it isn't an option). */
-const openState = new Map();
-const isOpen = (id) => (openState.has(id) ? openState.get(id) : true);
-
+/* ── Beat cards (shared shell) ───────────────────────────────
+   Every flow describes a call side as one card: `beat-<step>` for the
+   request, `beat-<step>-res` for the response. The engine room's sequence
+   view (engine/sequence.js) parses these and groups both sides of a call —
+   plus its webhooks — into one event; it owns the open/closed state. */
 /* `path` and `badge` are text that can carry API data (a cus_*** id, a Rapyd
    error code). Some callers still pass the pre-escaped literal 'signed &amp;
    sent', so un-escape &amp; first: the result is then escaped exactly once
@@ -114,7 +110,7 @@ export function beatCardHTML({ id, n, method, path, badge, badgeKind = '', badge
   // `sim`: a SIMULATED step outside Rapyd (external 3DS) — dashed card, its
   // own pill colour; the caller also passes the "Simulated" badge.
   return `
-    <details class="beat-card${sim ? ' sim' : ''}" id="${esc(id)}" ${isOpen(id) ? 'open' : ''}>
+    <details class="beat-card${sim ? ' sim' : ''}" id="${esc(id)}" open>
       <summary class="beat-head">
         <span class="beat-chev">▸</span>
         ${n ? `<span class="beat-n">${esc(n)}</span>` : ''}
@@ -125,17 +121,6 @@ export function beatCardHTML({ id, n, method, path, badge, badgeKind = '', badge
       <div class="beat-body">${inner}</div>
     </details>`;
 }
-
-document.addEventListener('click', (e) => {
-  const head = e.target.closest('.beat-head');
-  if (!head) return;
-  e.preventDefault(); // own the toggle so a repaint can't lose it
-  const card = head.closest('.beat-card');
-  if (!card) return;
-  const next = !isOpen(card.id);
-  openState.set(card.id, next);
-  card.open = next;
-});
 
 /* ── Request card ────────────────────────────────────────── */
 const REQ_HINT = {
@@ -189,15 +174,13 @@ export function fillCustomerSignature() {
 let reapplyHighlight = () => {};
 export function setHighlightHook(fn) { reapplyHighlight = fn; }
 
-/** Repaint ONLY the customer card — what a keystroke in the account step does,
-    so the payment card's JSON and the SE's cursor are both left alone. */
+/** Repaint after a keystroke in the account step. The sequence view rebuilds
+    the whole panel, so both highlights (this card's and the flow's) are
+    re-applied after. */
 export function refreshCustomerBeatCard() {
-  const card = $('#beat-cus');
-  if (!card) return;
-  card.outerHTML = customerRequestCardHTML();
-  fillCustomerSignature();
-  applyCustomerHighlight(); // this card's own highlight — rebuilt with the card
-  reapplyHighlight();       // and the flow's, for the payment card beside it
+  repaintPanels();
+  applyCustomerHighlight();
+  reapplyHighlight();
 }
 
 /* ── Response card ───────────────────────────────────────── */
@@ -291,7 +274,7 @@ export async function fireCreateCustomer() {
 
   r.state = 'created';
   r.at = Date.now();
-  openState.set('beat-cus', false); // its job is done — fold it away, the payment is the live one
+  setEventOpen('beat-cus', false); // its job is done — fold it away, the payment is the live one
   setStatus('Customer created', 'ok');
   customers.setCustomerId(id, { key: bucket }); // notifies: the chooser, the panel and the back office follow
   syncWebhooks();                   // starts the CUSTOMER_* watch

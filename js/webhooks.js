@@ -24,12 +24,9 @@
    status — a customer still in a 3DS challenge at 15s is the normal
    case, not an edge case.
 
-   The panel holds TWO sections, in beat order: the customer beat's
-   CUSTOMER_* events above the payment's — plus, on a page that registers
-   one (the wallet's PAYOUT_* events, js/site/wallet-page.js via steps.js),
-   a third below them. All are painted from here so there stays exactly ONE
-   writer of #panel-webhooks (this module's poll re-runs every 2.5s and
-   would otherwise clobber a second writer).
+   Nothing here paints: every polled event goes into the engine room's
+   sequence view (engine/sequence.js), which files it under the call that
+   fired it, plus one status line per watch (customer, payment).
 
    CUSTOMER_* events carry no merchant_reference_id, so the receiver
    files them under the cus_*** id — the customer poll reads
@@ -38,11 +35,9 @@
 
 import { fetchWebhooks, fetchCustomerWebhooks, retrievePayment } from './api.js';
 import { state } from './state.js';
-import { renderJSONView } from './json-view.js';
-import { classify, isTrusted, isTrustedFor } from './classify.js';
-import { esc } from './ui.js';
+import { classify, isTrustedFor } from './classify.js';
+import { ingestWebhooks, setWatch } from './engine/sequence.js';
 
-const $ = (s) => document.querySelector(s);
 const FAIL_STATUS = ['ERR', 'EXP', 'CAN', 'DEC'];
 // Retrieve fallback offsets from the moment the payment id is known.
 const RETRY_AT_MS = [15000, 30000, 60000, 120000, 180000, 240000];
@@ -286,150 +281,42 @@ async function poll() {
   }
 }
 
-/* ── Markup ──────────────────────────────────────────────────
-   Everything below lands in innerHTML and webhook bodies are attacker-
-   controllable, so every interpolated value goes through esc(). */
-function pill(text, cls = '') { return `<span class="wh-pill ${esc(cls)}">${esc(text)}</span>`; }
+/* The event card markup lives in engine/wh-card.js (the sequence view and
+   the back office share it); re-exported for the callers that import it here. */
+export { eventCardHTML } from './engine/wh-card.js';
 
-// One pill per field Rapyd actually sends, rather than one combined string —
-// easier to scan, and each field only appears when the event carries it.
-function fieldPills(e) {
-  const d = e.raw?.data || {};
-  const ar = d.authentication_result || {};
-  return [
-    ['status', e.status ?? d.status, classify(e)],
-    ['paid', d.paid ?? e.paid, null],
-    ['next_action', d.next_action, null],
-    ['eci', ar.eci, null],
-    ['result', ar.result, null],
-  ]
-    .filter(([, v]) => v !== undefined && v !== null && v !== '')
-    .map(([k, v, kind]) => pill(`${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`, kind || 'field'))
-    .join('');
-}
-
-function verifyChip(e) {
-  if (e.source === 'retrieve') return `<span class="wh-verify ok">✓ confirmed via Retrieve Payment</span>`;
-  // Which env's MID signed it — a sandbox signature never settles a live payment.
-  if (e.verified === 'verified') return `<span class="wh-verify ok">✓ signature verified${e.verified_env ? ` · ${esc(e.verified_env)}` : ''}</span>`;
-  if (e.verified === 'unverified' || e.verified === 'skipped') {
-    const why = e.verified === 'skipped' ? 'No Rapyd signature headers' : 'Rapyd signature did not match';
-    return `<span class="wh-verify warn" title="${esc(why)} — shown, but confirmed via Retrieve Payment before it counts">unverified — not trusted</span>`;
-  }
-  return `<span class="wh-verify">received</span>`; // built locally (e.g. back office's synchronous refund failure)
-}
-
-/** One webhook event card — shared by both sections here and by the back
-    office's webhook tab, so the markup (and its escaping) lives once. */
-export function eventCardHTML(e, open) {
-  const kind = classify(e);
-  const untrusted = kind !== 'pending' && !isTrusted(e) && e.verified !== undefined;
-  return `
-    <details class="wh-card ${kind}${untrusted ? ' untrusted' : ''}" ${open ? 'open' : ''}>
-      <summary class="wh-card-head">
-        <span class="wh-chev">▸</span>
-        ${pill(e.type || 'EVENT', 'evt')}
-        ${fieldPills(e)}
-        ${verifyChip(e)}
-      </summary>
-      <div class="wh-card-json">${renderJSONView(e.raw || e)}</div>
-    </details>`;
-}
-
-/* Beat 1's section. Four honest states, because Rapyd only sends CUSTOMER_*
-   when those events are registered for the MID — "nothing arrived" has to be
-   sayable without implying something broke. */
-function customerSectionHTML() {
-  if (cusBeat === 'idle') return '';
-  const label = `<div class="wh-beat-label"><span class="wh-beat-n">1</span>Customer · <code>POST /v1/customers</code></div>`;
-
-  if (cusBeat === 'draft' || cusBeat === 'sending') {
-    return `${label}
-      <div class="wh-expect-row">
-        <span class="wh-expect">CUSTOMER_CREATED</span>
-        <span class="wh-expect">CUSTOMER_PAYMENT_METHOD_CREATED</span>
-      </div>
-      <div class="wh-expect-note">Expected, not yet fired — <code>CUSTOMER_CREATED</code> when the account is created, <code>CUSTOMER_PAYMENT_METHOD_CREATED</code> when the first card is stored under it.</div>`;
-  }
-  if (cusBeat === 'error') {
-    return `${label}<div class="wh-expect-note">The create call failed, so no customer event can fire. See the Response tab.</div>`;
-  }
-
+/* ── Into the engine room ────────────────────────────────────
+   The sequence view (engine/sequence.js) owns the panel: it files every
+   event under the call that fired it. This module only feeds it — the
+   events it polled, and one status line per watch. */
+function customerWatchInfo() {
+  if (cusBeat !== 'created' || !cusId) return null;
   const listening = !!cusTimer;
-  let html = `${label}
-    <div class="wh-status ${listening ? 'live' : ''}">
-      <span class="wh-status-dot"></span>
-      ${listening ? 'Listening for customer events' : (cusEvents.length ? 'Delivered' : 'Not delivered')}
-      <span class="wh-ref">${esc(cusId || '—')}</span>
-    </div>`;
-  if (cusConfigured === false) {
-    html += `<div class="wh-note">Webhook receiver not configured — add Vercel KV + register <code>/api/webhook</code>.</div>`;
-  } else if (cusEvents.length) {
-    html += cusEvents.map((e, i) => eventCardHTML(e, i === 0)).join('');
-  } else if (listening) {
-    html += `<div class="wh-waiting">Watching for a <code>CUSTOMER_*</code> event filed under <code>${esc(cusId)}</code> — these carry no <code>merchant_reference_id</code>, so the receiver files them by customer id instead of this session's ref.</div>`;
-  } else {
-    html += `<div class="wh-note">No <code>CUSTOMER_*</code> event delivered. Rapyd fires these only when the event is registered for this MID (Client Portal → Developers → Webhooks) — the <code>${esc(cusId)}</code> in the response is the source of truth either way. <code>CUSTOMER_PAYMENT_METHOD_CREATED</code> may still arrive when the first card is saved.</div>`;
-  }
-  return html;
+  return {
+    live: listening, configured: cusConfigured,
+    text: listening ? 'Listening for customer events' : cusEvents.length ? 'Customer events delivered' : 'No customer event delivered',
+    id: cusId,
+    note: !listening && !cusEvents.length && cusConfigured !== false
+      ? 'Rapyd sends CUSTOMER_* only when the event is registered for this MID (Client Portal → Developers → Webhooks).' : '',
+  };
 }
-
-/* Beat 2's section — the original payment watcher, unchanged apart from the
-   beat label and the guard that keeps it out of the way before a payment. */
-function paymentSectionHTML() {
-  if (!ref) return '';
-  const events = lastEvents;
+function paymentWatchInfo() {
+  if (!ref) return null;
   const listening = !!timer;
-  // Numbered only when the customer beat is on screen above it.
-  const label = cusBeat === 'idle' ? '' :
-    `<div class="wh-beat-label"><span class="wh-beat-n">2</span>Payment events</div>`;
-
-  let html = `${label}
-    <div class="wh-status ${listening ? 'live' : ''}">
-      <span class="wh-status-dot"></span>
-      ${listening ? 'Listening for webhooks' : (events.length ? 'Delivered' : 'Idle')}
-      <span class="wh-ref">ref ${esc(ref || '—')}</span>
-    </div>`;
-
-  if (configured === false) {
-    html += `<div class="wh-note">Webhook receiver not configured — add Vercel KV + register <code>/api/webhook</code>. Showing polling fallback.</div>`;
-  }
-
-  if (events.length) {
-    html += events.map((e, i) => eventCardHTML(e, i === 0)).join('');
-  } else if (configured !== false) {
-    html += `<div class="wh-waiting">Waiting for Rapyd to POST an event to <code>/api/webhook</code>…</div>`;
-  }
-
-  if (fallbackStatus) {
-    html += `<div class="wh-fallback">
-      <span class="wh-fallback-tag">POLL FALLBACK</span>
-      Retrieve Payment → <code>status: ${esc(fallbackStatus.status)}</code> <code>paid: ${esc(fallbackStatus.paid)}</code>
-      <div class="wh-fallback-note">Pull-based — verified webhooks remain the canonical signal.</div>
-    </div>`;
-  }
-  return html;
+  return {
+    live: listening, configured,
+    text: listening ? 'Listening for payment webhooks' : lastEvents.length ? 'Payment events delivered' : 'Not listening',
+    id: `ref ${ref}`,
+    fallback: fallbackStatus ? { status: fallbackStatus.status, paid: fallbackStatus.paid } : null,
+  };
 }
 
-/** Repaint the whole panel from both sections. Exported so app.js can restore
-    it after renderBackend() wipes the panel on a flow reset (the customer
-    survives a reset, so its section has to come back). */
-/* A page's own extra section (markup, '' for none) — registered once by the
-   steps router, so this module never imports the page that owns it. */
-let extraSection = () => '';
-export function setExtraWebhookSection(fn) { extraSection = typeof fn === 'function' ? fn : () => ''; }
-
+/** Push both watches' events and status into the sequence view. Kept under
+    its old name: the flows and app.js call it after a reset. */
 export function repaintWebhooks() {
-  // Back office has its own renderer for the same shared DOM targets — while
-  // it's the active left tab, this watcher keeps polling/tracking terminal
-  // state (so the hidden client screen updates correctly in the background)
-  // but skips the DOM write so it can't clobber back office's own paint.
-  if (state.leftView && state.leftView !== 'client') return;
-  const el = $('#panel-webhooks');
-  if (!el) return;
-  const html = customerSectionHTML() + paymentSectionHTML() + extraSection();
-  if (!html) return; // nothing to say yet — leave app.js's empty state alone
-  el.innerHTML = html;
+  ingestWebhooks([...cusEvents, ...lastEvents]);
+  setWatch('customer', customerWatchInfo());
+  setWatch('payment', paymentWatchInfo());
 }
 
 function render(events) {
