@@ -26,7 +26,7 @@ import * as backOffice from './flows/back-office.js';
 import { totalsHTML } from './flows/shared.js';
 import { thumbHTML } from './site/chrome.js';
 import { billingPeriod } from './site/cart.js';
-import { SEAM_PATHS, seamPathKey, seamLinesHTML, seamStripHTML, setAddress, pagePath, isSeamOn, setSeamOn, applySeam } from './seam.js';
+import { SEAM_PATHS, seamPathKey, seamLinesHTML, setAddress, pagePath, isSeamOn, setSeamOn, applySeam } from './seam.js';
 import { EXT3DS_OUTCOMES, ext3dsPreset, setExt3dsPreset } from './ext3ds.js';
 import {
   WALLET_INTEGRATIONS, walletIntegration, setWalletIntegration, walletAvailability, effectiveWalletIntegration,
@@ -759,16 +759,6 @@ function syncControlStates() {
   setAddress(VERTICALS[state.vertical].domain, pagePath(state.step));
   renderHeaderContext();
   renderDrawer();
-  renderSeamStrip();
-}
-
-/* The engine room's seam strip (js/seam.js) — follows the path and the
-   toolkit's mode; keeps its open/closed state across repaints. */
-function renderSeamStrip() {
-  const host = $('#seam-strip-host');
-  if (!host) return;
-  const open = !!host.querySelector('details')?.open;
-  host.innerHTML = seamStripHTML(seamKey(), open, seamOpts());
 }
 
 /* A remembered customer (customers.js) comes back from storage with the cards
@@ -797,7 +787,6 @@ function switchProfile(id) {
   resyncRememberedCustomer();
   renderHeaderContext();
   renderDrawer();
-  renderSeamStrip(); // the seam's 3DS line follows the MID's provider
 }
 
 /* Sandbox ⇄ Live. Live is gated server-side (X-PayBridge-Live-Token): no token
@@ -842,7 +831,7 @@ function wire() {
   // Other modules ask for the drawer (own-fields' "Strategy" link) or tell it
   // their controls changed (the strategy deck, the toolkit's own mode switch).
   document.addEventListener('demo:open-controls', e => openDrawer(e.detail?.section));
-  document.addEventListener('demo:controls-changed', () => { renderDrawer(); renderSeamStrip(); });
+  document.addEventListener('demo:controls-changed', () => renderDrawer());
   customers.subscribeCustomers(() => renderDrawer());
 
   const drawer = $('#demo-drawer');
@@ -853,7 +842,7 @@ function wire() {
     const model = t.closest('#dc-model button[data-model]');
     if (model) { if (model.dataset.model !== state.model) setState({ model: model.dataset.model }); return; }
     const tk = t.closest('#dc-tkmode button[data-val]');
-    if (tk) { toolkit.setToolkitMode(tk.dataset.val); renderDrawer(); renderSeamStrip(); return; }
+    if (tk) { toolkit.setToolkitMode(tk.dataset.val); renderDrawer(); return; }
     const env = t.closest('#dc-env button[data-env]');
     if (env) { switchEnv(env.dataset.env); return; }
     const prof = t.closest('#dc-creds button[data-profile]');
@@ -863,7 +852,7 @@ function wire() {
     if (dw) {
       if (dw.disabled) return;
       setWalletIntegration(dw.dataset.val);
-      renderDrawer(); renderSeamStrip();
+      renderDrawer();
       refreshDirectSlot(); // the merchant's own buttons appear / go — nothing else repaints
       return;
     }

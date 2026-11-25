@@ -1,9 +1,8 @@
 /* ─────────────────────────────────────────────────────────────
    The integration seam — where the merchant's site ends and Rapyd
    begins, per integration path. The ONE source of truth for it: the
-   drawer's Integration path section (app.js) and the engine room's
-   seam strip both render from SEAM_PATHS, and the flows label their
-   Rapyd surfaces with SEAM_LABELS.
+   drawer's Integration path section (app.js) renders from SEAM_PATHS,
+   and the flows label their Rapyd surfaces with SEAM_LABELS.
 
    Paths (seamPathKey):
      own-fields · Own Card Fields — the whole page is the merchant's;
@@ -255,14 +254,4 @@ export function seamLinesHTML(key, { tds = null, wallet = null } = {}) {
       ${direct ? `<div><span class="seam-who third">Apple / Google</span>${esc('Payment sheet · merchant validation · the token')}</div>` : ''}
       <div><span class="seam-who rapyd">Rapyd</span>${esc(p.rapyd.join(' · '))}${wallet === 'encrypted' ? esc(' · token decryption') : ''}</div>
     </div>`;
-}
-
-/** The engine room's collapsible seam strip (above the request tabs' panels). */
-export function seamStripHTML(key, open = false, opts = {}) {
-  const p = SEAM_PATHS[key] || SEAM_PATHS['own-fields'];
-  return `
-    <details class="seam-strip"${open ? ' open' : ''}>
-      <summary><span class="seam-strip-k">Integration seam</span><span class="seam-strip-v">${esc(p.label)}</span><span class="seam-strip-tag">${esc(p.tag)}</span></summary>
-      ${seamLinesHTML(key, opts)}
-    </details>`;
 }

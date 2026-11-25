@@ -643,24 +643,6 @@ kbd {
 .tds-frame { flex: none; display: block; width: 100%; margin: 4px auto 0; height: clamp(380px, calc(100vh - 400px), 460px); border: 0; background: #fff; }
 
 /* ── 9 · Engine room ─────────────────────────────────────── */
-/* The integration seam strip (js/seam.js seamStripHTML) — one collapsible
-   line between the tabs and the panels. */
-.seam-strip-host { flex: none; background: var(--eng-bg); border-bottom: 1px solid var(--eng-line); }
-.seam-strip-host:empty { display: none; }
-.seam-strip > summary { list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 16px; cursor: pointer; font-size: 12.5px; color: var(--eng-muted); }
-.seam-strip > summary::-webkit-details-marker { display: none; }
-.seam-strip > summary::before { content: '▸'; font-size: 10px; color: var(--eng-faint); }
-.seam-strip[open] > summary::before { content: '▾'; }
-.seam-strip-k { font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--eng-faint); }
-.seam-strip-v { color: var(--eng-text); font-weight: 500; }
-.seam-strip-tag { margin-left: auto; padding: 1px 8px; border: 1px solid var(--eng-line); border-radius: var(--r-pill); font: 500 11px/1.5 var(--font-mono); color: var(--eng-accent); }
-.seam-strip .seam-lines, .seam-strip .seam-owners { padding: 0 16px; }
-.seam-strip .seam-owners { padding-bottom: 12px; }
-.seam-strip .seam-lines li, .seam-strip .seam-owners { color: var(--eng-muted); }
-.seam-strip .seam-lines b { color: var(--eng-text); }
-.seam-strip .seam-who { background: var(--eng-surface-2); color: var(--eng-text); }
-.seam-strip .seam-who.rapyd { background: var(--eng-accent); color: var(--eng-bg); }
-
 .rtabs { display: flex; align-items: center; gap: 20px; flex: none; padding: 0 16px; border-bottom: 1px solid var(--eng-line); background: var(--eng-bg); }
 .rtab {
   border: 0; background: transparent; color: var(--eng-muted);

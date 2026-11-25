@@ -188,8 +188,7 @@ its rail; the receipt's primary action is "Back to wallet"); Withdraw stays on t
 
 ### 5.3 The integration seam (`js/seam.js`)
 Where the merchant's site ends and Rapyd begins, per path — one source of truth (`SEAM_PATHS`) read by
-the drawer's Show seam card and the engine room's collapsible **seam strip** (between the tabs and the
-panels: path · SAQ tag; open → card form / PCI / redirects, then Merchant vs Rapyd surfaces).
+the drawer's Show seam card (card form / PCI / redirects, then Merchant vs Rapyd surfaces).
 
 - **Markers.** Every Rapyd surface in the frame — the toolkit iframe (`#rapyd-checkout`), Rapyd's 3DS
   challenge, the hosted page's stand-in — is wrapped in `.seam-rapyd`: a 1.5px dashed `--rapyd`
@@ -337,8 +336,7 @@ catalog, copy, `kycAtSignup`, `wallet`; a subscription's `interval` is `monthly`
 - **2026-10 — external 3DS (simulated).** `js/ext3ds.js`, the issuer page (`.x3ds-*`, `.seam-ext`), the
   engine room's Simulated card (`.beat-card.sim`, `.inject-hit`), the drawer's live 3DS card, the
   seam's 3DS line, the hosted decline that stays on Rapyd's page.
-- **2026-10 — integration seam.** `js/seam.js`, `.seam-rapyd` markers + Show seam, the engine room's
-  seam strip, the hosted redirect played in the address bar, the merchant's cancelled screen,
+- **2026-10 — integration seam.** `js/seam.js`, `.seam-rapyd` markers + Show seam, the hosted redirect played in the address bar, the merchant's cancelled screen,
   `--rapyd` / `--rapyd-soft`.
 - **2026-10 — Rapyd rebrand.** The tool became *Rapyd Demo*; the whole UI moved to the Rapyd design
   language (Anton/Epilogue/Hanken Grotesk and the warm greys retired — Inter covers every role, the
