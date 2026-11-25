@@ -42,7 +42,7 @@ import { PACKS } from '../js/packs.js';
 // The integration seam: pure data + address helpers (DOM writers untouched).
 import {
   SEAM_PATHS, SEAM_LABELS, seamPathKey, hostedAddress, isRapydHost, pagePath, HOSTED_DOMAIN,
-  seamWrapHTML, seamStripHTML, seamTdsLine, seamLinesHTML, seamExtWrapHTML, EXT_TDS_LABEL,
+  seamWrapHTML, seamTdsLine, seamLinesHTML, seamExtWrapHTML, EXT_TDS_LABEL,
 } from '../js/seam.js';
 // External 3DS (simulated): the pure decision + payment_method_options builder.
 import {
@@ -742,7 +742,6 @@ test('seam: page paths and escaped markers', () => {
   ok(!w.includes('<img'), 'label escaped');
   ok(w.includes('<i></i>'), 'inner kept');
   ok(SEAM_LABELS.hosted.startsWith('Rapyd'), 'labels name Rapyd');
-  ok(seamStripHTML('hosted').includes('SAQ A') && seamStripHTML('bogus').includes('SAQ D'), 'strip falls back to own-fields');
 });
 
 /* ── external 3DS — merchant's own provider, simulated ── */

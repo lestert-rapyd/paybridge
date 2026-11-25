@@ -33,8 +33,7 @@ Two integration models are demoed side by side:
 
 `js/seam.js` is the one description of where the merchant's site ends and Rapyd
 begins on each path (who hosts the card form, PCI scope, where redirects
-happen); the drawer's Integration path section and the engine room's seam strip
-both render it. Inside the browser frame every Rapyd surface — the toolkit
+happen); the drawer's Integration path section renders it. Inside the browser frame every Rapyd surface — the toolkit
 iframe, Rapyd's 3DS challenge, the hosted page — is outlined and tagged
 "Rapyd"; the merchant's parts carry no label and Rapyd's surfaces are never
 restyled. **Show seam** (drawer, default on) hides the markers for a clean
